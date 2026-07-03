@@ -7,3 +7,9 @@ Versions match `config.yaml` and the GitHub release tags.
 ---
 
 ## [Unreleased]
+
+### Added
+- Garmin Connect sync client, SQLite schema, and a manual sync CLI
+  (`python3 -m app.sync.scheduler --once`) for verifying auth and the data model against a real
+  Garmin account. Not yet wired into a continuous s6 service — see PROJECT_PLAN.md milestone
+  v0.2.
