@@ -1,0 +1,39 @@
+name: "StrideSync"
+description: >-
+  Syncs Garmin Connect running data and exposes it to Claude via MCP for
+  conversational analysis — cadence, pace, heart-rate trends, training load.
+version: "0.1.0"
+slug: "stridesync"
+init: false
+arch:
+  - aarch64
+  - amd64
+url: "https://github.com/nsaputro/stride-sync"
+# Pre-built images — HA substitutes {arch} (amd64, aarch64). Published starting at milestone v0.4.
+image: "ghcr.io/nsaputro/stride-sync/{arch}-stridesync"
+homeassistant: "2024.1.0"
+
+# MCP server — Streamable HTTP, reached remotely by MCP clients (e.g. via mcp-proxy)
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: "MCP server (Streamable HTTP) — point an MCP client (via mcp-proxy) at /mcp on this port"
+
+# Persistent SQLite database + sync state
+map:
+  - data:rw
+
+# User-configurable options
+options:
+  garmin_username: ""
+  garmin_password: ""
+  sync_interval_hours: 6
+  mcp_port: 8765
+  log_level: "info"
+
+schema:
+  garmin_username: str
+  garmin_password: password
+  sync_interval_hours: int(1,24)
+  mcp_port: port
+  log_level: list(debug|info|warning|error)

@@ -1,0 +1,7 @@
+# Garmin Connect sync — see PROJECT_PLAN.md §1
+garmy
+# python-garminconnect  # fallback, uncomment if garmy can't cover a needed endpoint
+
+# MCP server — Streamable HTTP transport
+# garmy-mcp
+# mcp-proxy

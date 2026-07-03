@@ -1,0 +1,5 @@
+-- SQLite schema for /data/stridesync.db — see PROJECT_PLAN.md milestone v0.1.
+--
+-- TODO (v0.1): activities (per-run summary: distance, duration, pace, avg/max HR, cadence,
+-- training load fields Garmin reports), activity_metrics (time-series HR/pace/cadence per
+-- activity), sync_log (status, records_synced, error_message, created_at).
