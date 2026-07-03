@@ -1,0 +1,292 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write       # commit, tag, push
+  packages: write       # push to ghcr.io
+  pull-requests: write  # open post-release PR
+  issues: write         # create the post-release label
+
+jobs:
+  # ── Validate & tag ────────────────────────────────────────────────────────────
+  prepare-release:
+    name: Validate & tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate NEXT_VERSION
+        id: ver
+        run: |
+          VERSION=$(cat stridesync/NEXT_VERSION | tr -d '[:space:]')
+
+          echo "NEXT_VERSION : $VERSION"
+
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::NEXT_VERSION ($VERSION) is not valid semver (X.Y.Z)."
+            exit 1
+          fi
+
+          if git tag | grep -qx "v${VERSION}"; then
+            echo "::error::Tag v${VERSION} already exists — already released."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"    >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"
+
+  # ── Build & push one image per architecture ───────────────────────────────────
+  build-and-push:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            base: ghcr.io/hassio-addons/base:18.0.1
+            platform: linux/amd64
+          - arch: aarch64
+            base: ghcr.io/hassio-addons/base:18.0.1
+            platform: linux/arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.tag }}
+
+      - name: Set up QEMU (for cross-platform builds)
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: stridesync
+          push: true
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_FROM=${{ matrix.base }}
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ matrix.arch }}-stridesync:${{ needs.prepare-release.outputs.version }}
+            ghcr.io/${{ github.repository }}/${{ matrix.arch }}-stridesync:latest
+          labels: |
+            org.opencontainers.image.title=StrideSync (${{ matrix.arch }})
+            org.opencontainers.image.description=Garmin Connect running data sync + MCP server — HA addon
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ matrix.arch }}-stridesync:cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/${{ matrix.arch }}-stridesync:cache,mode=max
+
+  # ── Create GitHub release ─────────────────────────────────────────────────────
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare-release, build-and-push]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare-release.outputs.tag }}
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+        run: |
+          gh release create "${TAG}" \
+            --title "StrideSync v${VERSION}" \
+            --generate-notes \
+            --notes-start-tag "$(git tag --sort=-version:refname | grep -v "^${TAG}$" | grep -vE 'b[0-9]+$' | head -n1)" \
+            --verify-tag || \
+          gh release create "${TAG}" \
+            --title "StrideSync v${VERSION}" \
+            --generate-notes \
+            --verify-tag
+
+  # ── Post-release PR: stamp config.yaml, bump NEXT_VERSION, update CHANGELOG ───
+  create-post-release-pr:
+    name: Create post-release PR
+    runs-on: ubuntu-latest
+    needs: [prepare-release, github-release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Compute next patch version
+        id: next
+        run: |
+          VERSION="${{ needs.prepare-release.outputs.version }}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
+          echo "next_version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Next version will be: $NEXT"
+
+      - name: Create branch and update files
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          NEXT: ${{ steps.next.outputs.next_version }}
+          REPO: ${{ github.repository }}
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          BRANCH="chore/post-release-${VERSION}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          # 1. Stamp stridesync/config.yaml with the released version
+          sed -i "s/^version:.*/version: \"${VERSION}\"/" stridesync/config.yaml
+
+          # 2. Bump NEXT_VERSION to next patch
+          echo "$NEXT" > stridesync/NEXT_VERSION
+
+          # 3. Update CHANGELOG.md and generate stridesync/CHANGELOG.md
+          TODAY="$TODAY" python3 - <<'PYEOF'
+          import os, re, pathlib
+
+          version = os.environ["VERSION"]
+          next_ver = os.environ["NEXT"]
+          today    = os.environ["TODAY"]
+          repo     = os.environ["REPO"]
+
+          p = pathlib.Path("CHANGELOG.md")
+          text = p.read_text()
+
+          # Find the previous stable version from the current [Unreleased] comparison link
+          m_prev = re.search(r"\[Unreleased\]:.*compare/(v[\d.]+)\.\.\.HEAD", text)
+          prev_tag = m_prev.group(1) if m_prev else "v0.0.0"
+
+          # If no [VERSION] section exists, migrate content from [Unreleased] into it
+          if not re.search(rf"## \[{re.escape(version)}\]", text):
+              m_unrel = re.search(
+                  r"(## \[Unreleased\]\n)(.*?)(?=\n## \[|\Z)", text, re.DOTALL
+              )
+              unrel_body = m_unrel.group(2).strip() if m_unrel else ""
+              if unrel_body:
+                  # Clear Unreleased section
+                  text = re.sub(
+                      r"(## \[Unreleased\]\n).*?(?=\n## \[|\Z)",
+                      r"\1",
+                      text,
+                      flags=re.DOTALL,
+                  )
+                  # Insert [VERSION] - unreleased section after [Unreleased]
+                  text = re.sub(
+                      r"(## \[Unreleased\]\n)",
+                      rf"\1\n## [{version}] - unreleased\n\n{unrel_body}\n",
+                      text,
+                  )
+
+          # Date the version section (replace "- unreleased" with "- YYYY-MM-DD")
+          text = re.sub(
+              rf"(## \[{re.escape(version)}\]) - unreleased",
+              rf"\1 - {today}",
+              text,
+              flags=re.IGNORECASE,
+          )
+
+          # Update [Unreleased] comparison link to point from new tag to HEAD
+          if "[Unreleased]:" in text:
+              text = re.sub(
+                  r"\[Unreleased\]:.*",
+                  f"[Unreleased]: https://github.com/{repo}/compare/v{version}...HEAD",
+                  text,
+              )
+          else:
+              text = text.rstrip() + (
+                  f"\n\n[Unreleased]: https://github.com/{repo}/compare/v{version}...HEAD\n"
+              )
+
+          # Add [VERSION] link after [Unreleased] if not already present
+          if f"[{version}]:" not in text:
+              text = re.sub(
+                  r"(\[Unreleased\]:.*\n)",
+                  rf"\1[{version}]: https://github.com/{repo}/compare/{prev_tag}...v{version}\n",
+                  text,
+              )
+
+          p.write_text(text)
+
+          # Generate stridesync/CHANGELOG.md — entries for this version only
+          m = re.search(
+              rf"(## \[{re.escape(version)}\].*?\n)(.*?)(?=\n## \[|\Z)",
+              text,
+              re.DOTALL,
+          )
+          body = m.group(0).strip() if m else f"## [{version}]\n\nSee full changelog."
+          addon_text = (
+              f"# Changelog\n\n"
+              f"{body}\n\n"
+              f"[{version}]: https://github.com/{repo}/releases/tag/v{version}\n"
+          )
+          pathlib.Path("stridesync/CHANGELOG.md").write_text(addon_text)
+
+          print(f"Updated CHANGELOG.md and generated stridesync/CHANGELOG.md for {version}")
+          PYEOF
+
+          git add stridesync/config.yaml stridesync/NEXT_VERSION CHANGELOG.md stridesync/CHANGELOG.md
+          git commit -m "chore: post-release ${VERSION} — stamp versions and update changelog"
+          git push --force origin "$BRANCH"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          NEXT: ${{ steps.next.outputs.next_version }}
+        run: |
+          # Skip if a PR for this branch already exists (re-run safety)
+          EXISTING=$(gh pr list --head "chore/post-release-${VERSION}" --json number --jq '.[0].number')
+          if [ -n "$EXISTING" ]; then
+            echo "PR #${EXISTING} already exists for chore/post-release-${VERSION} — skipping creation."
+            exit 0
+          fi
+
+          # Ensure the post-release label exists (--force updates it if it already does)
+          gh label create "post-release" --color "e4e669" --description "Post-release housekeeping — excluded from release notes" --force || true
+
+          gh pr create \
+            --base main \
+            --head "chore/post-release-${VERSION}" \
+            --label "post-release" \
+            --title "chore: post-release ${VERSION} — bump to ${NEXT}" \
+            --body "Automated post-release housekeeping after **v${VERSION}** was published.
+
+          **Changes in this PR:**
+          - \`stridesync/config.yaml\` version → \`${VERSION}\` (stamps the released version so HA offers the update)
+          - \`stridesync/NEXT_VERSION\` → \`${NEXT}\` (next patch target)
+          - \`CHANGELOG.md\` — \`[${VERSION}]\` section dated; comparison links updated
+          - \`stridesync/CHANGELOG.md\` — regenerated from main changelog
+
+          Please review \`stridesync/CHANGELOG.md\` for accuracy before merging."

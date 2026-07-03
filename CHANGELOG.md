@@ -22,3 +22,12 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   laps, and records the outcome in `sync_log` whether it succeeds or fails.
 - Unit test suite (`stridesync/tests/`, 22 tests) covering schema creation, Garmin API response
   normalization, and the sync/log-on-failure path, run with `pytest`.
+- CI pipeline (`.github/workflows/ci.yml`): yamllint, hadolint, a `NEXT_VERSION`-vs-`config.yaml`
+  version-ordering check, Python syntax check, `pytest`, and a Docker build smoke test on every
+  push and PR, gated behind a single `CI Pass` required status check.
+- Release pipeline (`.github/workflows/release.yml`, `workflow_dispatch`): tags
+  `stridesync/NEXT_VERSION`, builds and pushes multi-arch (`amd64`/`aarch64`) images to GHCR,
+  creates a GitHub release, and opens an automated post-release PR that stamps versions and
+  updates both changelogs.
+- `.yamllint.yml`, `.hadolint.yaml`, `.github/release.yml` (release-notes categorization), and
+  `.github/dependabot.yml` (weekly pip/Docker/GitHub Actions update checks, security-only).

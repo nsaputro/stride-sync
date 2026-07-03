@@ -1,0 +1,5 @@
+failure-threshold: error
+ignore:
+  - DL3018   # apk: pin versions (not needed for HA base images)
+  - DL3013   # pip: pin versions (we pin in requirements.txt)
+  - DL3042   # pip: use --no-cache-dir (we do, but suppressed for clarity)

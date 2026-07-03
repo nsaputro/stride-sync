@@ -1,0 +1,28 @@
+---
+extends: default
+
+rules:
+  # HA addon files and GitHub Actions workflows don't use "---"
+  document-start: disable
+
+  line-length:
+    max: 120
+    level: warning
+
+  # Allow single space after colon (alignment spaces are not permitted)
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+
+  comments:
+    min-spaces-from-content: 1
+
+  braces:
+    forbid: false
+
+  brackets:
+    forbid: false
