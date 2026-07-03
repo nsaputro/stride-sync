@@ -1,0 +1,8 @@
+#!/usr/bin/with-contenv bashio
+# s6 service: polls Garmin Connect on a configurable interval and writes to /data/stridesync.db.
+# See app/sync/scheduler.py and PROJECT_PLAN.md §1 (Scheduled sync service).
+
+bashio::log.info "Starting StrideSync sync scheduler..."
+
+cd /app
+exec python3 -m app.sync.scheduler

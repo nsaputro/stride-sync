@@ -1,0 +1,6 @@
+# NOTE: pin to a specific ghcr.io/hassio-addons/base release tag before the first real build —
+# check https://github.com/hassio-addons/addon-base/releases for the current version.
+build_from:
+  aarch64: "ghcr.io/hassio-addons/base:18.0.1"
+  amd64: "ghcr.io/hassio-addons/base:18.0.1"
+squash: false
