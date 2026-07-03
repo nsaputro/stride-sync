@@ -1,0 +1,8 @@
+changelog:
+  exclude:
+    labels:
+      - post-release
+  categories:
+    - title: What's Changed
+      labels:
+        - '*'

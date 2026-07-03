@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Version updates are disabled (open-pull-requests-limit: 0).
+  # Dependabot security updates (triggered by GitHub Advisory Database alerts)
+  # are unaffected by this limit and will still open PRs automatically.
+
+  # Python dependencies (HA addon)
+  - package-ecosystem: "pip"
+    directory: "/stridesync"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+
+  # Docker base images (HA addon)
+  - package-ecosystem: "docker"
+    directory: "/stridesync"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0

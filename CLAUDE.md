@@ -166,3 +166,51 @@ Every PR that changes add-on behavior must add an entry under `## [Unreleased]` 
 `CHANGELOG.md` (repo root) and `stridesync/CHANGELOG.md` (add-on-local, shown in the HA UI),
 using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (`Added`, `Changed`,
 `Fixed`, `Removed`).
+
+## CI / Release
+
+Two pipelines, following the same split used in `siap-jalan` and `health-recorder`. CI never
+publishes images — that's exclusively the release workflow's job.
+
+**CI** (`.github/workflows/ci.yml`) — runs on every push to `main`, `dev`, `claude/**`,
+`feature/**`, `fix/**` and on PRs targeting `main`:
+
+- yamllint on `stridesync/config.yaml` + `stridesync/build.yaml`
+- hadolint on `stridesync/Dockerfile`
+- Version-ordering check: `stridesync/NEXT_VERSION` must be greater than `stridesync/config.yaml`
+  `version` (catches the release workflow ever being skipped without bumping `NEXT_VERSION`)
+- Python `ast.parse` syntax check on `stridesync/app/`
+- `pytest` on `stridesync/tests/`
+- Docker build smoke test for the add-on (`linux/amd64`, no push)
+
+`ci-pass` is the single required status check for branch protection — it exits 0 immediately for
+PRs opened by `github-actions[bot]` (the auto-generated post-release PR, whose real jobs are
+skipped rather than run) and otherwise requires every real job to have succeeded.
+
+**Release** (`.github/workflows/release.yml`) — `workflow_dispatch` only:
+
+1. Reads `stridesync/NEXT_VERSION`, validates it's a pure `X.Y.Z` semver, tags `vX.Y.Z`.
+2. Builds and pushes `{arch}-stridesync:{version}` + `:latest` to GHCR for `amd64` + `aarch64`.
+3. Creates a GitHub release with auto-generated notes.
+4. Opens a `chore/post-release-X.Y.Z` PR (labelled `post-release`) that stamps
+   `stridesync/config.yaml` to the released version, bumps `stridesync/NEXT_VERSION` to the next
+   patch, and moves `CHANGELOG.md`'s `[Unreleased]` entries into a dated `[X.Y.Z]` section
+   (regenerating `stridesync/CHANGELOG.md` from it).
+
+**To ship a release:**
+
+1. Ensure `stridesync/NEXT_VERSION` holds the version to release and everything is merged to
+   `main`.
+2. **Actions → Release → Run workflow** (no inputs — version comes from `NEXT_VERSION`).
+3. Review and merge the auto-created `chore/post-release-X.Y.Z` PR — check
+   `stridesync/CHANGELOG.md` in particular, since its bullets are auto-extracted.
+
+There is no pre-release/dev-channel pipeline yet (no `stridesync-dev/` add-on folder exists) —
+add one, mirroring `health-recorder`'s `ha-addon-dev/` + `prerelease.yml` pattern, if a beta
+channel becomes useful before v1.0.
+
+### Branch protection
+
+Require exactly one status check on `main`: **`CI Pass`**. Do not add the individual job names
+(`Lint`, `Unit tests`, etc.) — they're skipped (not passed) on bot-created PRs, which would block
+those PRs from merging if required directly.

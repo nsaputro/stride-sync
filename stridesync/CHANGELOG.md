@@ -13,3 +13,5 @@ Versions match `config.yaml` and the GitHub release tags.
   (`python3 -m app.sync.scheduler --once`) for verifying auth and the data model against a real
   Garmin account. Not yet wired into a continuous s6 service — see PROJECT_PLAN.md milestone
   v0.2.
+- CI (lint, syntax check, tests, Docker build smoke test) and release (multi-arch GHCR images,
+  GitHub release, automated post-release version bump) pipelines.

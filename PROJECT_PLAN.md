@@ -170,6 +170,12 @@ tools/resources should appear in a new conversation.
   `python3 -m app.sync.scheduler --once` against a real account and check
   `sqlite3 /data/stridesync.db` before ticking this off; adjust the field lookups in
   `garmin_client.py` if any come back `NULL` that shouldn't.
+- ✅ CI pipeline (`.github/workflows/ci.yml`): yamllint + hadolint + version-ordering check +
+  Python syntax check + `pytest` + Docker build smoke test on every push/PR
+- ✅ Release pipeline (`.github/workflows/release.yml`): tags `stridesync/NEXT_VERSION`, builds
+  and pushes multi-arch (`amd64`/`aarch64`) images to GHCR, creates a GitHub release, and opens
+  the `chore/post-release` PR — see `CLAUDE.md`'s CI / Release section. Not yet run for a real
+  release (that's v1.0's last checkbox).
 
 ### v0.2 — Scheduled sync service ⬜
 
