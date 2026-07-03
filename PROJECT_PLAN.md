@@ -150,15 +150,26 @@ tools/resources should appear in a new conversation.
 
 ## 3. Milestones
 
-### v0.1 — Manual sync, verify schema ⬜
+### v0.1 — Manual sync, verify schema 🔄
 
-- ⬜ `app/sync/garmin_client.py`: authenticate against Garmin Connect via `garmy`
-- ⬜ SQLite schema defined and created on first run (`activities`, `activity_metrics` /
-  time-series table for HR & pace, `sync_log`)
-- ⬜ Manual sync runnable via CLI inside the container (`python3 -m app.sync.scheduler --once`)
+- ✅ `app/sync/garmin_client.py`: authenticate against Garmin Connect via `garmy`, wrapped so
+  callers only ever see `GarminAuthError`/`GarminAPIError` (never a raw `garmy` or `requests`
+  exception — see the module docstring for why transport-level failures needed their own
+  handling, not just `garmy`'s own exception types)
+- ✅ SQLite schema defined and created on first run (`activities`, `activity_metrics` as a
+  per-lap time-series table for HR & pace, `sync_log`) — see `app/db/schema.sql`
+- ✅ Manual sync runnable via CLI inside the container (`python3 -m app.sync.scheduler --once`)
   for verifying auth + schema without waiting on the scheduler
 - ⬜ Inspect the resulting SQLite DB by hand to confirm the schema captures cadence, pace, HR,
-  and training load fields Garmin actually returns
+  and training load fields Garmin actually returns — **still open**. `garmy`'s built-in
+  activity summary has no distance/pace/cadence fields at all, so `garmin_client.py` merges it
+  with the raw `/activity-service/activity/{id}` and `/activity-service/activity/{id}/splits`
+  endpoints; the exact field names there (`summaryDTO`, `lapDTOs`, `averageRunningCadence...`)
+  are inferred from the wider Garmin Connect tooling ecosystem, not confirmed against a live
+  account — this dev environment has no route to `garmin.com` and no test credentials. Run
+  `python3 -m app.sync.scheduler --once` against a real account and check
+  `sqlite3 /data/stridesync.db` before ticking this off; adjust the field lookups in
+  `garmin_client.py` if any come back `NULL` that shouldn't.
 
 ### v0.2 — Scheduled sync service ⬜
 
