@@ -10,8 +10,14 @@ WORKDIR /app
 COPY app/requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Copy application code
-COPY app/ .
+# Copy application code — preserves the app/ package directory (app/app/...), not flattened
+# into WORKDIR, since every module in this codebase imports itself as "app.xxx" (e.g.
+# "from app.config import Settings") and the run scripts do `python3 -m app.mcp.server` from
+# /app. Flattening (COPY app/ .) previously put __init__.py etc directly in /app with no "app"
+# package for Python to find, crashing every service on start with
+# "ModuleNotFoundError: No module named 'app'" — this shipped in v0.1.0 undetected because CI's
+# Docker build test only builds the image, it never runs it (see .github/workflows/ci.yml).
+COPY app/ ./app/
 
 # s6-overlay services + init scripts
 COPY rootfs /

@@ -150,9 +150,9 @@ jobs:
         working-directory: stridesync
         run: python -m pytest tests/ -v --tb=short
 
-  # ── Docker build test (amd64 only, no push) ──────────────────────────────────
+  # ── Docker build + smoke test (amd64 only, no push) ───────────────────────────
   build-test:
-    name: Docker build test (amd64)
+    name: Docker build + smoke test (amd64)
     runs-on: ubuntu-latest
     needs: [lint, python-syntax, test]
     if: github.event_name != 'pull_request' || github.actor != 'github-actions[bot]'
@@ -162,17 +162,79 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build addon image (no push)
+      - name: Build addon image (no push, loaded locally so it can be run below)
         uses: docker/build-push-action@v7
         with:
           context: stridesync
           push: false
+          load: true
           platforms: linux/amd64
           build-args: |
             BUILD_FROM=ghcr.io/hassio-addons/base:18.0.1
           tags: stridesync-ha:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # A successful `docker build` only proves the image compiles — it does not prove the s6
+      # services inside it actually start. v0.1.0 shipped with a Dockerfile bug
+      # (COPY app/ . flattened the app/ package into WORKDIR, so `python3 -m app.mcp.server`
+      # couldn't find a package called "app") that this build-only test never caught. This step
+      # actually runs the built image and checks both services come up without crashing.
+      - name: Run container smoke test
+        run: |
+          mkdir -p /tmp/stridesync-smoke-data
+          cat > /tmp/stridesync-smoke-data/options.json <<'EOF'
+          {
+            "garmin_username": "smoke-test@example.com",
+            "garmin_password": "smoke-test-password",
+            "sync_interval_hours": 6,
+            "mcp_port": 8765,
+            "log_level": "info"
+          }
+          EOF
+
+          CONTAINER_ID=$(docker run -d \
+            -p 18765:8765 \
+            -v /tmp/stridesync-smoke-data:/data \
+            stridesync-ha:ci)
+
+          echo "Waiting for s6 services to start..."
+          sleep 15
+
+          echo "--- container logs ---"
+          docker logs "$CONTAINER_ID" 2>&1 | tee /tmp/stridesync-smoke.log
+
+          FAILED=0
+
+          if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER_ID")" != "true" ]; then
+            echo "::error::Container exited unexpectedly — see logs above"
+            FAILED=1
+          fi
+
+          if grep -qiE "ModuleNotFoundError|Traceback \(most recent call last\)" /tmp/stridesync-smoke.log; then
+            echo "::error::Found a Python crash in container logs — see logs above"
+            FAILED=1
+          fi
+
+          # Any HTTP response (even a 4xx from a bare request with no MCP handshake) proves the
+          # server is bound and listening; a curl-level failure (connection refused, timeout)
+          # means it isn't.
+          HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:18765/mcp)
+          CURL_EXIT=$?
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "::error::MCP server unreachable on port 18765 (curl exit code $CURL_EXIT) — see logs above"
+            FAILED=1
+          else
+            echo "MCP server responded with HTTP $HTTP_CODE (server is listening)"
+          fi
+
+          docker stop "$CONTAINER_ID" >/dev/null
+          docker rm "$CONTAINER_ID" >/dev/null
+
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
+          echo "Container smoke test passed: both s6 services started without crashing."
 
   # ── Required gate ────────────────────────────────────────────────────────────
   # This is the ONLY job to add as a required status check in branch protection.
