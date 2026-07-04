@@ -50,3 +50,12 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   no longer a 1×1 scaffolding stub).
 - `stridesync/config.yaml` now documents why no `ingress:` is declared (the add-on is API-only,
   with no browser-facing web UI panel).
+- `README.md` rewritten: accurate status, a standalone Quick Start, install steps, config table,
+  and the Garmin-auth known-risk note.
+
+### Fixed
+- `.github/workflows/release.yml`'s post-release changelog script: the very first release (no
+  prior version section, no prior git tag) would have both generated a dead comparison link
+  (`compare/v0.0.0...vX.Y.Z` — that tag was never created) and duplicated the version's
+  reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
+  script against this repo's real `CHANGELOG.md` before ever running it for real.
