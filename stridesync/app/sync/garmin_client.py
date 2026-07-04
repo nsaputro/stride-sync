@@ -27,10 +27,11 @@ import requests
 from garmy import APIClient, AuthClient
 from garmy.core.exceptions import APIError, AuthError
 
-from app.sync import garmy_tls_impersonation, garmy_ua_override
+from app.sync import garmy_login_delay, garmy_tls_impersonation, garmy_ua_override
 
 garmy_ua_override.apply()
 garmy_tls_impersonation.apply()
+garmy_login_delay.apply()
 
 # garmy's SSO login flow doesn't wrap transport-level failures (connection errors, proxy
 # errors, timeouts) in its own exception types — a broken network path to Garmin surfaces as a

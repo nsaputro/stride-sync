@@ -104,6 +104,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `app/sync/garmy_tls_impersonation.py` applies the same `curl_cffi` fix to `garmy`'s SSO login
   flow specifically (a new dependency, `GARMIN_TLS_IMPERSONATE` env var to override the
   impersonated browser).
+- **TLS impersonation alone still didn't clear the Cloudflare challenge** — confirmed by live
+  retesting (the error message format changed, proving `curl_cffi` was genuinely used, but the
+  same challenge came back). `python-garminconnect`'s actual current implementation does the same
+  TLS impersonation *and* adds a randomized 3-8 second delay between fetching the login page and
+  submitting credentials, treating request timing as a separate Cloudflare signal from the TLS
+  handshake. New `app/sync/garmy_login_delay.py` reproduces this (`GARMIN_LOGIN_DELAY_MIN_S`/
+  `GARMIN_LOGIN_DELAY_MAX_S` env vars to override).
 
 ## [0.1.0] - 2026-07-04
 

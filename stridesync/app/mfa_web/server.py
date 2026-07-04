@@ -30,11 +30,12 @@ from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
 from app.config import Settings
-from app.sync import garmy_tls_impersonation, garmy_ua_override, mfa_login
+from app.sync import garmy_login_delay, garmy_tls_impersonation, garmy_ua_override, mfa_login
 from app.sync.garmin_client import TRANSPORT_ERRORS, describe_transport_error
 
 garmy_ua_override.apply()
 garmy_tls_impersonation.apply()
+garmy_login_delay.apply()
 
 logger = logging.getLogger(__name__)
 

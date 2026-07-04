@@ -50,6 +50,10 @@
   in March 2026 (deprecating `garth`). The login flow now impersonates a real browser's TLS
   fingerprint (via a new `curl_cffi` dependency) rather than just its headers, matching the fix
   other Garmin Connect tools adopted for this exact issue.
+- The TLS fingerprint fix above didn't fully clear the Cloudflare check either. The login flow
+  now also waits a few seconds (like a human filling in a form) between loading the login page
+  and submitting credentials, matching another technique other Garmin Connect tools use for this
+  same issue.
 
 ## [0.1.0] - 2026-07-04
 
