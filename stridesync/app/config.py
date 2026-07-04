@@ -27,24 +27,31 @@ class Settings:
     def from_env(cls) -> "Settings":
         """Build Settings from environment variables, matching config.yaml defaults."""
         return cls(
-            garmin_username=os.environ.get("GARMIN_USERNAME", ""),
-            garmin_password=os.environ.get("GARMIN_PASSWORD", ""),
+            garmin_username=_str_env("GARMIN_USERNAME", ""),
+            garmin_password=_str_env("GARMIN_PASSWORD", ""),
             sync_interval_hours=_int_env("SYNC_INTERVAL_HOURS", 6),
             mcp_port=_int_env("MCP_PORT", 8765),
-            log_level=os.environ.get("LOG_LEVEL", "info"),
-            db_path=os.environ.get("STRIDESYNC_DB_PATH", "/data/stridesync.db"),
+            log_level=_str_env("LOG_LEVEL", "info"),
+            db_path=_str_env("STRIDESYNC_DB_PATH", "/data/stridesync.db"),
         )
 
 
-def _int_env(key: str, default: int) -> int:
-    """Read an integer env var, falling back to `default` if unset, empty, or "null".
+def _str_env(key: str, default: str) -> str:
+    """Read a string env var, falling back to `default` if unset, empty, or the literal "null".
 
-    `bashio::config` for numeric/port-typed options has been observed to emit the literal
-    string "null" (not an empty value) when run standalone without a real HA Supervisor to
-    query — int("null") would otherwise crash every service on start with an unhelpful
-    ValueError. Treated as "not set" here rather than a fatal error, same as a missing key.
+    `bashio::config` has been observed to emit the literal string "null" (not an empty value,
+    not the schema default) for schema-validated option types — int ranges, `port`, and
+    `list(...)` enums — when run standalone without a real HA Supervisor to validate against.
+    Plain `str`/`password` options haven't shown this in testing, but treating every field the
+    same way here closes the whole class of bug rather than patching it field-by-field as new
+    schema types get hit.
     """
     raw = os.environ.get(key)
     if not raw or raw.strip().lower() == "null":
         return default
-    return int(raw)
+    return raw
+
+
+def _int_env(key: str, default: int) -> int:
+    """Read an integer env var — see `_str_env` for the "null" fallback this relies on."""
+    return int(_str_env(key, str(default)))
