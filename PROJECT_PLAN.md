@@ -151,6 +151,22 @@ above, so both entry points implement the flow exactly once. Login state (the pe
 `("needs_mfa", state)` tuple) lives in a single in-process slot — correct because there is
 exactly one Garmin account per add-on install — rather than a per-visitor session store.
 
+**Confirmed against `garmy` via live testing:** a real account hit `401 Client Error: Unauthorized`
+on the plain SSO signin GET (`https://sso.garmin.com/sso/signin?id=gauth-widget...`) — *before*
+credentials were even submitted. Copying the identical URL into a real mobile browser, on the
+same account/network, succeeded instantly and completed the full login (including MFA). That
+isolates the cause to *how* the request is made, not the URL or account, and traces to `garmy`'s
+Android User-Agent (`garmy.core.config.UserAgents.ANDROID_APP`): it's the literal Android package
+name `"com.garmin.android.apps.connectmobile"`, not a real User-Agent string (unlike garmy's own
+correctly-formatted iOS constant, `"GCM-iOS-5.12.24"`) — and it's identical across every garmy
+install, an easy fingerprint for Garmin/Cloudflare's bot detection to single out. `garmy` doesn't
+expose a supported way to override this (its public `set_config()` only reaches one of the two
+places this UA is read from — see `app/sync/garmy_ua_override.py`'s module docstring for the
+full mechanics), so `garmy_ua_override.apply()` patches both, called once per process by every
+entry point that talks to Garmin. Not guaranteed to be the *entire* fix — Cloudflare-class bot
+detection can also fingerprint at the TLS/connection level, which no header change can address —
+but it's a concrete, low-risk thing to try before assuming a deeper library change is needed.
+
 **Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
 surfaced in the wider unofficial-client ecosystem starting ~June 2026 —
 [python-garminconnect#369](https://github.com/cyberjunky/python-garminconnect/issues/369) and

@@ -36,6 +36,11 @@
   learning the account needs MFA** — it now fails fast locally instead, until the one-time login
   (CLI or web UI) is completed, so it stops repeatedly hitting Garmin with login attempts that
   can't succeed yet.
+- **Garmin login could fail with `401 Unauthorized` on the SSO signin page itself**, before
+  credentials were even submitted, on accounts/networks where the exact same login page worked
+  fine in a real browser — traced to a malformed, identical-across-every-install Android
+  User-Agent string that made automated login requests easy for Garmin to single out. Replaced
+  with a properly-formatted one (override via `GARMIN_ANDROID_USER_AGENT` if needed).
 
 ## [0.1.0] - 2026-07-04
 

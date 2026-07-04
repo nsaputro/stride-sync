@@ -74,6 +74,17 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   token files after the first such attempt and fails fast (no network call) on every subsequent
   call while the marker is set, clearing it automatically once `bootstrap_login.py` or the web UI
   completes the one-time login.
+- **Garmin login started failing with `401 Client Error: Unauthorized` on the plain SSO signin
+  page**, before credentials were even submitted — confirmed via live testing that the identical
+  URL worked instantly from a real browser on the same account, isolating the cause to the
+  request itself rather than the URL or account. Root cause: `garmy`'s Android User-Agent is the
+  literal Android package name (`com.garmin.android.apps.connectmobile`), not a real User-Agent
+  string, and identical across every install — an easy target for Garmin/Cloudflare's bot
+  detection. A new `app/sync/garmy_ua_override.py`, applied once by every entry point that talks
+  to Garmin, replaces it with a properly-formatted mobile-app-style value
+  (`GARMIN_ANDROID_USER_AGENT` env var to override further). Not guaranteed to be the complete
+  fix — Cloudflare-class bot detection can also fingerprint at the TLS/connection level — but a
+  concrete, low-risk thing to try first.
 
 ## [0.1.0] - 2026-07-04
 

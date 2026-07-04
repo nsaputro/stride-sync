@@ -26,6 +26,10 @@ import requests
 from garmy import APIClient, AuthClient
 from garmy.core.exceptions import APIError, AuthError
 
+from app.sync import garmy_ua_override
+
+garmy_ua_override.apply()
+
 # garmy's SSO login flow doesn't wrap transport-level failures (connection errors, proxy
 # errors, timeouts) in its own exception types — a broken network path to Garmin surfaces as a
 # raw `requests` exception. Caught alongside garmy's own AuthError/APIError below so every
