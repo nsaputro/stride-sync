@@ -55,3 +55,19 @@ def test_from_env_parses_valid_log_level(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.log_level == "debug"
+
+
+def test_from_env_garmin_token_dir_default(monkeypatch):
+    monkeypatch.delenv("GARMIN_TOKEN_DIR", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.garmin_token_dir == "/data/.garmin_tokens"
+
+
+def test_from_env_garmin_token_dir_override(monkeypatch):
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", "/tmp/custom_tokens")
+
+    settings = Settings.from_env()
+
+    assert settings.garmin_token_dir == "/tmp/custom_tokens"

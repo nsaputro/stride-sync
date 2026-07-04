@@ -167,19 +167,44 @@ class GarminClient:
     GarminAuthError/GarminAPIError — never a silently empty result (CLAUDE.md: "Fail loud").
     """
 
-    def __init__(self, username: str, password: str) -> None:
+    def __init__(self, username: str, password: str, token_dir: Optional[str] = None) -> None:
         self._username = username
         self._password = password
-        self._auth_client = AuthClient()
+        # token_dir persists OAuth1/OAuth2 tokens to disk (defaults under /data — see
+        # Settings.garmin_token_dir) so a session survives process restarts. This is what makes
+        # MFA accounts workable at all: see login()'s refresh-before-login preference below and
+        # app/sync/bootstrap_login.py for the one-time interactive login that populates it.
+        self._auth_client = AuthClient(token_dir=token_dir)
         self._api_client = APIClient(auth_client=self._auth_client)
 
     def login(self) -> None:
-        """Authenticate against Garmin Connect.
+        """Authenticate against Garmin Connect, preferring a cached/refreshed session.
+
+        A fresh login always re-runs the full SSO flow from scratch, which re-triggers MFA on
+        every call for accounts that require it — unworkable for a service that logs in on
+        every scheduled sync. So this checks for (and refreshes) an existing cached session
+        first, from a previous login or bootstrap_login.py run, and only falls back to a fresh
+        login if there is no usable session yet.
 
         Raises:
-            GarminAuthError: on bad credentials, required MFA, or any other auth failure
-                (including the SSO-flow breakage described in PROJECT_PLAN.md's known risk).
+            GarminAuthError: on bad credentials, required MFA with no cached session, or any
+                other auth failure (including the SSO-flow breakage described in
+                PROJECT_PLAN.md's known risk).
         """
+        if self._auth_client.is_authenticated:
+            return  # valid cached session — nothing to do
+
+        if self._auth_client.needs_refresh:
+            try:
+                self._auth_client.refresh_tokens()
+                return
+            except AuthError:
+                pass  # cached session itself was revoked/invalid — fall through to fresh login
+            except _TRANSPORT_ERRORS as exc:
+                raise GarminAuthError(
+                    f"Could not reach Garmin Connect to refresh session: {exc}"
+                ) from exc
+
         try:
             result = self._api_client.login(self._username, self._password)
         except AuthError as exc:
@@ -194,12 +219,12 @@ class GarminClient:
         if isinstance(result, tuple) and result and result[0] == "needs_mfa":
             raise GarminAuthError(
                 "Garmin Connect requires a multi-factor authentication (MFA) code for this "
-                "account. StrideSync runs headless and cannot answer an interactive MFA "
-                "prompt — use a Garmin account with MFA disabled, or disable MFA for this "
-                "account in Garmin Connect account settings."
+                "account, and no cached session was found. Run the one-time interactive login "
+                "(`python3 -m app.sync.bootstrap_login`, see DOCS.md) — scheduled syncs will "
+                "then reuse that session, refreshing it as needed, without requiring MFA again."
             )
 
-        if not self._api_client.is_authenticated:
+        if not self._auth_client.is_authenticated:
             raise GarminAuthError("Garmin Connect login did not return valid tokens.")
 
     def fetch_recent_activities(self, limit: int = 20) -> List[GarminActivity]:

@@ -17,6 +17,7 @@ def make_settings(tmp_path) -> Settings:
         mcp_port=8765,
         log_level="info",
         db_path=str(tmp_path / "stridesync.db"),
+        garmin_token_dir=str(tmp_path / "garmin_tokens"),
     )
 
 

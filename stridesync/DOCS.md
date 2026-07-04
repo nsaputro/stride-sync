@@ -41,11 +41,21 @@ the underlying library is updated. When this happens, StrideSync fails loudly in
 and reports sync staleness through the MCP server rather than silently serving stale data as if
 it were current.
 
-**Accounts with multi-factor authentication (MFA/2FA) enabled are not supported.** StrideSync
-runs headless with no way to prompt for an MFA code. If your Garmin account has MFA enabled,
-login fails with a clear error in the log (`Garmin Connect requires a multi-factor
-authentication (MFA) code for this account...`) rather than a confusing generic failure — use an
-account with MFA disabled, or disable MFA on this account.
+## Accounts with MFA/2FA enabled
+
+StrideSync runs headless, so a scheduled sync can't answer an interactive MFA prompt — but MFA
+accounts are supported via a **one-time interactive login**. If sync fails with `Garmin Connect
+requires a multi-factor authentication (MFA) code for this account...`, run:
+
+```bash
+docker exec -it <container> python3 -m app.sync.bootstrap_login
+```
+
+(on a real HA install, use the **Terminal & SSH** add-on: `ha addons exec <slug> python3 -m
+app.sync.bootstrap_login`). Enter the MFA code Garmin sends you when prompted. The resulting
+session is saved to `/data/.garmin_tokens` — every scheduled sync afterward reuses and refreshes
+that session without requiring MFA again, until the underlying session is itself revoked or
+expires, at which point re-run the bootstrap login.
 
 ## Data
 

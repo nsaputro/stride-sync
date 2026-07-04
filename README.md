@@ -75,9 +75,11 @@ updated. When this happens, StrideSync fails loudly in the add-on log and report
 through the MCP server (`last_sync_status` tool) rather than silently serving stale data as if it
 were current. See `PROJECT_PLAN.md`'s "Known risk" section for the full design rationale.
 
-**Accounts with MFA/2FA enabled are not supported** — StrideSync runs headless with no way to
-answer an interactive MFA prompt. Login fails with a clear, specific error rather than a
-confusing generic one; use an account with MFA disabled.
+**Accounts with MFA/2FA enabled** need a one-time interactive login: if sync fails asking for
+MFA, run `docker exec -it <container> python3 -m app.sync.bootstrap_login` (or, on a real HA
+install, `ha addons exec <slug> python3 -m app.sync.bootstrap_login` via the Terminal & SSH
+add-on), enter the code Garmin sends you, and every scheduled sync afterward reuses that session
+without needing MFA again. See `DOCS.md` for details.
 
 ## License
 
