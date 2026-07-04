@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest
@@ -212,6 +213,49 @@ class TestGarminClientLogin:
 
         with pytest.raises(GarminAuthError, match="multi-factor authentication"):
             client.login()
+
+    def test_login_sets_mfa_marker_and_fails_fast_on_next_attempt(self, tmp_path):
+        # Once a fresh login has revealed MFA is required, a later sync interval (still no
+        # cached session — bootstrap hasn't happened yet) must not repeat a fresh SSO login
+        # against Garmin: see PROJECT_PLAN.md's "no auto-retry storms" design guidance.
+        token_dir = str(tmp_path / "tokens")
+        client = GarminClient("user@example.com", "hunter2", token_dir=token_dir)
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = False
+        client._api_client = MagicMock()
+        client._api_client.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
+
+        with pytest.raises(GarminAuthError, match="multi-factor authentication"):
+            client.login()
+        client._api_client.login.assert_called_once()
+
+        client._api_client.login.reset_mock()
+        with pytest.raises(GarminAuthError, match="multi-factor authentication"):
+            client.login()
+        client._api_client.login.assert_not_called()
+
+    def test_mfa_marker_is_cleared_once_a_session_is_found_valid(self, tmp_path):
+        # Simulates bootstrap_login.py (or the web UI) completing the MFA flow in a separate
+        # process — the next sync should resume normally, not stay stuck fast-failing forever.
+        token_dir = str(tmp_path / "tokens")
+        client = GarminClient("user@example.com", "hunter2", token_dir=token_dir)
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = False
+        client._api_client = MagicMock()
+        client._api_client.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
+
+        with pytest.raises(GarminAuthError):
+            client.login()
+        marker_path = os.path.join(token_dir, ".mfa_required")
+        assert os.path.exists(marker_path)
+
+        client._auth_client.is_authenticated = True
+
+        client.login()  # should not raise
+
+        assert not os.path.exists(marker_path)
 
     def test_login_wraps_transport_error(self):
         # garmy's SSO flow doesn't wrap connection/proxy/timeout failures in its own

@@ -114,7 +114,12 @@ Design implications:
   surfaces the problem instead of Claude reasoning over stale data as if it were current.
 - **No auto-retry storms.** If auth is broken, retrying every sync interval against a broken SSO
   flow risks the account being flagged for suspicious activity. Back off and log distinctly from
-  "transient network failure" vs. "auth flow structurally broken, needs a library update."
+  "transient network failure" vs. "auth flow structurally broken, needs a library update." Applied
+  concretely to the MFA case below: once a fresh login reveals an account needs MFA,
+  `GarminClient` persists a marker (`.mfa_required` next to the token files) and fails fast on
+  every later call while it's still set, instead of repeating a fresh SSO login attempt every
+  `sync_interval_hours` forever — that attempt can't succeed without the one-time bootstrap
+  anyway. Cleared automatically the next time a session is found valid.
 - **Isolate the blast radius.** Because sync and MCP are separate s6 services, a broken Garmin
   auth flow degrades the sync scheduler only — the MCP server keeps serving whatever was last
   successfully synced, with clear staleness info, rather than the whole add-on going down.

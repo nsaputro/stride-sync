@@ -32,6 +32,10 @@
   Server Error"** instead of a clear message — it now handles network failures and other
   unexpected errors the same way the rest of the add-on does, always showing a diagnosable error
   page instead of crashing.
+- **The scheduled sync kept retrying a fresh Garmin login every `sync_interval_hours` even after
+  learning the account needs MFA** — it now fails fast locally instead, until the one-time login
+  (CLI or web UI) is completed, so it stops repeatedly hitting Garmin with login attempts that
+  can't succeed yet.
 
 ## [0.1.0] - 2026-07-04
 
