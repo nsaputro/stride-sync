@@ -22,20 +22,24 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import curl_cffi.requests.exceptions as curl_exceptions
 import requests
 from garmy import APIClient, AuthClient
 from garmy.core.exceptions import APIError, AuthError
 
-from app.sync import garmy_ua_override
+from app.sync import garmy_tls_impersonation, garmy_ua_override
 
 garmy_ua_override.apply()
+garmy_tls_impersonation.apply()
 
 # garmy's SSO login flow doesn't wrap transport-level failures (connection errors, proxy
 # errors, timeouts) in its own exception types — a broken network path to Garmin surfaces as a
 # raw `requests` exception. Caught alongside garmy's own AuthError/APIError below so every
 # failure mode described in PROJECT_PLAN.md's "known risk" section becomes a clean
-# GarminAuthError/GarminAPIError instead of an unhandled traceback.
-TRANSPORT_ERRORS = (requests.exceptions.RequestException,)
+# GarminAuthError/GarminAPIError instead of an unhandled traceback. Includes curl_cffi's own
+# RequestException too (not a subclass of requests' one) since garmy_tls_impersonation.py routes
+# the SSO login flow specifically through curl_cffi — see that module's docstring.
+TRANSPORT_ERRORS = (requests.exceptions.RequestException, curl_exceptions.RequestException)
 
 
 def describe_transport_error(exc: Exception) -> str:

@@ -3,6 +3,12 @@ garmy
 requests  # used directly in app/sync/garmin_client.py to catch transport-level auth failures
 # python-garminconnect  # fallback, uncomment if garmy can't cover a needed endpoint
 
+# TLS-fingerprint impersonation for garmy's SSO login flow only — see
+# app/sync/garmy_tls_impersonation.py's module docstring. Garmin's Cloudflare bot management
+# blocks plain `requests`-based logins regardless of headers; ships musllinux wheels for both
+# amd64/aarch64 (this add-on's Alpine base), confirmed via https://pypi.org/pypi/curl_cffi/json.
+curl_cffi
+
 # MCP server — fastmcp serves Streamable HTTP natively (transport="http"), no mcp-proxy needed
 # inside the add-on; see app/mcp/server.py module docstring for why garmy-mcp's bundled server
 # wasn't reused as-is.

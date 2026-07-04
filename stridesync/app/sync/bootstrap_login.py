@@ -27,10 +27,11 @@ from garmy import AuthClient
 from garmy.core.exceptions import AuthError
 
 from app.config import Settings
-from app.sync import garmy_ua_override, mfa_login
+from app.sync import garmy_tls_impersonation, garmy_ua_override, mfa_login
 from app.sync.garmin_client import TRANSPORT_ERRORS, describe_transport_error
 
 garmy_ua_override.apply()
+garmy_tls_impersonation.apply()
 
 
 def main() -> int:
