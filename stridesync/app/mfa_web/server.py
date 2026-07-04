@@ -31,7 +31,9 @@ from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
 from app.config import Settings
-from app.sync import mfa_login
+from app.sync import garmy_ua_override, mfa_login
+
+garmy_ua_override.apply()
 
 logger = logging.getLogger(__name__)
 

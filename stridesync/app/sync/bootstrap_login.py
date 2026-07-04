@@ -27,7 +27,9 @@ from garmy import AuthClient
 from garmy.core.exceptions import AuthError
 
 from app.config import Settings
-from app.sync import mfa_login
+from app.sync import garmy_ua_override, mfa_login
+
+garmy_ua_override.apply()
 
 
 def main() -> int:
