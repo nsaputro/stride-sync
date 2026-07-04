@@ -31,3 +31,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   updates both changelogs.
 - `.yamllint.yml`, `.hadolint.yaml`, `.github/release.yml` (release-notes categorization), and
   `.github/dependabot.yml` (weekly pip/Docker/GitHub Actions update checks, security-only).
+- Continuous sync scheduling (`app/sync/scheduler.py`'s `run_forever`): the sync-scheduler s6
+  service now loops on `sync_interval_hours` instead of requiring manual `--once` invocation. A
+  failed sync is logged and recorded in `sync_log` but never crashes the loop — the next
+  scheduled interval is the retry. `SIGTERM`/`SIGINT` (sent by s6 on stop) now interrupt the wait
+  promptly instead of blocking for up to `sync_interval_hours`.
+- `rootfs/etc/services.d/sync-scheduler/run` now exports `garmin_username`, `garmin_password`,
+  `sync_interval_hours`, and `log_level` from `bashio::config` as environment variables.

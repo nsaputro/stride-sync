@@ -177,15 +177,23 @@ tools/resources should appear in a new conversation.
   the `chore/post-release` PR — see `CLAUDE.md`'s CI / Release section. Not yet run for a real
   release (that's v1.0's last checkbox).
 
-### v0.2 — Scheduled sync service ⬜
+### v0.2 — Scheduled sync service 🔄
 
-- ⬜ `rootfs/etc/services.d/sync-scheduler/run` — s6 service wrapping the scheduler loop
-- ⬜ `sync_interval_hours` read from `/data/options.json` via `bashio::config`, default `6`
-- ⬜ Sync runs continuously without manual invocation; verified across a container restart
-  (interval timer state doesn't need to persist — just re-arms on start)
-- ⬜ `sync_log` populated on every run (success and failure paths)
-- ⬜ Graceful failure path exercised: simulate a broken Garmin auth flow and confirm it logs
-  clearly and doesn't crash the service loop
+- ✅ `rootfs/etc/services.d/sync-scheduler/run` — s6 service wrapping the scheduler loop
+  (`app/sync/scheduler.py`'s `run_forever`), now exporting `garmin_username`/`garmin_password`/
+  `sync_interval_hours`/`log_level` from `bashio::config` as env vars
+- ✅ `sync_interval_hours` read from `/data/options.json` via `bashio::config`, default `6`
+- 🔄 Sync runs continuously without manual invocation — verified by running
+  `python3 -m app.sync.scheduler` directly (env vars set the way the s6 `run` script sets them)
+  and confirming repeated sync passes + a clean exit within seconds of `SIGTERM` (not a multi-hour
+  hang). **Not yet verified inside the actual Docker/s6 container** — this sandbox has no Docker
+  daemon, so a real container restart (`docker restart`) hasn't been exercised.
+- ✅ `sync_log` populated on every run (success and failure paths) — covered by
+  `tests/test_scheduler.py::TestRunForever`
+- ✅ Graceful failure path exercised: a forced Garmin login failure (real SSO call blocked by this
+  sandbox's network policy) confirmed the loop logs the failure, writes it to `sync_log`, and
+  keeps running rather than crashing the service — both as a unit test
+  (`test_auth_failure_does_not_crash_the_loop`) and live via the CLI
 
 ### v0.3 — MCP server over HTTP ⬜
 

@@ -11,7 +11,9 @@ Versions match `config.yaml` and the GitHub release tags.
 ### Added
 - Garmin Connect sync client, SQLite schema, and a manual sync CLI
   (`python3 -m app.sync.scheduler --once`) for verifying auth and the data model against a real
-  Garmin account. Not yet wired into a continuous s6 service — see PROJECT_PLAN.md milestone
-  v0.2.
+  Garmin account.
 - CI (lint, syntax check, tests, Docker build smoke test) and release (multi-arch GHCR images,
   GitHub release, automated post-release version bump) pipelines.
+- The sync-scheduler service now runs continuously, polling Garmin Connect every
+  `sync_interval_hours` (default 6) instead of requiring a manual sync. Stops promptly when the
+  add-on is stopped/restarted instead of blocking for up to `sync_interval_hours`.
