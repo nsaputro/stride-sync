@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import requests
 from garmy.core.exceptions import AuthError, LoginError
 
 from app.sync.bootstrap_login import main
@@ -96,6 +97,36 @@ def test_mfa_resume_failure_returns_error(monkeypatch, tmp_path):
         mock_auth.is_authenticated = False
         mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
         mock_auth.resume_login.side_effect = AuthError("MFA verification failed")
+        mock_cls.return_value = mock_auth
+
+        assert main() == 1
+
+
+def test_login_transport_error_returns_error(monkeypatch, tmp_path):
+    # A raw requests exception (e.g. a 401 from Garmin's SSO signin page, or a plain network
+    # failure) must not crash uncaught — this mirrors garmin_client.py's TRANSPORT_ERRORS
+    # handling rather than only catching garmy's AuthError.
+    _settings_env(monkeypatch, tmp_path)
+
+    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls:
+        mock_auth = MagicMock()
+        mock_auth.is_authenticated = False
+        mock_auth.login.side_effect = requests.exceptions.ConnectionError("connection reset")
+        mock_cls.return_value = mock_auth
+
+        assert main() == 1
+
+
+def test_mfa_resume_transport_error_returns_error(monkeypatch, tmp_path):
+    _settings_env(monkeypatch, tmp_path)
+
+    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls, patch(
+        "builtins.input", return_value="000000"
+    ):
+        mock_auth = MagicMock()
+        mock_auth.is_authenticated = False
+        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
+        mock_auth.resume_login.side_effect = requests.exceptions.ConnectionError("reset")
         mock_cls.return_value = mock_auth
 
         assert main() == 1
