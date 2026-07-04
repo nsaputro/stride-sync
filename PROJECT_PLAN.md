@@ -181,8 +181,23 @@ in sequence, both needed:
    has to patch around (`GarminOAuth1Session`'s `parent.adapters` access, and
    `curl_cffi`'s exception types not being `requests` exception subclasses).
 
+3. **TLS impersonation alone still didn't clear it** — confirmed by live retesting (the error
+   message's format changed from `requests`'s to `curl_cffi`'s, proving the new transport was
+   actually used, but the same Cloudflare challenge came back). Investigated
+   `python-garminconnect`'s actual current implementation directly: it does the same `curl_cffi`
+   TLS impersonation *and* inserts a randomized delay (3-8 seconds for the same widget-flow login
+   `garmy` uses) between fetching the login page and submitting credentials — treating request
+   *timing* as a separate Cloudflare signal from the TLS handshake itself. New
+   `app/sync/garmy_login_delay.py` reproduces this by patching `garmy.auth.sso`'s
+   `_perform_initial_login` (the credential-submitting POST) to sleep first, matching the
+   GET-then-wait-then-POST pattern rather than firing both back-to-back.
+
 Still not verified end-to-end against a live account from this environment (no route to
-`garmin.com` here) — awaiting confirmation from a real HA install.
+`garmin.com` here) — awaiting confirmation from a real HA install. Three fix attempts in a row
+for the same underlying block (UA, TLS fingerprint, timing) — if this one *also* doesn't clear
+it, that would point toward an actual JavaScript challenge (the response body's `class="no-js"`
+is consistent with this), which no plain HTTP client — regardless of headers, TLS fingerprint, or
+timing — can solve without real browser automation (Playwright/Selenium), a much larger change.
 
 **Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
 surfaced in the wider unofficial-client ecosystem starting ~June 2026 —
