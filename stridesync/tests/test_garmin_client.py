@@ -134,6 +134,20 @@ class TestGarminClientLogin:
 
         client.login()  # should not raise
 
+    def test_login_raises_clear_error_when_mfa_required(self):
+        # garmy doesn't raise when the account needs MFA and no prompt_mfa callback was
+        # given (we never pass one, since this runs headless) — it returns
+        # ("needs_mfa", state) instead. This must surface as a specific, actionable
+        # GarminAuthError, not fall through to the generic "did not return valid tokens"
+        # message.
+        client = GarminClient("user@example.com", "hunter2")
+        client._api_client = MagicMock()
+        client._api_client.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
+        client._api_client.is_authenticated = False
+
+        with pytest.raises(GarminAuthError, match="multi-factor authentication"):
+            client.login()
+
     def test_login_wraps_transport_error(self):
         # garmy's SSO flow doesn't wrap connection/proxy/timeout failures in its own
         # exceptions — a raw requests error must still surface as GarminAuthError, not an

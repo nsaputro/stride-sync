@@ -119,6 +119,28 @@ Design implications:
   auth flow degrades the sync scheduler only — the MCP server keeps serving whatever was last
   successfully synced, with clear staleness info, rather than the whole add-on going down.
 
+**MFA/2FA accounts are not supported.** `garmy`'s SSO login doesn't raise an exception when an
+account requires MFA and no interactive prompt callback is supplied (which StrideSync, running
+headless, never supplies) — it silently returns a `("needs_mfa", state)` tuple instead. Left
+unchecked, `garmin_client.py`'s `login()` would fall through to a generic "did not return valid
+tokens" error, hiding the actual, actionable cause — this surfaced for real (a user with MFA
+enabled hit exactly this). Fixed: `login()` now detects that tuple explicitly and raises a
+specific `GarminAuthError` naming MFA as the cause. Supporting MFA properly would need a
+headless-appropriate flow (e.g. a `stridesync_mfa_code` config option the user fills in and
+restarts the add-on with) — out of scope unless requested; for now, document it as a hard
+requirement (MFA disabled) rather than pretend to support it.
+
+**Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
+surfaced in the wider unofficial-client ecosystem starting ~June 2026 —
+[python-garminconnect#369](https://github.com/cyberjunky/python-garminconnect/issues/369) and
+[garth#137](https://github.com/matin/garth/issues/137) both report login succeeding but a
+subsequent API call returning `401 Token is not active`, suggesting Garmin changed server-side
+bearer-token validation. `garmy` reimplements SSO itself (doesn't depend on `garth`), so it isn't
+automatically affected, but if Garmin's change is server-side it could hit `garmy` too. No
+confirmed reports against `garmy` specifically as of this writing, and this environment has no
+route to `garmin.com` to check directly — worth a quick look if sync starts failing with a 401
+after a successful-looking login (as opposed to the MFA case above, which fails *during* login).
+
 ---
 
 ## 2. MCP Connection

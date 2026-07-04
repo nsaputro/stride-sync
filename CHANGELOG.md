@@ -39,6 +39,14 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   rather than the configured value. `app/config.py`'s `Settings.from_env()` now treats `"null"`
   (and an empty string) as "unset" for every field and falls back to the documented default,
   instead of crashing.
+- **Login failed with a confusing generic error (`Garmin Connect login did not return valid
+  tokens`) for accounts with MFA/2FA enabled**: `garmy` doesn't raise an exception when MFA is
+  required and no interactive prompt callback is supplied (StrideSync never supplies one — it
+  runs headless) — it silently returns a `("needs_mfa", state)` tuple instead, which fell
+  through to the generic error. `garmin_client.py`'s `login()` now detects this and raises a
+  specific error naming MFA as the cause. **Accounts with MFA/2FA enabled are still not
+  supported** — see `PROJECT_PLAN.md`'s "Known risk" section — but the failure is now
+  actionable instead of mysterious.
 
 ## [0.1.0] - 2026-07-04
 

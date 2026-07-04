@@ -181,11 +181,23 @@ class GarminClient:
                 (including the SSO-flow breakage described in PROJECT_PLAN.md's known risk).
         """
         try:
-            self._api_client.login(self._username, self._password)
+            result = self._api_client.login(self._username, self._password)
         except AuthError as exc:
             raise GarminAuthError(f"Garmin Connect login failed: {exc}") from exc
         except _TRANSPORT_ERRORS as exc:
             raise GarminAuthError(f"Could not reach Garmin Connect to login: {exc}") from exc
+
+        # garmy doesn't raise when MFA is required and no prompt_mfa callback was given (we
+        # never pass one) — it returns ("needs_mfa", state) instead. Left unchecked, this falls
+        # through to the generic "did not return valid tokens" error below, hiding the actual,
+        # actionable cause.
+        if isinstance(result, tuple) and result and result[0] == "needs_mfa":
+            raise GarminAuthError(
+                "Garmin Connect requires a multi-factor authentication (MFA) code for this "
+                "account. StrideSync runs headless and cannot answer an interactive MFA "
+                "prompt — use a Garmin account with MFA disabled, or disable MFA for this "
+                "account in Garmin Connect account settings."
+            )
 
         if not self._api_client.is_authenticated:
             raise GarminAuthError("Garmin Connect login did not return valid tokens.")
