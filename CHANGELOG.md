@@ -66,6 +66,14 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `requests.exceptions.RequestException` (matching `garmin_client.py`'s `_TRANSPORT_ERRORS`) plus
   a catch-all for any other unexpected exception, always rendering a clear error page instead of
   crashing.
+- **`sync-scheduler` retried a fresh Garmin SSO login every `sync_interval_hours` even after
+  learning the account needs MFA** — an unbounded automated-login retry against Garmin's
+  unofficial API that PROJECT_PLAN.md's "no auto-retry storms" design guidance specifically
+  warns risks the account being flagged, and one that could never succeed anyway without the
+  one-time bootstrap. `GarminClient.login()` now persists a `.mfa_required` marker next to the
+  token files after the first such attempt and fails fast (no network call) on every subsequent
+  call while the marker is set, clearing it automatically once `bootstrap_login.py` or the web UI
+  completes the one-time login.
 
 ## [0.1.0] - 2026-07-04
 

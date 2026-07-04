@@ -18,6 +18,7 @@ v0.1's "inspect the resulting SQLite DB by hand" step, which is still open.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,15 @@ from garmy.core.exceptions import APIError, AuthError
 # failure mode described in PROJECT_PLAN.md's "known risk" section becomes a clean
 # GarminAuthError/GarminAPIError instead of an unhandled traceback.
 _TRANSPORT_ERRORS = (requests.exceptions.RequestException,)
+
+_MFA_REQUIRED_MARKER_NAME = ".mfa_required"
+
+_MFA_REQUIRED_MESSAGE = (
+    "Garmin Connect requires a multi-factor authentication (MFA) code for this account, and no "
+    "cached session was found. Run the one-time interactive login (`python3 -m "
+    "app.sync.bootstrap_login`, see DOCS.md) — scheduled syncs will then reuse that session, "
+    "refreshing it as needed, without requiring MFA again."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +180,7 @@ class GarminClient:
     def __init__(self, username: str, password: str, token_dir: Optional[str] = None) -> None:
         self._username = username
         self._password = password
+        self._token_dir = token_dir
         # token_dir persists OAuth1/OAuth2 tokens to disk (defaults under /data — see
         # Settings.garmin_token_dir) so a session survives process restarts. This is what makes
         # MFA accounts workable at all: see login()'s refresh-before-login preference below and
@@ -186,17 +197,28 @@ class GarminClient:
         first, from a previous login or bootstrap_login.py run, and only falls back to a fresh
         login if there is no usable session yet.
 
+        Once a fresh login has revealed that this account needs MFA, every subsequent call
+        fails fast locally (see `_MFA_REQUIRED_MARKER_NAME`) instead of repeating a fresh SSO
+        login attempt every `sync_interval_hours` forever — that attempt cannot succeed without
+        the one-time bootstrap anyway, and retrying it against Garmin's unofficial API on a
+        fixed schedule is exactly the "auto-retry storm" PROJECT_PLAN.md's known-risk section
+        warns could get the account flagged for suspicious activity. The marker is cleared
+        automatically the next time a session is found valid (i.e. after bootstrap_login.py or
+        the web UI completes).
+
         Raises:
             GarminAuthError: on bad credentials, required MFA with no cached session, or any
                 other auth failure (including the SSO-flow breakage described in
                 PROJECT_PLAN.md's known risk).
         """
         if self._auth_client.is_authenticated:
+            self._clear_mfa_required_marker()
             return  # valid cached session — nothing to do
 
         if self._auth_client.needs_refresh:
             try:
                 self._auth_client.refresh_tokens()
+                self._clear_mfa_required_marker()
                 return
             except AuthError:
                 pass  # cached session itself was revoked/invalid — fall through to fresh login
@@ -204,6 +226,9 @@ class GarminClient:
                 raise GarminAuthError(
                     f"Could not reach Garmin Connect to refresh session: {exc}"
                 ) from exc
+
+        if self._mfa_required_marker_set():
+            raise GarminAuthError(_MFA_REQUIRED_MESSAGE)
 
         try:
             result = self._api_client.login(self._username, self._password)
@@ -217,15 +242,44 @@ class GarminClient:
         # through to the generic "did not return valid tokens" error below, hiding the actual,
         # actionable cause.
         if isinstance(result, tuple) and result and result[0] == "needs_mfa":
-            raise GarminAuthError(
-                "Garmin Connect requires a multi-factor authentication (MFA) code for this "
-                "account, and no cached session was found. Run the one-time interactive login "
-                "(`python3 -m app.sync.bootstrap_login`, see DOCS.md) — scheduled syncs will "
-                "then reuse that session, refreshing it as needed, without requiring MFA again."
-            )
+            self._set_mfa_required_marker()
+            raise GarminAuthError(_MFA_REQUIRED_MESSAGE)
 
         if not self._auth_client.is_authenticated:
             raise GarminAuthError("Garmin Connect login did not return valid tokens.")
+
+        self._clear_mfa_required_marker()
+
+    def _mfa_marker_path(self) -> Optional[str]:
+        if not self._token_dir:
+            return None
+        return os.path.join(self._token_dir, _MFA_REQUIRED_MARKER_NAME)
+
+    def _mfa_required_marker_set(self) -> bool:
+        path = self._mfa_marker_path()
+        return bool(path) and os.path.exists(path)
+
+    def _set_mfa_required_marker(self) -> None:
+        path = self._mfa_marker_path()
+        if not path:
+            return
+        try:
+            os.makedirs(self._token_dir, exist_ok=True)  # type: ignore[arg-type]
+            with open(path, "w") as f:
+                f.write("MFA required as of the last fresh login attempt.\n")
+        except OSError as exc:
+            logger.warning("Could not persist MFA-required marker at %s: %s", path, exc)
+
+    def _clear_mfa_required_marker(self) -> None:
+        path = self._mfa_marker_path()
+        if not path:
+            return
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("Could not clear MFA-required marker at %s: %s", path, exc)
 
     def fetch_recent_activities(self, limit: int = 20) -> List[GarminActivity]:
         """Fetch the most recent activities, with full distance/pace/cadence detail.
