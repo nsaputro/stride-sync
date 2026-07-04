@@ -25,6 +25,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `python3 -m app.mcp.server` / `app.sync.scheduler` couldn't find a package called `app` (every
   module in this codebase imports itself as `app.xxx`). Changed to `COPY app/ ./app/` to
   preserve the package directory. Affects every install of `v0.1.0`.
+- **`rootfs/etc/cont-init.d/00-validate-config.sh` always reported credentials missing when run
+  standalone** (no real HA Supervisor), killing the container even with valid `options.json` —
+  found by the new CI container smoke test on the PR that fixed the bug above.
+  `bashio::config.has_value` calls out to the Supervisor API (`curl: Could not resolve host:
+  supervisor` outside a real HA install), so it always returned false standalone. Switched to
+  plain `bashio::config` (reads `/data/options.json` directly, works both standalone and under a
+  real Supervisor) + a shell emptiness check.
 
 ## [0.1.0] - 2026-07-04
 
