@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from starlette.testclient import TestClient
 
 from app.mfa_web import server as mfa_web_server
@@ -88,6 +89,35 @@ def test_start_wraps_auth_error(tmp_path):
     assert "bad credentials" in response.text
 
 
+def test_start_wraps_transport_error(tmp_path):
+    with patch("app.mfa_web.server.AuthClient") as mock_cls:
+        mock_auth = MagicMock()
+        mock_auth.is_authenticated = False
+        mock_auth.login.side_effect = requests.exceptions.ConnectionError("no route")
+        mock_cls.return_value = mock_auth
+
+        response = _client(tmp_path).post("/start")
+
+    assert response.status_code == 200
+    assert "Could not reach Garmin Connect" in response.text
+
+
+def test_start_never_returns_a_raw_500_on_unexpected_error(tmp_path):
+    # A real production incident: garmy raised something other than AuthError (e.g. an
+    # unexpected response shape from Garmin) and this route had no catch-all, so it crashed to
+    # Starlette's generic 500 page instead of a diagnosable message.
+    with patch("app.mfa_web.server.AuthClient") as mock_cls:
+        mock_auth = MagicMock()
+        mock_auth.is_authenticated = False
+        mock_auth.login.side_effect = ValueError("unexpected Garmin response shape")
+        mock_cls.return_value = mock_auth
+
+        response = _client(tmp_path).post("/start")
+
+    assert response.status_code == 200
+    assert "Login failed unexpectedly" in response.text
+
+
 def test_start_needs_mfa_then_verify_succeeds(tmp_path):
     with patch("app.mfa_web.server.AuthClient") as mock_cls:
         mock_auth = MagicMock()
@@ -122,6 +152,38 @@ def test_verify_wraps_auth_error(tmp_path):
 
     assert verify_response.status_code == 200
     assert "MFA verification failed" in verify_response.text
+
+
+def test_verify_wraps_transport_error(tmp_path):
+    with patch("app.mfa_web.server.AuthClient") as mock_cls:
+        mock_auth = MagicMock()
+        mock_auth.is_authenticated = False
+        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
+        mock_auth.resume_login.side_effect = requests.exceptions.Timeout("timed out")
+        mock_cls.return_value = mock_auth
+
+        client = _client(tmp_path)
+        client.post("/start")
+        verify_response = client.post("/verify", data={"code": "000000"})
+
+    assert verify_response.status_code == 200
+    assert "Could not reach Garmin Connect" in verify_response.text
+
+
+def test_verify_never_returns_a_raw_500_on_unexpected_error(tmp_path):
+    with patch("app.mfa_web.server.AuthClient") as mock_cls:
+        mock_auth = MagicMock()
+        mock_auth.is_authenticated = False
+        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
+        mock_auth.resume_login.side_effect = ValueError("unexpected Garmin response shape")
+        mock_cls.return_value = mock_auth
+
+        client = _client(tmp_path)
+        client.post("/start")
+        verify_response = client.post("/verify", data={"code": "000000"})
+
+    assert verify_response.status_code == 200
+    assert "Verification failed unexpectedly" in verify_response.text
 
 
 def test_verify_without_pending_flow_shows_error(tmp_path):

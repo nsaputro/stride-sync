@@ -28,6 +28,10 @@
   login, which would otherwise re-trigger MFA on every single sync. A new one-time interactive
   CLI, `python3 -m app.sync.bootstrap_login`, performs the first MFA login and persists the
   session to `garmin_token_dir` (`/data/.garmin_tokens`) for every scheduled sync to reuse.
+- **The MFA login web UI's "Log in to Garmin Connect" button could return a bare "Internal
+  Server Error"** instead of a clear message — it now handles network failures and other
+  unexpected errors the same way the rest of the add-on does, always showing a diagnosable error
+  page instead of crashing.
 
 ## [0.1.0] - 2026-07-04
 
