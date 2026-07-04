@@ -35,7 +35,43 @@ garmy_ua_override.apply()
 # raw `requests` exception. Caught alongside garmy's own AuthError/APIError below so every
 # failure mode described in PROJECT_PLAN.md's "known risk" section becomes a clean
 # GarminAuthError/GarminAPIError instead of an unhandled traceback.
-_TRANSPORT_ERRORS = (requests.exceptions.RequestException,)
+TRANSPORT_ERRORS = (requests.exceptions.RequestException,)
+
+
+def describe_transport_error(exc: Exception) -> str:
+    """Render a transport error with diagnostic detail beyond the bare exception message.
+
+    For an `HTTPError` (raised via `response.raise_for_status()`), the bare message is just
+    "<status> Client Error: ... for url: ...", which can't distinguish a Cloudflare-level block
+    (typically has a `cf-ray` header and an HTML challenge/block-page body) from a plain
+    application-level rejection from Garmin itself — a distinction worth knowing before deciding
+    whether a fix even belongs in this codebase at all (see PROJECT_PLAN.md's "known risk"
+    section). Selected headers plus a short body snippet are appended when a response is
+    available; never includes request headers/cookies/credentials.
+    """
+    detail = str(exc)
+    response = getattr(exc, "response", None)
+    if response is None:
+        return detail
+
+    extra = []
+    server = response.headers.get("server")
+    if server:
+        extra.append(f"server={server}")
+    cf_ray = response.headers.get("cf-ray")
+    if cf_ray:
+        extra.append(f"cf-ray={cf_ray}")
+    cf_mitigated = response.headers.get("cf-mitigated")
+    if cf_mitigated:
+        extra.append(f"cf-mitigated={cf_mitigated}")
+    body_snippet = (response.text or "").strip()[:200].replace("\n", " ")
+    if body_snippet:
+        extra.append(f"body={body_snippet!r}")
+
+    if not extra:
+        return detail
+    return f"{detail} ({', '.join(extra)})"
+
 
 _MFA_REQUIRED_MARKER_NAME = ".mfa_required"
 
@@ -226,9 +262,10 @@ class GarminClient:
                 return
             except AuthError:
                 pass  # cached session itself was revoked/invalid — fall through to fresh login
-            except _TRANSPORT_ERRORS as exc:
+            except TRANSPORT_ERRORS as exc:
                 raise GarminAuthError(
-                    f"Could not reach Garmin Connect to refresh session: {exc}"
+                    f"Could not reach Garmin Connect to refresh session: "
+                    f"{describe_transport_error(exc)}"
                 ) from exc
 
         if self._mfa_required_marker_set():
@@ -238,8 +275,10 @@ class GarminClient:
             result = self._api_client.login(self._username, self._password)
         except AuthError as exc:
             raise GarminAuthError(f"Garmin Connect login failed: {exc}") from exc
-        except _TRANSPORT_ERRORS as exc:
-            raise GarminAuthError(f"Could not reach Garmin Connect to login: {exc}") from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAuthError(
+                f"Could not reach Garmin Connect to login: {describe_transport_error(exc)}"
+            ) from exc
 
         # garmy doesn't raise when MFA is required and no prompt_mfa callback was given (we
         # never pass one) — it returns ("needs_mfa", state) instead. Left unchecked, this falls
@@ -298,9 +337,10 @@ class GarminClient:
             summaries = self._api_client.metrics.get("activities").list(limit=limit)
         except APIError as exc:
             raise GarminAPIError(f"Failed to fetch activity list: {exc}") from exc
-        except _TRANSPORT_ERRORS as exc:
+        except TRANSPORT_ERRORS as exc:
             raise GarminAPIError(
-                f"Could not reach Garmin Connect to list activities: {exc}"
+                f"Could not reach Garmin Connect to list activities: "
+                f"{describe_transport_error(exc)}"
             ) from exc
 
         activities: List[GarminActivity] = []
@@ -323,9 +363,10 @@ class GarminClient:
             raise GarminAPIError(
                 f"Failed to fetch laps for activity {activity_id}: {exc}"
             ) from exc
-        except _TRANSPORT_ERRORS as exc:
+        except TRANSPORT_ERRORS as exc:
             raise GarminAPIError(
-                f"Could not reach Garmin Connect to fetch laps for activity {activity_id}: {exc}"
+                f"Could not reach Garmin Connect to fetch laps for activity {activity_id}: "
+                f"{describe_transport_error(exc)}"
             ) from exc
 
         lap_dtos = (raw or {}).get("lapDTOs", [])
@@ -340,8 +381,9 @@ class GarminClient:
             raise GarminAPIError(
                 f"Failed to fetch detail for activity {activity_id}: {exc}"
             ) from exc
-        except _TRANSPORT_ERRORS as exc:
+        except TRANSPORT_ERRORS as exc:
             raise GarminAPIError(
-                f"Could not reach Garmin Connect to fetch detail for activity {activity_id}: {exc}"
+                f"Could not reach Garmin Connect to fetch detail for activity {activity_id}: "
+                f"{describe_transport_error(exc)}"
             ) from exc
         return detail if isinstance(detail, dict) else {}

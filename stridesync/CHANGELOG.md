@@ -41,6 +41,10 @@
   fine in a real browser — traced to a malformed, identical-across-every-install Android
   User-Agent string that made automated login requests easy for Garmin to single out. Replaced
   with a properly-formatted one (override via `GARMIN_ANDROID_USER_AGENT` if needed).
+- The User-Agent fix above didn't fully resolve every case of that same 401. Error messages now
+  include extra diagnostic detail when Garmin returns one (response headers, a short body
+  snippet), and the CLI MFA login (`bootstrap_login.py`) no longer crashes uncaught on this kind
+  of failure — it now reports it clearly like the web UI and scheduled sync already did.
 
 ## [0.1.0] - 2026-07-04
 

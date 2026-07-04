@@ -85,6 +85,16 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   (`GARMIN_ANDROID_USER_AGENT` env var to override further). Not guaranteed to be the complete
   fix — Cloudflare-class bot detection can also fingerprint at the TLS/connection level — but a
   concrete, low-risk thing to try first.
+- **The User-Agent fix above didn't fully resolve a real account's 401** — confirmed by live
+  retesting on a rebuilt image. Since the bare exception message alone can't tell a
+  Cloudflare-level block from a plain Garmin-side rejection, `garmin_client.py`'s error messages
+  now include diagnostic detail when a response is available (`server`/`cf-ray` headers, a short
+  body snippet), reused by the web UI, `bootstrap_login.py`, and the scheduler — to get real
+  signal on the next failure instead of guessing further.
+- **`bootstrap_login.py` (the CLI MFA login) crashed with an unhandled traceback on any
+  network/HTTP error** (e.g. the same Garmin SSO 401 above) — unlike the web UI and scheduled
+  sync, it only caught `garmy`'s `AuthError`, not transport-level failures. Now handles them the
+  same way as the other two entry points.
 
 ## [0.1.0] - 2026-07-04
 

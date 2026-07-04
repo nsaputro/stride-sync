@@ -13,6 +13,7 @@ from app.sync.garmin_client import (
     _normalize_activity,
     _normalize_lap,
     _pace_sec_per_km,
+    describe_transport_error,
 )
 
 
@@ -108,6 +109,47 @@ class TestNormalizeLap:
         assert lap.distance_meters == 1000.0
         assert lap.pace_sec_per_km == pytest.approx(1000.0 / 3.0)
         assert lap.average_cadence_spm == 172.0
+
+
+class TestDescribeTransportError:
+    def test_no_response_returns_bare_message(self):
+        exc = requests.exceptions.ConnectionError("connection reset")
+
+        assert describe_transport_error(exc) == "connection reset"
+
+    def test_response_with_cloudflare_headers_and_body_is_appended(self):
+        response = MagicMock()
+        response.headers = {"server": "cloudflare", "cf-ray": "abc123-SIN"}
+        response.text = "<html>Access denied</html>"
+        exc = requests.exceptions.HTTPError("401 Client Error: Unauthorized")
+        exc.response = response
+
+        described = describe_transport_error(exc)
+
+        assert described.startswith("401 Client Error: Unauthorized (")
+        assert "server=cloudflare" in described
+        assert "cf-ray=abc123-SIN" in described
+        assert "body='<html>Access denied</html>'" in described
+
+    def test_response_with_no_notable_headers_or_body_is_unchanged(self):
+        response = MagicMock()
+        response.headers = {}
+        response.text = ""
+        exc = requests.exceptions.HTTPError("500 Server Error")
+        exc.response = response
+
+        assert describe_transport_error(exc) == "500 Server Error"
+
+    def test_long_body_is_truncated(self):
+        response = MagicMock()
+        response.headers = {"server": "nginx"}
+        response.text = "x" * 500
+        exc = requests.exceptions.HTTPError("403 Forbidden")
+        exc.response = response
+
+        described = describe_transport_error(exc)
+
+        assert len(described) < 500 + 100
 
 
 class TestGarminClientLogin:
