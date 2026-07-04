@@ -13,6 +13,12 @@ url: "https://github.com/nsaputro/stride-sync"
 image: "ghcr.io/nsaputro/stride-sync/{arch}-stridesync"
 homeassistant: "2024.1.0"
 
+# No ingress: this add-on is API-only (a sync scheduler + an MCP server), with no web UI panel
+# for ingress to serve. MCP clients (Claude Desktop, etc.) reach the MCP server directly over
+# the network — ingress only proxies browser traffic through the HA frontend, which doesn't fit
+# an MCP client's connection model anyway. See PROJECT_PLAN.md milestone v0.4 for the reasoning;
+# revisit if a future milestone adds a browser-facing status/config panel.
+
 # MCP server — Streamable HTTP, reached remotely by MCP clients (e.g. via mcp-proxy)
 ports:
   8765/tcp: 8765
