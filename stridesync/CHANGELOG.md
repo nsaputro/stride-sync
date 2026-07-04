@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Pre-release/dev channel (install slug `stridesync_dev`, default host port `8766`) so fixes can
+  be verified on a real HA instance before being promoted to a stable release.
+
 ## [0.1.0] - 2026-07-04
 
 ### Added

@@ -1,0 +1,7 @@
+# Mirrors stridesync/build.yaml — the pre-release workflow builds from the same Dockerfile/app
+# code (context: stridesync/), this file only exists because HA reads build.yaml relative to
+# the add-on folder that owns each config.yaml.
+build_from:
+  aarch64: "ghcr.io/hassio-addons/base:18.0.1"
+  amd64: "ghcr.io/hassio-addons/base:18.0.1"
+squash: false
