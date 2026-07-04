@@ -227,7 +227,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("GARMIN_USERNAME and GARMIN_PASSWORD must be set")
 
     def make_client() -> GarminClient:
-        return GarminClient(settings.garmin_username, settings.garmin_password)
+        return GarminClient(
+            settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+        )
 
     if args.once:
         try:

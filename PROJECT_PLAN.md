@@ -119,16 +119,28 @@ Design implications:
   auth flow degrades the sync scheduler only — the MCP server keeps serving whatever was last
   successfully synced, with clear staleness info, rather than the whole add-on going down.
 
-**MFA/2FA accounts are not supported.** `garmy`'s SSO login doesn't raise an exception when an
-account requires MFA and no interactive prompt callback is supplied (which StrideSync, running
-headless, never supplies) — it silently returns a `("needs_mfa", state)` tuple instead. Left
-unchecked, `garmin_client.py`'s `login()` would fall through to a generic "did not return valid
-tokens" error, hiding the actual, actionable cause — this surfaced for real (a user with MFA
-enabled hit exactly this). Fixed: `login()` now detects that tuple explicitly and raises a
-specific `GarminAuthError` naming MFA as the cause. Supporting MFA properly would need a
-headless-appropriate flow (e.g. a `stridesync_mfa_code` config option the user fills in and
-restarts the add-on with) — out of scope unless requested; for now, document it as a hard
-requirement (MFA disabled) rather than pretend to support it.
+**MFA/2FA accounts are supported via a one-time interactive login, not automatically.**
+`garmy`'s SSO login doesn't raise an exception when an account requires MFA and no interactive
+prompt callback is supplied (which StrideSync, running headless, never supplies) — it silently
+returns a `("needs_mfa", state)` tuple instead. This surfaced for real (a user with MFA enabled
+hit exactly this, and their account can't have MFA disabled). Two changes fixed it properly
+rather than just reporting it more clearly:
+
+1. `GarminClient.login()` no longer calls a fresh SSO login on every sync — a fresh login always
+   re-runs the full flow, which would re-trigger MFA every single sync forever. It now checks
+   for a cached session first (`AuthClient.is_authenticated`), then a refreshable one
+   (`needs_refresh` → `refresh_tokens()`, which uses the long-lived OAuth1 token and does **not**
+   need MFA), and only falls back to a fresh SSO login if neither exists.
+2. `app/sync/bootstrap_login.py` — a one-time interactive CLI (`python3 -m
+   app.sync.bootstrap_login`, run via `docker exec` or HA's Terminal & SSH add-on) that performs
+   that first fresh login, prompts for the MFA code, and persists the resulting session to
+   `garmin_token_dir` (`/data/.garmin_tokens`) — the same location `login()` checks first. Every
+   scheduled sync afterward reuses/refreshes that session.
+
+A **web-based MFA entry flow** (through HA ingress, so no terminal/`docker exec` access is
+needed) is a natural next increment — flagged by the same user who hit this, since terminal
+access isn't something every HA user has set up. Not yet implemented; see the "no ingress"
+decision in the v0.4 milestone, which this would need to revisit.
 
 **Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
 surfaced in the wider unofficial-client ecosystem starting ~June 2026 —

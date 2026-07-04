@@ -1,9 +1,9 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 import requests
 from garmy import ActivitySummary
-from garmy.core.exceptions import APIError, LoginError
+from garmy.core.exceptions import APIError, AuthError, LoginError
 
 from app.sync.garmin_client import (
     GarminAPIError,
@@ -110,8 +110,65 @@ class TestNormalizeLap:
 
 
 class TestGarminClientLogin:
+    def test_login_skips_when_already_authenticated(self):
+        # A valid cached session (from a previous login or bootstrap_login.py run) — no API
+        # call should happen at all.
+        client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = True
+        client._api_client = MagicMock()
+
+        client.login()
+
+        client._api_client.login.assert_not_called()
+
+    def test_login_refreshes_when_session_expired_but_refreshable(self):
+        client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = True
+        client._api_client = MagicMock()
+
+        client.login()
+
+        client._auth_client.refresh_tokens.assert_called_once()
+        client._api_client.login.assert_not_called()
+
+    def test_login_falls_back_to_fresh_login_when_refresh_fails(self):
+        # The cached session itself was revoked/invalid server-side — refresh_tokens() raises,
+        # and login() should fall back to a fresh login rather than giving up.
+        client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        type(client._auth_client).is_authenticated = PropertyMock(side_effect=[False, True])
+        client._auth_client.needs_refresh = True
+        client._auth_client.refresh_tokens.side_effect = AuthError("refresh token revoked")
+        client._api_client = MagicMock()
+
+        client.login()  # should not raise
+
+        client._auth_client.refresh_tokens.assert_called_once()
+        client._api_client.login.assert_called_once_with("user@example.com", "hunter2")
+
+    def test_login_wraps_transport_error_during_refresh(self):
+        client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = True
+        client._auth_client.refresh_tokens.side_effect = requests.exceptions.ConnectionError(
+            "connection reset"
+        )
+        client._api_client = MagicMock()
+
+        with pytest.raises(GarminAuthError):
+            client.login()
+
+        client._api_client.login.assert_not_called()
+
     def test_login_wraps_auth_error(self):
         client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = False
         client._api_client = MagicMock()
         client._api_client.login.side_effect = LoginError("bad credentials")
 
@@ -120,30 +177,38 @@ class TestGarminClientLogin:
 
     def test_login_requires_valid_tokens(self):
         client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = False
         client._api_client = MagicMock()
         client._api_client.login.return_value = None
-        client._api_client.is_authenticated = False
 
         with pytest.raises(GarminAuthError):
             client.login()
 
-    def test_login_success(self):
+    def test_login_success_via_fresh_login(self):
         client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        type(client._auth_client).is_authenticated = PropertyMock(side_effect=[False, True])
+        client._auth_client.needs_refresh = False
         client._api_client = MagicMock()
-        client._api_client.is_authenticated = True
 
         client.login()  # should not raise
+
+        client._api_client.login.assert_called_once_with("user@example.com", "hunter2")
 
     def test_login_raises_clear_error_when_mfa_required(self):
         # garmy doesn't raise when the account needs MFA and no prompt_mfa callback was
         # given (we never pass one, since this runs headless) — it returns
         # ("needs_mfa", state) instead. This must surface as a specific, actionable
-        # GarminAuthError, not fall through to the generic "did not return valid tokens"
-        # message.
+        # GarminAuthError pointing at bootstrap_login.py, not the generic "did not return
+        # valid tokens" message.
         client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = False
         client._api_client = MagicMock()
         client._api_client.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        client._api_client.is_authenticated = False
 
         with pytest.raises(GarminAuthError, match="multi-factor authentication"):
             client.login()
@@ -153,6 +218,9 @@ class TestGarminClientLogin:
         # exceptions — a raw requests error must still surface as GarminAuthError, not an
         # unhandled traceback (see garmin_client.py module docstring / _TRANSPORT_ERRORS).
         client = GarminClient("user@example.com", "hunter2")
+        client._auth_client = MagicMock()
+        client._auth_client.is_authenticated = False
+        client._auth_client.needs_refresh = False
         client._api_client = MagicMock()
         client._api_client.login.side_effect = requests.exceptions.ProxyError(
             "Unable to connect to proxy"

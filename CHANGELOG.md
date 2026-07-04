@@ -40,13 +40,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   (and an empty string) as "unset" for every field and falls back to the documented default,
   instead of crashing.
 - **Login failed with a confusing generic error (`Garmin Connect login did not return valid
-  tokens`) for accounts with MFA/2FA enabled**: `garmy` doesn't raise an exception when MFA is
-  required and no interactive prompt callback is supplied (StrideSync never supplies one — it
-  runs headless) — it silently returns a `("needs_mfa", state)` tuple instead, which fell
-  through to the generic error. `garmin_client.py`'s `login()` now detects this and raises a
-  specific error naming MFA as the cause. **Accounts with MFA/2FA enabled are still not
-  supported** — see `PROJECT_PLAN.md`'s "Known risk" section — but the failure is now
-  actionable instead of mysterious.
+  tokens`) for accounts with MFA/2FA enabled**, and syncing didn't actually work for them at
+  all: `garmy` doesn't raise an exception when MFA is required and no interactive prompt
+  callback is supplied (StrideSync never supplies one — it runs headless) — it silently returns
+  a `("needs_mfa", state)` tuple instead. Fixed properly, not just reported more clearly:
+  `GarminClient.login()` now prefers a cached session (`AuthClient.is_authenticated`) or a
+  refreshed one (`needs_refresh` → `refresh_tokens()`, which doesn't need MFA) over a fresh SSO
+  login, which would otherwise re-trigger MFA on every single sync. A new one-time interactive
+  CLI, `python3 -m app.sync.bootstrap_login`, performs the first MFA login and persists the
+  session to `garmin_token_dir` (`/data/.garmin_tokens`) for every scheduled sync to reuse.
 
 ## [0.1.0] - 2026-07-04
 
