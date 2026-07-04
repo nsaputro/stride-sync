@@ -60,15 +60,25 @@ them locally.
 
 ### MCP server
 
-- Wraps [`garmy-mcp`](https://pypi.org/project/garmy-mcp/) (or an equivalent MCP tool/resource
-  layer built directly on the SQLite schema, if `garmy-mcp`'s data model doesn't line up with
-  what the sync service stores) with [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy).
+- Built with [`fastmcp`](https://gofastmcp.com) directly (`app/mcp/server.py`), exposing five
+  purpose-built tools (`recent_activities`, `activity_laps`, `pace_cadence_hr_trend`,
+  `training_load_summary`, `last_sync_status`) on top of `app/db/schema.sql`, rather than
+  [`garmy-mcp`](https://pypi.org/project/garmy-mcp/)'s bundled server — `garmy-mcp`'s
+  schema-specific tool (`get_health_summary`) queries a `daily_health_metrics` table that doesn't
+  exist in our schema, and this milestone wants purpose-built tools, not a generic
+  run-arbitrary-SQL tool. This is the "equivalent MCP tool/resource layer built directly on the
+  SQLite schema" fallback this section originally anticipated.
 - Exposes **Streamable HTTP transport**, not stdio — this add-on runs on the Home Assistant
   server, not on the same machine as the Claude client, so an stdio-piped subprocess isn't an
-  option. `mcp-proxy` bridges the stdio-based MCP server implementation to an HTTP endpoint
-  clients can reach over the network.
+  option. Modern `fastmcp` (the same library `garmy-mcp` itself depends on) serves Streamable
+  HTTP **natively** via `mcp.run(transport="http", ...)` — no separate `mcp-proxy` process runs
+  *inside* the add-on. (`mcp-proxy` is still used **client-side**, e.g. by Claude Desktop, to
+  bridge its local stdio-only integration to this remote HTTP endpoint — see §2. That is a
+  different process, on a different machine, doing a different job.)
 - Runs as its own **s6 service** (`rootfs/etc/services.d/mcp-server/run`) on a **configurable
-  port** (default `8765`).
+  port** (default `8765`), reading the sync scheduler's SQLite DB over a **read-only** connection
+  (`sqlite3.connect("file:...?mode=ro", uri=True)`) — the MCP server must never be able to write
+  to the sync scheduler's database.
 - **Read-only**: exposes tools/resources for querying activities, trends, and summaries. No
   write-back to Garmin is planned initially (see Milestones — a future write-back milestone would
   need explicit user confirmation flows and is out of scope for v1.0).
@@ -195,16 +205,24 @@ tools/resources should appear in a new conversation.
   keeps running rather than crashing the service — both as a unit test
   (`test_auth_failure_does_not_crash_the_loop`) and live via the CLI
 
-### v0.3 — MCP server over HTTP ⬜
+### v0.3 — MCP server over HTTP 🔄
 
-- ⬜ `app/mcp/server.py` — `garmy-mcp` (or equivalent) wired to the sync scheduler's SQLite DB
-- ⬜ `mcp-proxy` wrapping the server, exposing Streamable HTTP on `mcp_port` (default `8765`)
-- ⬜ `rootfs/etc/services.d/mcp-server/run` — s6 service for the MCP server, independent of
-  `sync-scheduler`
-- ⬜ Tested end-to-end with Claude Desktop using the config snippet in §2, against a container
-  run standalone (not yet installed into HA)
-- ⬜ MCP tools cover: recent activities, pace/cadence/HR trend over a date range, training load
-  summary, and last-sync status
+- ✅ `app/mcp/server.py` — built directly on `fastmcp`, wired to the sync scheduler's SQLite DB
+  over a read-only connection (see Architecture §1 for why `garmy-mcp`'s bundled server wasn't
+  reused as-is)
+- ✅ Streamable HTTP on `mcp_port` (default `8765`), served natively by `fastmcp`
+  (`transport="http"`) — no `mcp-proxy` process runs inside the add-on (see Architecture §1)
+- ✅ `rootfs/etc/services.d/mcp-server/run` — s6 service for the MCP server, independent of
+  `sync-scheduler`, now exporting `mcp_port`/`log_level` from `bashio::config`
+- 🔄 Tested end-to-end **with a real MCP client over real Streamable HTTP** (`fastmcp.Client`
+  connecting to a live `python3 -m app.mcp.server` subprocess, listing tools and calling all
+  five) — confirmed the full wire protocol works. **Not tested with Claude Desktop itself** — no
+  desktop environment in this sandbox to run it; the config snippet in §2 is unverified against
+  the real client.
+- ✅ MCP tools cover: recent activities (`recent_activities`), pace/cadence/HR trend over a date
+  range (`pace_cadence_hr_trend`), training load summary (`training_load_summary`), and
+  last-sync status (`last_sync_status`) — plus `activity_laps` for per-lap detail within one
+  activity
 
 ### v0.4 — HA Supervisor add-on packaging ⬜
 

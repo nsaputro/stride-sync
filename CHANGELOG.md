@@ -38,3 +38,9 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   promptly instead of blocking for up to `sync_interval_hours`.
 - `rootfs/etc/services.d/sync-scheduler/run` now exports `garmin_username`, `garmin_password`,
   `sync_interval_hours`, and `log_level` from `bashio::config` as environment variables.
+- MCP server (`app/mcp/server.py`), built directly on `fastmcp`: five tools —
+  `recent_activities`, `activity_laps`, `pace_cadence_hr_trend`, `training_load_summary`, and
+  `last_sync_status` — served over Streamable HTTP on `mcp_port` (default `8765`), reading the
+  sync scheduler's SQLite DB through a read-only connection. Served natively by `fastmcp`
+  (`transport="http"`) — no `mcp-proxy` process runs inside the add-on.
+- `rootfs/etc/services.d/mcp-server/run` now exports `mcp_port`/`log_level` from `bashio::config`.

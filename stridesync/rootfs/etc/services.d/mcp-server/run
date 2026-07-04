@@ -1,8 +1,16 @@
 #!/usr/bin/with-contenv bashio
-# s6 service: serves synced activity data over MCP (Streamable HTTP via mcp-proxy).
-# See app/mcp/server.py and PROJECT_PLAN.md §1 (MCP server) / §2 (MCP Connection).
+# s6 service: serves synced activity data over MCP (Streamable HTTP, served natively by
+# fastmcp — see app/mcp/server.py module docstring for why no mcp-proxy runs in-container).
+# See PROJECT_PLAN.md §1 (MCP server) / §2 (MCP Connection).
 
-bashio::log.info "Starting StrideSync MCP server..."
+MCP_PORT=$(bashio::config 'mcp_port')
+LOG_LEVEL=$(bashio::config 'log_level')
+
+export MCP_PORT
+export LOG_LEVEL
+export STRIDESYNC_DB_PATH="/data/stridesync.db"
+
+bashio::log.info "Starting StrideSync MCP server on port ${MCP_PORT}..."
 
 cd /app
 exec python3 -m app.mcp.server
