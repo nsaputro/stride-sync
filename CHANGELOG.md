@@ -44,3 +44,9 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   sync scheduler's SQLite DB through a read-only connection. Served natively by `fastmcp`
   (`transport="http"`) — no `mcp-proxy` process runs inside the add-on.
 - `rootfs/etc/services.d/mcp-server/run` now exports `mcp_port`/`log_level` from `bashio::config`.
+
+### Changed
+- `icon.png`/`logo.png` replaced with a generated runner-glyph placeholder (correct dimensions,
+  no longer a 1×1 scaffolding stub).
+- `stridesync/config.yaml` now documents why no `ingress:` is declared (the add-on is API-only,
+  with no browser-facing web UI panel).

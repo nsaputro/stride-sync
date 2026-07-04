@@ -20,3 +20,8 @@ Versions match `config.yaml` and the GitHub release tags.
 - MCP server: query your synced activities from Claude or any MCP client over Streamable HTTP on
   `mcp_port` (default `8765`/`/mcp`) — recent activities, per-lap splits, pace/cadence/HR trends,
   training load summaries, and last-sync status.
+- Add-on icon and logo.
+
+### Changed
+- No ingress panel — StrideSync is API-only (sync scheduler + MCP server), reachable directly
+  over the network rather than through the HA sidebar.

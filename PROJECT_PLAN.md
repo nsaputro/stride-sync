@@ -224,19 +224,30 @@ tools/resources should appear in a new conversation.
   last-sync status (`last_sync_status`) — plus `activity_laps` for per-lap detail within one
   activity
 
-### v0.4 — HA Supervisor add-on packaging ⬜
+### v0.4 — HA Supervisor add-on packaging 🔄
 
-- ⬜ `stridesync/config.yaml` finalized: `options` + `schema` for all five settings in §1
-- ⬜ `stridesync/build.yaml` multi-arch (`aarch64`, `amd64`) pinned to a specific
-  `ghcr.io/hassio-addons/base` tag
-- ⬜ `icon.png` (128×128) and `logo.png` (250×100) — real artwork, replacing scaffolding
-  placeholders
-- ⬜ Ingress evaluated: if a status/config UI panel is added, wire it through HA ingress; if the
-  add-on stays API-only (MCP + maybe a health-check page), document why ingress is skipped
-- ⬜ `repository.yaml` verified against this add-on repo added as a custom repository in a real
-  HA instance (**Settings → Add-ons → Add-on Store → ⋮ → Repositories**)
-- ⬜ Full install-from-repository flow tested: add repo → install → configure options → start →
-  confirm both s6 services come up healthy in the HA add-on log viewer
+- ✅ `stridesync/config.yaml` finalized: `options` + `schema` for all five settings in §1
+- ✅ `stridesync/build.yaml` multi-arch (`aarch64`, `amd64`) pinned to a specific
+  `ghcr.io/hassio-addons/base` tag (`18.0.1`) — implicitly verified: CI's Docker build test job
+  has been building against this exact tag since v0.1 and passing on every PR
+- ✅ `icon.png` (128×128) and `logo.png` (250×100) — a simple generated runner-glyph placeholder
+  (flat teal background, white pictogram, "StrideSync" wordmark on the logo), replacing the 1×1
+  scaffolding PNGs. Not professional artwork — reasonable to swap for real branding later, but no
+  longer a placeholder that would look broken in the add-on store.
+- ✅ Ingress evaluated: **skipped, documented in `config.yaml`**. StrideSync is API-only (a sync
+  scheduler + an MCP server) with no web UI panel — ingress only proxies *browser* traffic
+  through the HA frontend, which doesn't fit how MCP clients connect (they reach the MCP server
+  directly over the network, not through HA's UI). Revisit if a future milestone adds a
+  browser-facing status/config panel.
+- 🔄 `repository.yaml` is present and yamllint-clean, but **not verified against a real HA
+  instance** — this sandbox has no Home Assistant Supervisor to add the repository to. Add
+  `https://github.com/nsaputro/stride-sync` under **Settings → Add-ons → Add-on Store → ⋮ →
+  Repositories** on a real HA instance to confirm HA recognizes it as a valid add-on source.
+- ⬜ Full install-from-repository flow — **not done**. Needs a real HA instance and (until a
+  release is tagged, see v1.0) a locally built image, since `stridesync/config.yaml`'s `image:`
+  field points at a GHCR path with no pushed images yet. This is the main remaining gap before
+  the add-on can genuinely be called "released" — see the Getting Started section for the
+  standalone `docker build`/`docker run` steps that substitute for it pre-release.
 
 ### v1.0 — Documented, versioned, changelog-tracked release ⬜
 
