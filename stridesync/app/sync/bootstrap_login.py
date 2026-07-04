@@ -27,6 +27,7 @@ from garmy import AuthClient
 from garmy.core.exceptions import AuthError
 
 from app.config import Settings
+from app.sync import mfa_login
 
 
 def main() -> int:
@@ -38,24 +39,23 @@ def main() -> int:
 
     auth_client = AuthClient(token_dir=settings.garmin_token_dir)
 
-    if auth_client.is_authenticated:
-        print(f"Already have a valid cached session in {settings.garmin_token_dir} — nothing to do.")
-        return 0
-
     try:
-        result = auth_client.login(
-            settings.garmin_username, settings.garmin_password, return_on_mfa=True
+        result = mfa_login.start_login(
+            auth_client, settings.garmin_username, settings.garmin_password
         )
     except AuthError as exc:
         print(f"Login failed: {exc}", file=sys.stderr)
         return 1
 
-    if isinstance(result, tuple) and result and result[0] == "needs_mfa":
-        mfa_state = result[1]
+    if isinstance(result, mfa_login.LoginResult) and result.already_authenticated:
+        print(f"Already have a valid cached session in {settings.garmin_token_dir} — nothing to do.")
+        return 0
+
+    if isinstance(result, mfa_login.NeedsMfa):
         print("Garmin sent a multi-factor authentication code to your registered device/email.")
         mfa_code = input("Enter the MFA code: ").strip()
         try:
-            auth_client.resume_login(mfa_code, mfa_state)
+            mfa_login.resume_login(auth_client, mfa_code, result.mfa_state)
         except AuthError as exc:
             print(f"MFA verification failed: {exc}", file=sys.stderr)
             return 1

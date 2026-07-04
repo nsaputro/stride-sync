@@ -2,7 +2,7 @@ name: "StrideSync (dev)"
 description: >-
   [DEV CHANNEL] Syncs Garmin Connect running data and exposes it to Claude via MCP for
   conversational analysis — cadence, pace, heart-rate trends, training load.
-version: "0.1.1b1"
+version: "0.2.0b1"
 slug: "stridesync_dev"
 init: false
 arch:
@@ -14,7 +14,11 @@ url: "https://github.com/nsaputro/stride-sync"
 image: "ghcr.io/nsaputro/stride-sync/{arch}-stridesync"
 homeassistant: "2024.1.0"
 
-# No ingress — see stridesync/config.yaml for the reasoning (unchanged for the dev channel).
+# Ingress: the MFA login UI — see stridesync/config.yaml for the reasoning.
+ingress: true
+ingress_port: 8767
+panel_icon: mdi:run
+panel_title: StrideSync (dev)
 
 # Host port offset by 1 from stable (8765) so both can run installed side by side.
 ports:

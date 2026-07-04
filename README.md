@@ -40,11 +40,14 @@ cat > .dev-data/options.json <<'EOF'
 }
 EOF
 
-docker run --rm -it -p 8765:8765 -v "$(pwd)/.dev-data:/data" stridesync-dev
+docker run --rm -it -p 8765:8765 -p 8767:8767 -v "$(pwd)/.dev-data:/data" stridesync-dev
 ```
 
 Then point an MCP client at `http://localhost:8765/mcp` — see
 [`PROJECT_PLAN.md` §2](PROJECT_PLAN.md#2-mcp-connection) for the Claude Desktop config snippet.
+
+For an MFA/2FA account, open `http://localhost:8767/` for the one-time login UI (this is what
+real HA installs reach through the add-on's ingress panel instead — see the MFA section below).
 
 ## Installation (once released)
 
@@ -75,10 +78,11 @@ updated. When this happens, StrideSync fails loudly in the add-on log and report
 through the MCP server (`last_sync_status` tool) rather than silently serving stale data as if it
 were current. See `PROJECT_PLAN.md`'s "Known risk" section for the full design rationale.
 
-**Accounts with MFA/2FA enabled** need a one-time interactive login: if sync fails asking for
-MFA, run `docker exec -it <container> python3 -m app.sync.bootstrap_login` (or, on a real HA
+**Accounts with MFA/2FA enabled** need a one-time interactive login — either via the add-on's
+ingress web UI (StrideSync panel in the HA sidebar → **Log in to Garmin Connect**) or, without a
+real HA instance, `docker exec -it <container> python3 -m app.sync.bootstrap_login` (on a real HA
 install, `ha addons exec <slug> python3 -m app.sync.bootstrap_login` via the Terminal & SSH
-add-on), enter the code Garmin sends you, and every scheduled sync afterward reuses that session
+add-on). Enter the code Garmin sends you, and every scheduled sync afterward reuses that session
 without needing MFA again. See `DOCS.md` for details.
 
 ## License
