@@ -15,6 +15,9 @@
 - Fixed a crash when any schema-validated option (`sync_interval_hours`, `mcp_port`,
   `log_level`) came through as the literal text `"null"` outside a real Supervisor — now falls
   back to the documented default instead.
+- Login now reports a clear, specific error for Garmin accounts with MFA/2FA enabled instead of
+  a confusing generic failure. **MFA/2FA accounts are still not supported** — StrideSync runs
+  headless with no way to answer an interactive MFA prompt.
 
 ## [0.1.0] - 2026-07-04
 

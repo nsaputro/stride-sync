@@ -41,6 +41,12 @@ the underlying library is updated. When this happens, StrideSync fails loudly in
 and reports sync staleness through the MCP server rather than silently serving stale data as if
 it were current.
 
+**Accounts with multi-factor authentication (MFA/2FA) enabled are not supported.** StrideSync
+runs headless with no way to prompt for an MFA code. If your Garmin account has MFA enabled,
+login fails with a clear error in the log (`Garmin Connect requires a multi-factor
+authentication (MFA) code for this account...`) rather than a confusing generic failure — use an
+account with MFA disabled, or disable MFA on this account.
+
 ## Data
 
 Activity data is stored in `/data/stridesync.db` (SQLite). This file persists across add-on
