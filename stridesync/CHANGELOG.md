@@ -45,6 +45,11 @@
   include extra diagnostic detail when Garmin returns one (response headers, a short body
   snippet), and the CLI MFA login (`bootstrap_login.py`) no longer crashes uncaught on this kind
   of failure — it now reports it clearly like the web UI and scheduled sync already did.
+- **Confirmed root cause of the SSO 401**: Garmin's Cloudflare bot management, blocking at the
+  TLS/connection level — the same change that broke every unofficial Garmin client ecosystem-wide
+  in March 2026 (deprecating `garth`). The login flow now impersonates a real browser's TLS
+  fingerprint (via a new `curl_cffi` dependency) rather than just its headers, matching the fix
+  other Garmin Connect tools adopted for this exact issue.
 
 ## [0.1.0] - 2026-07-04
 

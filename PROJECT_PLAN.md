@@ -151,21 +151,38 @@ above, so both entry points implement the flow exactly once. Login state (the pe
 `("needs_mfa", state)` tuple) lives in a single in-process slot — correct because there is
 exactly one Garmin account per add-on install — rather than a per-visitor session store.
 
-**Confirmed against `garmy` via live testing:** a real account hit `401 Client Error: Unauthorized`
-on the plain SSO signin GET (`https://sso.garmin.com/sso/signin?id=gauth-widget...`) — *before*
-credentials were even submitted. Copying the identical URL into a real mobile browser, on the
-same account/network, succeeded instantly and completed the full login (including MFA). That
-isolates the cause to *how* the request is made, not the URL or account, and traces to `garmy`'s
-Android User-Agent (`garmy.core.config.UserAgents.ANDROID_APP`): it's the literal Android package
-name `"com.garmin.android.apps.connectmobile"`, not a real User-Agent string (unlike garmy's own
-correctly-formatted iOS constant, `"GCM-iOS-5.12.24"`) — and it's identical across every garmy
-install, an easy fingerprint for Garmin/Cloudflare's bot detection to single out. `garmy` doesn't
-expose a supported way to override this (its public `set_config()` only reaches one of the two
-places this UA is read from — see `app/sync/garmy_ua_override.py`'s module docstring for the
-full mechanics), so `garmy_ua_override.apply()` patches both, called once per process by every
-entry point that talks to Garmin. Not guaranteed to be the *entire* fix — Cloudflare-class bot
-detection can also fingerprint at the TLS/connection level, which no header change can address —
-but it's a concrete, low-risk thing to try before assuming a deeper library change is needed.
+**Confirmed against `garmy` via live testing — Garmin's Cloudflare bot management, not an
+application-level rejection.** A real account hit `401 Client Error: Unauthorized` on the plain
+SSO signin GET (`https://sso.garmin.com/sso/signin?id=gauth-widget...`) — *before* credentials
+were even submitted. Copying the identical URL into a real mobile browser, on the same
+account/network, succeeded instantly and completed the full login (including MFA). Two fixes,
+in sequence, both needed:
+
+1. `garmy`'s Android User-Agent (`garmy.core.config.UserAgents.ANDROID_APP`) is the literal
+   Android package name `"com.garmin.android.apps.connectmobile"`, not a real User-Agent string
+   (unlike garmy's own correctly-formatted iOS constant, `"GCM-iOS-5.12.24"`) — and identical
+   across every garmy install, an easy fingerprint to single out. `garmy` doesn't expose a
+   supported way to override this (its public `set_config()` only reaches one of the two places
+   this UA is read from — see `app/sync/garmy_ua_override.py`'s module docstring), so
+   `garmy_ua_override.apply()` patches both. **This alone did not resolve it** — confirmed by
+   live retesting on a rebuilt image.
+2. Retesting with enhanced error diagnostics (`describe_transport_error()` in
+   `garmin_client.py`, appending response headers/body to transport-error messages) confirmed
+   the real cause: `server=cloudflare`, a `cf-ray` header, and an HTML body with `class="no-js"`
+   — a genuine Cloudflare bot-challenge page, which no amount of header tweaking can defeat since
+   Cloudflare's bot management checks the TLS/JA3 handshake fingerprint itself, before any HTTP
+   request is even sent. This is the same event already known ecosystem-wide: Garmin put
+   Cloudflare in front of SSO in March 2026, which deprecated `garth` entirely (its maintainer
+   couldn't work around it) and forced `python-garminconnect` to adopt `curl_cffi` (a
+   `requests`-compatible client that can impersonate a real browser's TLS fingerprint) to stay
+   working. `app/sync/garmy_tls_impersonation.py` applies the same fix to `garmy`'s SSO login
+   flow specifically (not `APIClient`'s ordinary data-fetch requests, which aren't gated behind
+   this rule) — see that module's docstring for the two `garmy`-internals compatibility gaps it
+   has to patch around (`GarminOAuth1Session`'s `parent.adapters` access, and
+   `curl_cffi`'s exception types not being `requests` exception subclasses).
+
+Still not verified end-to-end against a live account from this environment (no route to
+`garmin.com` here) — awaiting confirmation from a real HA install.
 
 **Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
 surfaced in the wider unofficial-client ecosystem starting ~June 2026 —

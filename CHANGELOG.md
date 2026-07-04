@@ -95,6 +95,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   network/HTTP error** (e.g. the same Garmin SSO 401 above) — unlike the web UI and scheduled
   sync, it only caught `garmy`'s `AuthError`, not transport-level failures. Now handles them the
   same way as the other two entry points.
+- **Root cause of the SSO 401, finally confirmed**: the new diagnostic detail above showed
+  `server=cloudflare` and a `cf-ray` header with an HTML challenge-page body — this is Garmin's
+  Cloudflare bot management blocking the request at the TLS/connection level, the same
+  ecosystem-wide event that deprecated `garth` entirely in March 2026 and forced
+  `python-garminconnect` to adopt TLS-fingerprint impersonation (`curl_cffi`) to keep working. No
+  header change (like the User-Agent fix above) can defeat this. New
+  `app/sync/garmy_tls_impersonation.py` applies the same `curl_cffi` fix to `garmy`'s SSO login
+  flow specifically (a new dependency, `GARMIN_TLS_IMPERSONATE` env var to override the
+  impersonated browser).
 
 ## [0.1.0] - 2026-07-04
 
