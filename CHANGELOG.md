@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-04
+
 ### Added
 - Initial repository scaffolding: `CLAUDE.md`, `PROJECT_PLAN.md`, and the `stridesync/` add-on
   folder layout (`config.yaml`, `build.yaml`, `Dockerfile`, `rootfs/`, `DOCS.md`, `CHANGELOG.md`,
@@ -59,3 +61,6 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   (`compare/v0.0.0...vX.Y.Z` — that tag was never created) and duplicated the version's
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
+
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nsaputro/stride-sync/releases/tag/v0.1.0
