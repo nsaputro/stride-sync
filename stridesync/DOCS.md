@@ -44,18 +44,29 @@ it were current.
 ## Accounts with MFA/2FA enabled
 
 StrideSync runs headless, so a scheduled sync can't answer an interactive MFA prompt — but MFA
-accounts are supported via a **one-time interactive login**. If sync fails with `Garmin Connect
-requires a multi-factor authentication (MFA) code for this account...`, run:
+accounts are supported via a **one-time interactive login**, in either of two ways:
+
+### Option A: the add-on's web UI (no terminal needed)
+
+Open the **StrideSync** panel in the Home Assistant sidebar (added by this add-on's ingress
+page) and click **Log in to Garmin Connect**. If your account needs an MFA code, you'll be
+prompted for it right there.
+
+### Option B: terminal / `docker exec`
+
+If sync fails with `Garmin Connect requires a multi-factor authentication (MFA) code for this
+account...`, run:
 
 ```bash
 docker exec -it <container> python3 -m app.sync.bootstrap_login
 ```
 
 (on a real HA install, use the **Terminal & SSH** add-on: `ha addons exec <slug> python3 -m
-app.sync.bootstrap_login`). Enter the MFA code Garmin sends you when prompted. The resulting
-session is saved to `/data/.garmin_tokens` — every scheduled sync afterward reuses and refreshes
-that session without requiring MFA again, until the underlying session is itself revoked or
-expires, at which point re-run the bootstrap login.
+app.sync.bootstrap_login`). Enter the MFA code Garmin sends you when prompted.
+
+Either way, the resulting session is saved to `/data/.garmin_tokens` — every scheduled sync
+afterward reuses and refreshes that session without requiring MFA again, until the underlying
+session is itself revoked or expires, at which point log in again (either option above).
 
 ## Data
 

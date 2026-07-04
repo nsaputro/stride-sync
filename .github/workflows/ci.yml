@@ -179,7 +179,7 @@ jobs:
       # services inside it actually start. v0.1.0 shipped with a Dockerfile bug
       # (COPY app/ . flattened the app/ package into WORKDIR, so `python3 -m app.mcp.server`
       # couldn't find a package called "app") that this build-only test never caught. This step
-      # actually runs the built image and checks both services come up without crashing.
+      # actually runs the built image and checks all s6 services come up without crashing.
       - name: Run container smoke test
         run: |
           mkdir -p /tmp/stridesync-smoke-data
@@ -195,6 +195,7 @@ jobs:
 
           CONTAINER_ID=$(docker run -d \
             -p 18765:8765 \
+            -p 18767:8767 \
             -v /tmp/stridesync-smoke-data:/data \
             stridesync-ha:ci)
 
@@ -228,13 +229,24 @@ jobs:
             echo "MCP server responded with HTTP $HTTP_CODE (server is listening)"
           fi
 
+          # MFA login ingress UI (app/mfa_web/server.py) — same "any HTTP response proves it's
+          # listening" check as the MCP server above.
+          MFA_HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:18767/)
+          MFA_CURL_EXIT=$?
+          if [ "$MFA_CURL_EXIT" -ne 0 ]; then
+            echo "::error::MFA login web UI unreachable on port 18767 (curl exit code $MFA_CURL_EXIT) — see logs above"
+            FAILED=1
+          else
+            echo "MFA login web UI responded with HTTP $MFA_HTTP_CODE (server is listening)"
+          fi
+
           docker stop "$CONTAINER_ID" >/dev/null
           docker rm "$CONTAINER_ID" >/dev/null
 
           if [ "$FAILED" -eq 1 ]; then
             exit 1
           fi
-          echo "Container smoke test passed: both s6 services started without crashing."
+          echo "Container smoke test passed: all three s6 services started without crashing."
 
   # ── Required gate ────────────────────────────────────────────────────────────
   # This is the ONLY job to add as a required status check in branch protection.

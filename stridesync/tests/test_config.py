@@ -71,3 +71,19 @@ def test_from_env_garmin_token_dir_override(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.garmin_token_dir == "/tmp/custom_tokens"
+
+
+def test_from_env_mfa_web_port_default(monkeypatch):
+    monkeypatch.delenv("MFA_WEB_PORT", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.mfa_web_port == 8767
+
+
+def test_from_env_mfa_web_port_override(monkeypatch):
+    monkeypatch.setenv("MFA_WEB_PORT", "9001")
+
+    settings = Settings.from_env()
+
+    assert settings.mfa_web_port == 9001

@@ -23,6 +23,7 @@ class Settings:
     log_level: str
     db_path: str
     garmin_token_dir: str
+    mfa_web_port: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -35,6 +36,7 @@ class Settings:
             log_level=_str_env("LOG_LEVEL", "info"),
             db_path=_str_env("STRIDESYNC_DB_PATH", "/data/stridesync.db"),
             garmin_token_dir=_str_env("GARMIN_TOKEN_DIR", "/data/.garmin_tokens"),
+            mfa_web_port=_int_env("MFA_WEB_PORT", 8767),
         )
 
 

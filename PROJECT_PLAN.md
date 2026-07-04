@@ -137,10 +137,14 @@ rather than just reporting it more clearly:
    `garmin_token_dir` (`/data/.garmin_tokens`) — the same location `login()` checks first. Every
    scheduled sync afterward reuses/refreshes that session.
 
-A **web-based MFA entry flow** (through HA ingress, so no terminal/`docker exec` access is
-needed) is a natural next increment — flagged by the same user who hit this, since terminal
-access isn't something every HA user has set up. Not yet implemented; see the "no ingress"
-decision in the v0.4 milestone, which this would need to revisit.
+A **web-based MFA entry flow** through HA ingress — flagged by the same user who hit this, since
+terminal access isn't something every HA user has set up — is now implemented too:
+`app/mfa_web/server.py`, a small Starlette app reached at the add-on's ingress panel
+(`ingress: true`/`ingress_port` in `config.yaml`, revisiting the v0.4 milestone's original "no
+ingress" decision). It shares `app/sync/mfa_login.py`'s login/resume logic with the CLI bootstrap
+above, so both entry points implement the flow exactly once. Login state (the pending
+`("needs_mfa", state)` tuple) lives in a single in-process slot — correct because there is
+exactly one Garmin account per add-on install — rather than a per-visitor session store.
 
 **Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
 surfaced in the wider unofficial-client ecosystem starting ~June 2026 —
@@ -279,11 +283,11 @@ tools/resources should appear in a new conversation.
   (flat teal background, white pictogram, "StrideSync" wordmark on the logo), replacing the 1×1
   scaffolding PNGs. Not professional artwork — reasonable to swap for real branding later, but no
   longer a placeholder that would look broken in the add-on store.
-- ✅ Ingress evaluated: **skipped, documented in `config.yaml`**. StrideSync is API-only (a sync
-  scheduler + an MCP server) with no web UI panel — ingress only proxies *browser* traffic
-  through the HA frontend, which doesn't fit how MCP clients connect (they reach the MCP server
-  directly over the network, not through HA's UI). Revisit if a future milestone adds a
-  browser-facing status/config panel.
+- ✅ Ingress: **revisited and added**, for exactly one browser-facing page — the one-time Garmin
+  MFA login (`app/mfa_web/server.py`, see §1's "Known risk" section), for HA users without
+  terminal/`docker exec` access. Originally skipped in this milestone (MCP clients reach the MCP
+  server directly over the network, not through HA's UI, so ingress didn't fit that connection
+  model) — that reasoning still holds for the MCP server itself, which has no ingress route.
 - 🔄 `repository.yaml` is present and yamllint-clean, but **not verified against a real HA
   instance** — this sandbox has no Home Assistant Supervisor to add the repository to. Add
   `https://github.com/nsaputro/stride-sync` under **Settings → Add-ons → Add-on Store → ⋮ →

@@ -1,0 +1,16 @@
+#!/usr/bin/with-contenv bashio
+# s6 service: ingress web UI for the one-time Garmin MFA login (app/mfa_web/server.py) — an
+# alternative to `python3 -m app.sync.bootstrap_login` for HA users without terminal/`docker
+# exec` access. See PROJECT_PLAN.md §1, "Known risk" section.
+
+LOG_LEVEL=$(bashio::config 'log_level')
+
+export LOG_LEVEL
+# Fixed internal port, matching config.yaml's ingress_port — not a user-configurable option
+# (ingress traffic is reached through HA's own proxy, so there's nothing for a user to set).
+export MFA_WEB_PORT="8767"
+
+bashio::log.info "Starting StrideSync MFA login web UI on port ${MFA_WEB_PORT}..."
+
+cd /app
+exec python3 -m app.mfa_web.server

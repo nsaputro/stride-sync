@@ -26,6 +26,7 @@ def make_settings(tmp_path) -> Settings:
         log_level="info",
         db_path=str(tmp_path / "stridesync.db"),
         garmin_token_dir=str(tmp_path / "garmin_tokens"),
+        mfa_web_port=8767,
     )
 
 

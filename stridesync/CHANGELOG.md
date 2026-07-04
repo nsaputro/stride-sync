@@ -5,6 +5,9 @@
 ### Added
 - Pre-release/dev channel (install slug `stridesync_dev`, default host port `8766`) so fixes can
   be verified on a real HA instance before being promoted to a stable release.
+- **Ingress web UI for the one-time Garmin MFA login**: a StrideSync panel now appears in the HA
+  sidebar with a "Log in to Garmin Connect" button — an alternative to the `docker exec`-based
+  CLI bootstrap (`python3 -m app.sync.bootstrap_login`) for users without terminal access.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both

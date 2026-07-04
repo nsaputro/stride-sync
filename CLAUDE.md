@@ -136,6 +136,7 @@ EOF
 
 docker run --rm -it \
   -p 8765:8765 \
+  -p 8767:8767 \
   -v "$(pwd)/.dev-data:/data" \
   stridesync-dev
 ```
@@ -144,6 +145,8 @@ docker run --rm -it \
   yourself, as shown above.
 - Once running, point an MCP client at `http://localhost:8765/mcp` to exercise the MCP server
   without needing HA ingress or `mcp-proxy` on the HA side.
+- For an MFA/2FA account, `http://localhost:8767/` serves the one-time login UI directly (this
+  is what a real HA install reaches through the add-on's ingress panel instead).
 - Only after standalone behavior is verified should you add the repo to a real HA instance
   (**Settings → Add-ons → Add-on Store → ⋮ → Repositories** → this repo's URL) to test Supervisor
   packaging, ingress, and the options UI.

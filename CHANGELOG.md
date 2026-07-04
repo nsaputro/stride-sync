@@ -18,6 +18,14 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - CI now actually **runs** the built Docker image and checks both s6 services start without
   crashing (previously it only built the image, which is exactly why the bug below shipped
   undetected through 6 PRs).
+- **Ingress web UI for the one-time Garmin MFA login** (`app/mfa_web/server.py`, a new
+  `mfa-web` s6 service on `ingress_port: 8767`): open the StrideSync panel in the HA sidebar and
+  click "Log in to Garmin Connect" — an alternative to `python3 -m app.sync.bootstrap_login` for
+  users without terminal/`docker exec` access, which not every HA user has set up. Shares the
+  login/resume logic with the CLI bootstrap via a new `app/sync/mfa_login.py` module, so both
+  entry points implement the flow exactly once. This revisits milestone v0.4's original "no
+  ingress" decision — the MCP server itself still has no ingress route, since MCP clients reach
+  it directly over the network, not through HA's UI.
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the
