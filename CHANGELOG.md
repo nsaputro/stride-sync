@@ -32,11 +32,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   supervisor` outside a real HA install), so it always returned false standalone. Switched to
   plain `bashio::config` (reads `/data/options.json` directly, works both standalone and under a
   real Supervisor) + a shell emptiness check.
-- **Both services crashed with `ValueError: invalid literal for int() with base 10: 'null'`**
-  when run standalone: `bashio::config` for numeric/port-typed options (`sync_interval_hours`,
-  `mcp_port`) emits the literal string `"null"` outside a real Supervisor, rather than the
-  configured value. `app/config.py`'s `Settings.from_env()` now treats `"null"` (and an empty
-  string) the same as "unset" and falls back to the documented default, instead of crashing.
+- **Both services crashed with `ValueError: invalid literal for int() with base 10: 'null'`
+  (and, for `log_level`, `ValueError: Unknown level: 'NULL'`)** when run standalone:
+  `bashio::config` for any schema-validated option type — int ranges, `port`, `list(...)`
+  enums, not just numeric fields — emits the literal string `"null"` outside a real Supervisor,
+  rather than the configured value. `app/config.py`'s `Settings.from_env()` now treats `"null"`
+  (and an empty string) as "unset" for every field and falls back to the documented default,
+  instead of crashing.
 
 ## [0.1.0] - 2026-07-04
 
