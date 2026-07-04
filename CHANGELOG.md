@@ -14,7 +14,17 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `.github/workflows/prerelease.yml` (`workflow_dispatch`), so a fix can be built, pushed to
   GHCR under a pre-release tag, and installed/verified on a real HA instance before it's
   promoted to a stable release — added in response to v0.1.0 shipping with a startup bug (see
-  next entry) that a build-only CI smoke test didn't catch.
+  below) that a build-only CI smoke test didn't catch.
+- CI now actually **runs** the built Docker image and checks both s6 services start without
+  crashing (previously it only built the image, which is exactly why the bug below shipped
+  undetected through 6 PRs).
+
+### Fixed
+- **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the
+  Dockerfile's `COPY app/ .` flattened `app/`'s contents directly into `WORKDIR /app`, so
+  `python3 -m app.mcp.server` / `app.sync.scheduler` couldn't find a package called `app` (every
+  module in this codebase imports itself as `app.xxx`). Changed to `COPY app/ ./app/` to
+  preserve the package directory. Affects every install of `v0.1.0`.
 
 ## [0.1.0] - 2026-07-04
 

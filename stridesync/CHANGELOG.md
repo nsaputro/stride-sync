@@ -6,6 +6,10 @@
 - Pre-release/dev channel (install slug `stridesync_dev`, default host port `8766`) so fixes can
   be verified on a real HA instance before being promoted to a stable release.
 
+### Fixed
+- **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both
+  services) — a packaging bug, fixed. If you installed `v0.1.0`, update to this version.
+
 ## [0.1.0] - 2026-07-04
 
 ### Added
