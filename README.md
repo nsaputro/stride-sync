@@ -16,14 +16,10 @@ setup.
 
 ## Status
 
-All of the add-on's functionality (v0.1–v0.4 in [`PROJECT_PLAN.md`](PROJECT_PLAN.md)) is
-implemented: Garmin Connect sync, a continuously-running sync scheduler, an MCP server over
-Streamable HTTP, and HA Supervisor add-on packaging. **No version has been tagged/released yet**
-— see [`PROJECT_PLAN.md`](PROJECT_PLAN.md) milestone v1.0 for what's left before the first
-release.
-
-Until a release is tagged, there are no pre-built images on GHCR — build the add-on standalone
-instead (see Quick Start below).
+`v0.1.0` is tagged and published to GHCR, but **fails to start** (`ModuleNotFoundError: No
+module named 'app'` — see `CHANGELOG.md`) — a fix is in progress. A **pre-release/dev channel**
+now exists (`stridesync-dev/`, see Installation below) precisely so a fix like this one can be
+verified on a real HA instance before being promoted to a stable release.
 
 ## Quick Start
 
@@ -55,6 +51,11 @@ Then point an MCP client at `http://localhost:8765/mcp` — see
 1. In Home Assistant, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 2. Add: `https://github.com/nsaputro/stride-sync`
 3. Find **StrideSync** → Install → configure your Garmin Connect credentials → Start
+
+## Installation (dev channel)
+
+1. Add the same repository URL — HA will also list **StrideSync (dev)**
+2. Install it alongside stable; it defaults to host port `8766` (stable uses `8765`)
 
 ## Configuration
 

@@ -156,9 +156,22 @@ Follow the same three-file convention used in `siap-jalan` and `health-recorder`
 |------|-------------|------|
 | `stridesync/NEXT_VERSION` | PRs | Next version to release (plain `X.Y.Z`). |
 | `stridesync/config.yaml` `version` | Release workflow only | Always the last *released* version — never edit in feature PRs. |
+| `stridesync-dev/config.yaml` `version` | PRs | Tracks `{NEXT_VERSION}b{N}` (pre-release suffix). |
 
 Use semantic versioning: `PATCH` for fixes, `MINOR` for new user-facing features, `MAJOR` for
 breaking changes (e.g. a Garmin auth library swap that requires re-authentication).
+
+### Pre-release version must always track NEXT_VERSION
+
+`stridesync-dev/config.yaml` must always be `{NEXT_VERSION}b{N}`:
+
+1. Read `stridesync/NEXT_VERSION` (e.g. `0.1.1`).
+2. List existing pre-release tags: `mcp__github__list_tags owner=nsaputro repo=stride-sync`.
+   Filter for tags like `v0.1.1b*`. Find the highest `b` number; `N = highest + 1`. If none
+   exist, `N = 1`.
+3. Set `stridesync-dev/config.yaml` `version` to `{NEXT_VERSION}b{N}` (e.g. `0.1.1b1`).
+4. Every PR that adds new code and wants to be testable via the dev channel should bump this
+   value — the correct value is always strictly greater than every existing tag.
 
 ## Changelog
 
@@ -169,8 +182,8 @@ using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (`Adde
 
 ## CI / Release
 
-Two pipelines, following the same split used in `siap-jalan` and `health-recorder`. CI never
-publishes images — that's exclusively the release workflow's job.
+Three pipelines, following the same split used in `siap-jalan` and `health-recorder`. CI never
+publishes images — that's exclusively owned by the release and pre-release workflows.
 
 **CI** (`.github/workflows/ci.yml`) — runs on every push to `main`, `dev`, `claude/**`,
 `feature/**`, `fix/**` and on PRs targeting `main`:
@@ -187,6 +200,19 @@ publishes images — that's exclusively the release workflow's job.
 PRs opened by `github-actions[bot]` (the auto-generated post-release PR, whose real jobs are
 skipped rather than run) and otherwise requires every real job to have succeeded.
 
+**Pre-release** (`.github/workflows/prerelease.yml`) — `workflow_dispatch` only. Use this for
+beta/dev-channel builds **before** cutting a stable release, so a real bug (e.g. one that only
+shows up when the built image actually runs, which CI's build-only smoke test won't catch) is
+caught on the dev channel instead of the stable one:
+
+1. Reads `stridesync-dev/config.yaml` `version`; must carry a pre-release suffix (`0.1.1b1`,
+   `0.1.1rc1`) — a pure `X.Y.Z` is rejected (use the Release workflow instead).
+2. Tags `v{version}` and pushes it.
+3. Builds and pushes `{arch}-stridesync:{version}` to GHCR for `amd64` + `aarch64` — **no**
+   `:latest` tag, so it never gets pulled by a stable install.
+4. Install the dev channel add-on (slug `stridesync_dev`, host port `8766`) on a real HA
+   instance to verify it before promoting the same fix to a stable release.
+
 **Release** (`.github/workflows/release.yml`) — `workflow_dispatch` only:
 
 1. Reads `stridesync/NEXT_VERSION`, validates it's a pure `X.Y.Z` semver, tags `vX.Y.Z`.
@@ -195,19 +221,23 @@ skipped rather than run) and otherwise requires every real job to have succeeded
 4. Opens a `chore/post-release-X.Y.Z` PR (labelled `post-release`) that stamps
    `stridesync/config.yaml` to the released version, bumps `stridesync/NEXT_VERSION` to the next
    patch, and moves `CHANGELOG.md`'s `[Unreleased]` entries into a dated `[X.Y.Z]` section
-   (regenerating `stridesync/CHANGELOG.md` from it).
+   (regenerating `stridesync/CHANGELOG.md` from it). It does **not** touch
+   `stridesync-dev/config.yaml` — bump that in a normal PR per the versioning section above.
 
-**To ship a release:**
+**To ship a pre-release:**
+
+1. Ensure `stridesync-dev/config.yaml` version is `{NEXT_VERSION}b{N}` (see versioning rules
+   above) and merged to `main`.
+2. **Actions → Pre-release → Run workflow** (no inputs — version read from
+   `stridesync-dev/config.yaml`).
+
+**To ship a stable release:**
 
 1. Ensure `stridesync/NEXT_VERSION` holds the version to release and everything is merged to
-   `main`.
+   `main` — ideally after the same code has already been validated via a pre-release.
 2. **Actions → Release → Run workflow** (no inputs — version comes from `NEXT_VERSION`).
 3. Review and merge the auto-created `chore/post-release-X.Y.Z` PR — check
    `stridesync/CHANGELOG.md` in particular, since its bullets are auto-extracted.
-
-There is no pre-release/dev-channel pipeline yet (no `stridesync-dev/` add-on folder exists) —
-add one, mirroring `health-recorder`'s `ha-addon-dev/` + `prerelease.yml` pattern, if a beta
-channel becomes useful before v1.0.
 
 ### Branch protection
 

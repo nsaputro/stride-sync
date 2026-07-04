@@ -36,7 +36,9 @@ jobs:
       - name: Lint YAML files
         uses: ibiqlik/action-yamllint@v3
         with:
-          file_or_dir: stridesync/config.yaml stridesync/build.yaml
+          file_or_dir: >-
+            stridesync/config.yaml stridesync/build.yaml
+            stridesync-dev/config.yaml stridesync-dev/build.yaml
           config_file: .yamllint.yml
 
       - name: Lint Dockerfile (hadolint)
@@ -45,7 +47,7 @@ jobs:
           dockerfile: stridesync/Dockerfile
           ignore: DL3018,DL3013   # apk/pip --no-cache warnings suppressed
 
-      - name: Validate addon config.yaml
+      - name: Validate addon config.yaml files
         run: |
           python3 - <<'EOF'
           import yaml, sys, re
@@ -55,20 +57,20 @@ jobs:
               m = re.match(r"(\d+)\.(\d+)\.(\d+)", v)
               return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
 
-          path = "stridesync/config.yaml"
+          configs = ["stridesync/config.yaml", "stridesync-dev/config.yaml"]
           required = ["name", "description", "version", "slug", "arch", "init"]
           ok = True
-
-          with open(path) as f:
-              cfg = yaml.safe_load(f)
-
-          missing = [k for k in required if k not in cfg]
-          if missing:
-              print(f"ERROR: {path} missing required keys: {missing}")
-              ok = False
-          else:
-              released = cfg["version"]
-              print(f"{path} OK — version {released}, slug {cfg['slug']}")
+          versions = {}
+          for path in configs:
+              with open(path) as f:
+                  cfg = yaml.safe_load(f)
+              missing = [k for k in required if k not in cfg]
+              if missing:
+                  print(f"ERROR: {path} missing required keys: {missing}")
+                  ok = False
+              else:
+                  versions[path] = cfg["version"]
+                  print(f"{path} OK — version {cfg['version']}, slug {cfg['slug']}")
 
           try:
               next_ver = open("stridesync/NEXT_VERSION").read().strip()
@@ -77,12 +79,21 @@ jobs:
 
           if next_ver:
               print(f"stridesync/NEXT_VERSION : {next_ver}")
-              if ver_tuple(next_ver) <= ver_tuple(released):
+              released = versions.get("stridesync/config.yaml", "")
+              dev      = versions.get("stridesync-dev/config.yaml", "")
+
+              if released and ver_tuple(next_ver) <= ver_tuple(released):
                   print(f"ERROR: NEXT_VERSION ({next_ver}) must be greater than "
                         f"config.yaml released version ({released})")
                   ok = False
               else:
                   print(f"Version ordering OK: released={released} < next={next_ver}")
+
+              if dev and not dev.startswith(next_ver):
+                  print(f"ERROR: stridesync-dev version ({dev}) must start with NEXT_VERSION ({next_ver})")
+                  ok = False
+              elif dev:
+                  print(f"Dev pre-release OK: {dev} matches NEXT_VERSION {next_ver}")
 
           if not ok:
               sys.exit(1)

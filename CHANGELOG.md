@@ -8,6 +8,14 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Added
+- Pre-release/dev channel: `stridesync-dev/config.yaml` + `build.yaml` (slug `stridesync_dev`,
+  host port `8766` alongside a stable install on `8765`) and
+  `.github/workflows/prerelease.yml` (`workflow_dispatch`), so a fix can be built, pushed to
+  GHCR under a pre-release tag, and installed/verified on a real HA instance before it's
+  promoted to a stable release — added in response to v0.1.0 shipping with a startup bug (see
+  next entry) that a build-only CI smoke test didn't catch.
+
 ## [0.1.0] - 2026-07-04
 
 ### Added
