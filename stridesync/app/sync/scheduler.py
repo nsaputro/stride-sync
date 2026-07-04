@@ -1,17 +1,20 @@
-"""Sync scheduler entry point — python3 -m app.sync.scheduler --once
+"""Sync scheduler entry point — python3 -m app.sync.scheduler [--once]
 
-Runs as the sync-scheduler s6 service (rootfs/etc/services.d/sync-scheduler/run) from v0.2
-onward. See PROJECT_PLAN.md §1 (Scheduled sync service) and milestone v0.1 (manual sync only —
-the continuous interval loop is v0.2's `--daemon`-style entry, not yet implemented here).
+Runs as the sync-scheduler s6 service (rootfs/etc/services.d/sync-scheduler/run), polling Garmin
+Connect every `sync_interval_hours` (default 6). See PROJECT_PLAN.md §1 (Scheduled sync service)
+and milestone v0.2. `--once` remains for manual CLI verification (milestone v0.1).
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import signal
 import sqlite3
+import threading
 from datetime import datetime, timezone
-from typing import Sequence
+from types import FrameType
+from typing import Callable, Optional, Sequence
 
 from app import db
 from app.config import Settings
@@ -143,14 +146,70 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
     return activities_synced
 
 
+def run_forever(
+    settings: Settings,
+    make_client: Callable[[], GarminClient],
+    limit: int = 20,
+    interval_seconds: Optional[float] = None,
+    stop_event: Optional[threading.Event] = None,
+    max_iterations: Optional[int] = None,
+) -> None:
+    """Sync on a loop, once per `interval_seconds` (default: `settings.sync_interval_hours`).
+
+    A failed sync (bad credentials, broken SSO, network error) is logged and recorded in
+    `sync_log` by `run_sync_once` but never crashes this loop — the next scheduled sync is the
+    retry, which is already a conservative backoff (PROJECT_PLAN.md's "known risk" section warns
+    against retry storms; waiting a full interval between attempts avoids that by construction).
+
+    Args:
+        make_client: Builds a fresh GarminClient for each sync pass.
+        interval_seconds: Overrides `settings.sync_interval_hours` — used by tests.
+        stop_event: Signaled to stop the loop promptly instead of waiting out the full interval
+            (see `_install_shutdown_handler`, which wires this to SIGTERM/SIGINT in `main()`).
+        max_iterations: Stop after this many sync passes — used by tests; production runs
+            forever.
+    """
+    if interval_seconds is None:
+        interval_seconds = settings.sync_interval_hours * 3600
+    stop_event = stop_event if stop_event is not None else threading.Event()
+
+    iterations = 0
+    while True:
+        try:
+            run_sync_once(settings, make_client(), limit=limit)
+        except (GarminAuthError, GarminAPIError):
+            pass  # already logged + recorded in sync_log; retry on the next interval
+
+        iterations += 1
+        if max_iterations is not None and iterations >= max_iterations:
+            return
+        if stop_event.wait(timeout=interval_seconds):
+            return
+
+
+def _install_shutdown_handler(stop_event: threading.Event) -> None:
+    """Make SIGTERM/SIGINT set `stop_event` instead of killing the process mid-sleep.
+
+    Without this, s6 stopping the service would otherwise leave the loop blocked in
+    `stop_event.wait()` for up to `sync_interval_hours`, forcing a slow/forced container stop.
+    """
+
+    def _handle(signum: int, _frame: Optional[FrameType]) -> None:
+        logger.info("Received signal %s, shutting down sync scheduler...", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, _handle)
+    signal.signal(signal.SIGINT, _handle)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="StrideSync Garmin Connect sync")
     parser.add_argument(
         "--once",
         action="store_true",
         help=(
-            "Run a single sync pass and exit (v0.1 CLI verification mode). Continuous "
-            "interval-based scheduling is added in v0.2."
+            "Run a single sync pass and exit, instead of looping on sync_interval_hours. "
+            "Used for manual CLI verification (see PROJECT_PLAN.md milestone v0.1)."
         ),
     )
     parser.add_argument(
@@ -164,23 +223,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = Settings.from_env()
     logging.basicConfig(level=settings.log_level.upper())
 
-    if not args.once:
-        parser.error(
-            "continuous scheduling isn't implemented yet (see PROJECT_PLAN.md milestone v0.2) "
-            "— run with --once for a manual sync"
-        )
-
     if not settings.garmin_username or not settings.garmin_password:
         parser.error("GARMIN_USERNAME and GARMIN_PASSWORD must be set")
 
-    client = GarminClient(settings.garmin_username, settings.garmin_password)
+    def make_client() -> GarminClient:
+        return GarminClient(settings.garmin_username, settings.garmin_password)
 
-    try:
-        count = run_sync_once(settings, client, limit=args.limit)
-    except (GarminAuthError, GarminAPIError):
-        return 1
+    if args.once:
+        try:
+            count = run_sync_once(settings, make_client(), limit=args.limit)
+        except (GarminAuthError, GarminAPIError):
+            return 1
+        print(f"Synced {count} activities to {settings.db_path}")
+        return 0
 
-    print(f"Synced {count} activities to {settings.db_path}")
+    logger.info(
+        "Starting StrideSync sync scheduler: every %d hour(s)", settings.sync_interval_hours
+    )
+    stop_event = threading.Event()
+    _install_shutdown_handler(stop_event)
+    run_forever(settings, make_client, limit=args.limit, stop_event=stop_event)
     return 0
 
 

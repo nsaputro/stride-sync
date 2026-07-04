@@ -2,7 +2,18 @@
 # s6 service: polls Garmin Connect on a configurable interval and writes to /data/stridesync.db.
 # See app/sync/scheduler.py and PROJECT_PLAN.md §1 (Scheduled sync service).
 
-bashio::log.info "Starting StrideSync sync scheduler..."
+GARMIN_USERNAME=$(bashio::config 'garmin_username')
+GARMIN_PASSWORD=$(bashio::config 'garmin_password')
+SYNC_INTERVAL_HOURS=$(bashio::config 'sync_interval_hours')
+LOG_LEVEL=$(bashio::config 'log_level')
+
+export GARMIN_USERNAME
+export GARMIN_PASSWORD
+export SYNC_INTERVAL_HOURS
+export LOG_LEVEL
+export STRIDESYNC_DB_PATH="/data/stridesync.db"
+
+bashio::log.info "Starting StrideSync sync scheduler (every ${SYNC_INTERVAL_HOURS}h)..."
 
 cd /app
 exec python3 -m app.sync.scheduler

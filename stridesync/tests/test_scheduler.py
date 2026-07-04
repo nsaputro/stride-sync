@@ -1,8 +1,12 @@
+import signal
+import threading
+import time
+
 import pytest
 
 from app.config import Settings
 from app.sync.garmin_client import GarminActivity, GarminAPIError, GarminAuthError, GarminLap
-from app.sync.scheduler import run_sync_once
+from app.sync.scheduler import _install_shutdown_handler, run_forever, run_sync_once
 
 
 def make_settings(tmp_path) -> Settings:
@@ -173,3 +177,118 @@ def test_run_sync_once_logs_failure_on_fetch_error(tmp_path):
         assert "garmin is down" in log_row["error_message"]
     finally:
         conn.close()
+
+
+class TestRunForever:
+    def test_stops_after_max_iterations_without_waiting_full_interval(self, tmp_path):
+        settings = make_settings(tmp_path)
+        activity = make_activity()
+        made_clients = []
+
+        def make_client():
+            client = FakeGarminClient(activities=[activity])
+            made_clients.append(client)
+            return client
+
+        # interval_seconds=0 keeps the test instant even though sync_interval_hours is 6.
+        run_forever(settings, make_client, interval_seconds=0, max_iterations=3)
+
+        assert len(made_clients) == 3
+        assert all(c.login_called for c in made_clients)
+
+        from app import db
+
+        conn = db.connect(settings.db_path)
+        try:
+            rows = conn.execute("SELECT * FROM sync_log").fetchall()
+            assert len(rows) == 3
+            assert all(r["status"] == "success" for r in rows)
+        finally:
+            conn.close()
+
+    def test_stop_event_ends_the_loop_promptly(self, tmp_path):
+        # A long interval (1 hour) proves stop_event short-circuits the wait instead of the
+        # loop actually waiting it out. A background timer sets stop_event from a separate
+        # thread — setting it from inside make_client would deadlock, since the *next* call to
+        # make_client only happens after the current wait() returns.
+        settings = make_settings(tmp_path)
+        stop_event = threading.Event()
+        calls = []
+
+        def make_client():
+            calls.append(1)
+            return FakeGarminClient(activities=[make_activity()])
+
+        timer = threading.Timer(0.05, stop_event.set)
+        timer.start()
+        try:
+            start = time.monotonic()
+            run_forever(settings, make_client, interval_seconds=3600, stop_event=stop_event)
+            elapsed = time.monotonic() - start
+        finally:
+            timer.cancel()
+
+        assert elapsed < 5, "stop_event should short-circuit the 3600s wait, not run it out"
+        assert len(calls) == 1
+
+    def test_auth_failure_does_not_crash_the_loop(self, tmp_path):
+        # CLAUDE.md: sync failures must never crash the service — the sync-scheduler must keep
+        # retrying on the next interval rather than taking the whole s6 service down.
+        settings = make_settings(tmp_path)
+        attempts = []
+
+        def make_client():
+            attempts.append(1)
+            return FakeGarminClient(login_error=GarminAuthError("SSO login flow broke"))
+
+        run_forever(settings, make_client, interval_seconds=0, max_iterations=3)
+
+        assert len(attempts) == 3
+
+        from app import db
+
+        conn = db.connect(settings.db_path)
+        try:
+            rows = conn.execute("SELECT * FROM sync_log ORDER BY id").fetchall()
+            assert len(rows) == 3
+            assert all(r["status"] == "failed" for r in rows)
+            assert all("SSO login flow broke" in r["error_message"] for r in rows)
+        finally:
+            conn.close()
+
+    def test_defaults_interval_from_settings_sync_interval_hours(self, tmp_path):
+        settings = make_settings(tmp_path)  # sync_interval_hours=6
+        stop_event = threading.Event()
+        stop_event.set()  # loop should check this before ever computing a real 6h wait
+
+        recorded_timeouts = []
+        real_wait = threading.Event.wait
+
+        def spying_wait(self, timeout=None):
+            recorded_timeouts.append(timeout)
+            return real_wait(self, timeout)
+
+        threading.Event.wait = spying_wait
+        try:
+            run_forever(
+                settings,
+                lambda: FakeGarminClient(activities=[make_activity()]),
+                stop_event=stop_event,
+            )
+        finally:
+            threading.Event.wait = real_wait
+
+        assert recorded_timeouts == [6 * 3600]
+
+
+class TestInstallShutdownHandler:
+    def test_sigterm_sets_stop_event(self):
+        stop_event = threading.Event()
+        original = signal.getsignal(signal.SIGTERM)
+        try:
+            _install_shutdown_handler(stop_event)
+            handler = signal.getsignal(signal.SIGTERM)
+            handler(signal.SIGTERM, None)
+            assert stop_event.is_set()
+        finally:
+            signal.signal(signal.SIGTERM, original)
