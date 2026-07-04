@@ -3,6 +3,7 @@ garmy
 requests  # used directly in app/sync/garmin_client.py to catch transport-level auth failures
 # python-garminconnect  # fallback, uncomment if garmy can't cover a needed endpoint
 
-# MCP server — Streamable HTTP transport
-# garmy-mcp
-# mcp-proxy
+# MCP server — fastmcp serves Streamable HTTP natively (transport="http"), no mcp-proxy needed
+# inside the add-on; see app/mcp/server.py module docstring for why garmy-mcp's bundled server
+# wasn't reused as-is.
+fastmcp
