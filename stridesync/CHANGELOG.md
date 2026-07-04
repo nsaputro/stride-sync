@@ -12,6 +12,9 @@
 - Fixed a related config-validation bug that would also have broken standalone (non-Supervisor)
   testing: the startup config check always reported Garmin credentials missing outside a real
   HA install, even when set correctly.
+- Fixed a crash (`invalid literal for int()`) when `sync_interval_hours`/`mcp_port` came through
+  as the literal text `"null"` outside a real Supervisor — now falls back to the documented
+  default instead.
 
 ## [0.1.0] - 2026-07-04
 
