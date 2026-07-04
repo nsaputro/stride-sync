@@ -22,6 +22,7 @@ import threading
 from html import escape
 from typing import Any, Dict, Optional
 
+import requests
 from garmy import AuthClient
 from garmy.core.exceptions import AuthError
 from starlette.applications import Starlette
@@ -33,6 +34,13 @@ from app.config import Settings
 from app.sync import mfa_login
 
 logger = logging.getLogger(__name__)
+
+# garmy's SSO flow doesn't wrap transport-level failures (connection errors, timeouts, or a
+# non-JSON response from a rate-limit/CAPTCHA page) in its own exception types — see
+# garmin_client.py's _TRANSPORT_ERRORS, which this mirrors. A bare, unhandled exception here
+# would otherwise reach the browser as Starlette's generic 500 "Internal Server Error" page
+# instead of a diagnosable message.
+_TRANSPORT_ERRORS = (requests.exceptions.RequestException,)
 
 _lock = threading.Lock()
 _pending_auth_client: Optional[AuthClient] = None
@@ -96,6 +104,19 @@ async def start(request: Request) -> HTMLResponse:
             "Login failed",
             f'<p class="error">Login failed: {escape(str(exc))}</p><p><a href=".">Back</a></p>',
         )
+    except _TRANSPORT_ERRORS as exc:
+        return _page(
+            "Login failed",
+            f'<p class="error">Could not reach Garmin Connect: {escape(str(exc))}</p>'
+            '<p><a href=".">Back</a></p>',
+        )
+    except Exception:
+        logger.exception("Unexpected error starting Garmin login")
+        return _page(
+            "Login failed",
+            '<p class="error">Login failed unexpectedly — check the add-on log for details.</p>'
+            '<p><a href=".">Back</a></p>',
+        )
 
     if isinstance(result, mfa_login.NeedsMfa):
         with _lock:
@@ -137,6 +158,19 @@ async def verify(request: Request) -> HTMLResponse:
             "MFA verification failed",
             f'<p class="error">MFA verification failed: {escape(str(exc))}</p>'
             '<p><a href=".">Back</a></p>',
+        )
+    except _TRANSPORT_ERRORS as exc:
+        return _page(
+            "MFA verification failed",
+            f'<p class="error">Could not reach Garmin Connect: {escape(str(exc))}</p>'
+            '<p><a href=".">Back</a></p>',
+        )
+    except Exception:
+        logger.exception("Unexpected error verifying Garmin MFA code")
+        return _page(
+            "MFA verification failed",
+            '<p class="error">Verification failed unexpectedly — check the add-on log for '
+            "details.</p><p><a href=\".\">Back</a></p>",
         )
 
     with _lock:

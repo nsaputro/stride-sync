@@ -57,6 +57,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   login, which would otherwise re-trigger MFA on every single sync. A new one-time interactive
   CLI, `python3 -m app.sync.bootstrap_login`, performs the first MFA login and persists the
   session to `garmin_token_dir` (`/data/.garmin_tokens`) for every scheduled sync to reuse.
+- **The MFA login web UI's "Log in to Garmin Connect" button returned a bare "Internal Server
+  Error"** instead of a diagnosable message: `app/mfa_web/server.py`'s `start()`/`verify()`
+  routes only caught `garmy`'s `AuthError`, not the transport-level failures (connection errors,
+  timeouts, an unexpected non-JSON response from Garmin) that `garmin_client.py` already knows
+  to expect and wrap — most likely to surface here because `sync-scheduler` also attempts a
+  login at container startup, independently of the web UI. Now catches
+  `requests.exceptions.RequestException` (matching `garmin_client.py`'s `_TRANSPORT_ERRORS`) plus
+  a catch-all for any other unexpected exception, always rendering a clear error page instead of
+  crashing.
 
 ## [0.1.0] - 2026-07-04
 
