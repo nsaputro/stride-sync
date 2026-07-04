@@ -186,7 +186,7 @@ jobs:
 
           # Find the previous stable version from the current [Unreleased] comparison link
           m_prev = re.search(r"\[Unreleased\]:.*compare/(v[\d.]+)\.\.\.HEAD", text)
-          prev_tag = m_prev.group(1) if m_prev else "v0.0.0"
+          prev_tag = m_prev.group(1) if m_prev else None
 
           # If no [VERSION] section exists, migrate content from [Unreleased] into it
           if not re.search(rf"## \[{re.escape(version)}\]", text):
@@ -229,19 +229,28 @@ jobs:
                   f"\n\n[Unreleased]: https://github.com/{repo}/compare/v{version}...HEAD\n"
               )
 
-          # Add [VERSION] link after [Unreleased] if not already present
+          # Add [VERSION] link after [Unreleased] if not already present. First release ever
+          # has no real previous tag to compare against (a compare/v0.0.0...vX.Y.Z link would
+          # 404 — that tag was never created) — link straight to the release instead.
           if f"[{version}]:" not in text:
+              if prev_tag:
+                  version_link = f"[{version}]: https://github.com/{repo}/compare/{prev_tag}...v{version}\n"
+              else:
+                  version_link = f"[{version}]: https://github.com/{repo}/releases/tag/v{version}\n"
               text = re.sub(
                   r"(\[Unreleased\]:.*\n)",
-                  rf"\1[{version}]: https://github.com/{repo}/compare/{prev_tag}...v{version}\n",
+                  rf"\1{version_link}",
                   text,
               )
 
           p.write_text(text)
 
-          # Generate stridesync/CHANGELOG.md — entries for this version only
+          # Generate stridesync/CHANGELOG.md — entries for this version only. The lookahead
+          # stops before the next "## [" heading OR a reference-style link line ("[x]: url") —
+          # without the latter, the first-ever release (with no heading after it) would sweep
+          # the trailing [Unreleased]/[version] link lines into the body, duplicating them below.
           m = re.search(
-              rf"(## \[{re.escape(version)}\].*?\n)(.*?)(?=\n## \[|\Z)",
+              rf"(## \[{re.escape(version)}\].*?\n)(.*?)(?=\n## \[|\n\[|\Z)",
               text,
               re.DOTALL,
           )

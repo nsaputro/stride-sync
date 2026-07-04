@@ -249,16 +249,30 @@ tools/resources should appear in a new conversation.
   the add-on can genuinely be called "released" — see the Getting Started section for the
   standalone `docker build`/`docker run` steps that substitute for it pre-release.
 
-### v1.0 — Documented, versioned, changelog-tracked release ⬜
+### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
-- ⬜ `DOCS.md` complete: install steps, all config options explained, MCP connection
-  instructions, known-risk note about Garmin auth breakage
-- ⬜ `README.md` complete with install + quick-start
-- ⬜ `CHANGELOG.md` (root) and `stridesync/CHANGELOG.md` (add-on-local) populated for every
-  milestone above, in Keep a Changelog format
-- ⬜ `stridesync/config.yaml` `version` and `stridesync/NEXT_VERSION` following the versioning
-  convention in `CLAUDE.md`
-- ⬜ First tagged GitHub release, images published to GHCR for `amd64` + `aarch64`
+- ✅ `DOCS.md` complete: install steps, all five config options, MCP connection instructions
+  (`http://homeassistant.local:8765/mcp`), and the known-risk note about Garmin auth breakage
+- ✅ `README.md` complete: accurate status (v0.1–v0.4 implemented, nothing released yet), a
+  standalone Quick Start (`docker build`/`docker run`, no HA instance required), install
+  instructions, config table, and the known-risk note
+- ✅ `CHANGELOG.md` (root) and `stridesync/CHANGELOG.md` (add-on-local) populated for every
+  milestone under `## [Unreleased]`, in Keep a Changelog format
+- ✅ `stridesync/config.yaml` `version` (`0.0.0` — no release has shipped) and
+  `stridesync/NEXT_VERSION` (`0.1.0` — next version to release) follow the versioning convention
+  in `CLAUDE.md`
+- ✅ Fixed a real bug in `.github/workflows/release.yml`'s post-release changelog script before
+  it ever ran for real: simulated it against this repo's actual `CHANGELOG.md` and found the
+  first-ever release (no prior version section, no prior git tag) both 404'd its own comparison
+  link (`compare/v0.0.0...vX.Y.Z` — that tag was never created) and duplicated the version's
+  trailing reference link in the generated `stridesync/CHANGELOG.md`. Fixed both; re-simulated a
+  first release *and* a hypothetical second release (with a real prior tag) to confirm both
+  paths now produce correct output.
+- ⬜ First tagged GitHub release, images published to GHCR for `amd64` + `aarch64` — **not done,
+  intentionally**. Running the release workflow publishes real public Docker images and a real
+  GitHub release; that's a judgment call about readiness for the repo owner to make, not
+  something to trigger unprompted. Once `stridesync/NEXT_VERSION` (`0.1.0`) is confirmed correct:
+  **Actions → Release → Run workflow** on `main`. See `CLAUDE.md`'s CI / Release section.
 
 ---
 
