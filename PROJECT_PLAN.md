@@ -196,14 +196,19 @@ tools/resources should appear in a new conversation.
 - 🔄 Sync runs continuously without manual invocation — verified by running
   `python3 -m app.sync.scheduler` directly (env vars set the way the s6 `run` script sets them)
   and confirming repeated sync passes + a clean exit within seconds of `SIGTERM` (not a multi-hour
-  hang). **This caveat turned out to matter**: `v0.1.0` shipped with a Dockerfile bug
+  hang). **This caveat turned out to matter, twice**: `v0.1.0` shipped with a Dockerfile bug
   (`COPY app/ .` flattened the `app/` package into `WORKDIR`, breaking `python3 -m app.xxx` for
   both services — `ModuleNotFoundError: No module named 'app'`) that only running-from-`stridesync/`
   local testing could never have caught, because locally `app/` is naturally a subdirectory.
-  Fixed (`COPY app/ ./app/`), and CI's Docker build test now actually **runs** the built image and
-  checks both services start, not just that the image builds — but a real HA instance /
-  `docker restart` still hasn't been exercised (no Docker daemon in this sandbox); verify there
-  before the next stable release if possible.
+  Fixed (`COPY app/ ./app/`), and CI's Docker build test now actually **runs** the built image
+  and checks both services start, not just that the image builds. That new CI smoke test
+  immediately caught a **second** bug on the same PR: `00-validate-config.sh` used
+  `bashio::config.has_value`, which calls out to the Supervisor API and always reports values
+  missing when there's no real Supervisor (standalone `docker run`) — it would have killed the
+  container even with a correct `options.json`. Fixed (plain `bashio::config` + a shell
+  emptiness check, matching the pattern the service `run` scripts already used successfully). A
+  real HA instance / `docker restart` still hasn't been exercised (no Docker daemon in this
+  sandbox); verify there before the next stable release if possible.
 - ✅ `sync_log` populated on every run (success and failure paths) — covered by
   `tests/test_scheduler.py::TestRunForever`
 - ✅ Graceful failure path exercised: a forced Garmin login failure (real SSO call blocked by this
