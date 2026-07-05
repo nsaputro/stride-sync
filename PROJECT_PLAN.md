@@ -275,7 +275,8 @@ add-on's internal stdio-based MCP server to HTTP for the network hop):
 ```
 
 Add this to Claude Desktop's `claude_desktop_config.json`, restart Claude Desktop, and StrideSync's
-tools/resources should appear in a new conversation.
+tools/resources should appear in a new conversation. See `DOCS.md`'s "Connecting Claude to
+StrideSync" section for the `mcp_auth_token` header variant and full walkthrough.
 
 ### Remote access beyond the LAN (e.g. Claude mobile via Cloudflare Tunnel)
 
@@ -284,18 +285,29 @@ Tunnel (`cloudflared`) HA add-on install. Mechanically this needs only a tunnel 
 routed at `http://homeassistant.local:8765` (the MCP port, not the `8767` ingress port — that
 serves the browser-only MFA login page).
 
-**This must not be done without also setting `mcp_auth_token`** (see milestone v0.6 below and
-DOCS.md's "Remote access" section) — the MCP server has no auth by default, which is a
-reasonable default for LAN-only reachability but becomes a real privacy exposure the moment a
-public hostname points at it, since it serves personal Garmin activity/HR/health data. Considered
-and rejected relying on Cloudflare Access alone (gating the tunnel hostname via Cloudflare's own
-Zero Trust login) as the *only* protection: it would need either an interactive login (which an
-API client like an MCP connector can't complete) or a Cloudflare Access Service Token, and it's
-unconfirmed whether Claude's connector configuration lets you attach the required
-`CF-Access-Client-Id`/`CF-Access-Client-Secret` headers to its requests. Enforcing auth inside
-StrideSync itself works regardless of what sits in front of it (Cloudflare Tunnel, a plain port
-forward, anything else), so that's the approach taken — Cloudflare Access can still be layered on
-top for defense in depth, but isn't relied on as the sole gate.
+**Confirmed (milestone v0.9): Claude's "Add custom connector" UI cannot send `mcp_auth_token` at
+all.** v0.6 below shipped `mcp_auth_token` on the assumption that it was merely unconfirmed
+whether Claude's connector UI could attach a custom `Authorization` header; verified since then
+that it definitively cannot — the UI only offers OAuth (Client ID/Secret) or no auth, with no
+field for a static bearer token (tracked upstream as a known gap, e.g.
+`anthropics/claude-ai-mcp` issues #112 and #411). That means `mcp_auth_token` alone does **not**
+protect a Cloudflare-Tunnel-exposed MCP endpoint against Claude's own official connector traffic,
+which arrives with no auth header regardless. Real protection for this specific client has to
+come from restricting *who can reach the tunnel hostname*, not from a header StrideSync checks —
+see `DOCS.md`'s Cloudflare WAF IP-allowlist step (Anthropic's published MCP-connector egress
+ranges) for the approach actually taken. `mcp_auth_token` is kept anyway as defense-in-depth
+against any other client and in case Claude adds header support later — it still fully protects
+the `mcp-proxy`/Claude-Desktop path (§2 above), since that's a local process that can send any
+header.
+
+Cloudflare Access alone (gating the tunnel hostname via Cloudflare's own Zero Trust login) was
+considered and rejected as the *only* protection for the same underlying reason: it needs either
+an interactive login (which Claude's connector, fetching server-side from Anthropic's own
+infrastructure, can't complete) or a Cloudflare Access Service Token — and Service Tokens are
+also delivered via custom headers (`CF-Access-Client-Id`/`CF-Access-Client-Secret`), which the
+connector UI can't attach either. Cloudflare Access can still be layered on top for defense in
+depth, but isn't relied on as the sole gate — an IP-range WAF rule is, since it doesn't depend on
+the connecting client sending anything at all.
 
 ---
 
@@ -461,11 +473,12 @@ itself rather than relied on Cloudflare Access alone.
 - ✅ `DOCS.md` documents the Cloudflare Tunnel setup (route the tunnel at `mcp_port`/`8765`, not
   the ingress port `8767`) and configuring an MCP client's bearer-token auth against the new
   option.
-- ⬜ Not yet verified end-to-end against a real Cloudflare Tunnel + Claude mobile connector from
-  this sandboxed environment (no route to the internet or a real HA/cloudflared install here) —
-  in particular, whether Claude's custom-connector UI (web or Android) actually supports
-  attaching a bearer token / custom `Authorization` header to a remote MCP connection is
-  unconfirmed. Verify on a real HA instance with the tunnel configured per DOCS.md.
+- ✅ Whether Claude's custom-connector UI (web/Desktop/Android) supports attaching a bearer token
+  / custom `Authorization` header to a remote MCP connection — the open question this milestone
+  originally left unconfirmed — was resolved (in the negative) during milestone v0.9's
+  documentation work: it does not, and only supports OAuth or no auth. See v0.9's "Remote access
+  beyond the LAN" note in §2 for the real mitigation (a Cloudflare WAF IP allowlist) since
+  `mcp_auth_token` alone can't gate Claude's own connector traffic.
 
 ### v0.7 — "Running" tab: weekly mileage on the web UI 🔄
 
@@ -543,6 +556,38 @@ to pull in older history beyond whatever `limit` happens to cover.
   now checks `_backfill_state` itself: shows the progress bar while running, the last backfill's
   result/error (plus the form, so a new one can still be started) once done, otherwise the plain
   form as before.
+
+### v0.9 — Claude connection docs: Desktop direct + mobile via Cloudflare Tunnel, example prompts 🔄
+
+Requested directly: documentation for connecting Claude Desktop (direct LAN) and Claude mobile
+(via an existing Cloudflare Tunnel install), plus example prompts for run analysis and
+training-pace recommendations.
+
+- ✅ `DOCS.md`'s "Connecting Claude to StrideSync" section rewritten into two concrete setups:
+  Claude Desktop (`claude_desktop_config.json` + `mcp-proxy` stdio↔HTTP bridge, since that's a
+  local process on the user's own machine and so can reach a LAN-only hostname) and Claude mobile
+  (Settings → Connectors → Add custom connector, since mobile/claude.ai fetch remote MCP servers
+  from Anthropic's own cloud infrastructure rather than the user's device, requiring a public
+  URL).
+- ✅ **Discovered and documented a real client-side limitation** while researching the mobile
+  setup: Claude's "Add custom connector" UI only supports OAuth or no authentication — there is no
+  field for a static bearer token, so it cannot send StrideSync's `mcp_auth_token` header at all.
+  This resolves v0.6's previously-open question in the negative (see that milestone's updated
+  bullet) and means `mcp_auth_token` alone does not protect a Cloudflare-Tunnel-exposed endpoint
+  against Claude's own connector traffic.
+- ✅ Verified Anthropic publishes a fixed outbound IP range for MCP-connector fetches
+  (`160.79.104.0/21` IPv4, `2607:6bc0::/48` IPv6, per
+  [Anthropic's IP-address reference](https://platform.claude.com/docs/en/api/ip-addresses)) —
+  real, checkable access control that doesn't depend on the connecting client sending any header.
+  `DOCS.md` documents adding a Cloudflare WAF rule restricting the tunnel hostname to these
+  ranges, chosen over the weaker "obscure hostname only" alternative after asking directly.
+  `mcp_auth_token` is kept regardless, as defense-in-depth against any other client and since it
+  still fully protects the Desktop/`mcp-proxy` path (a local process can send any header).
+- ✅ New "Example prompts" section in `DOCS.md`: recent-run review, trend analysis over time,
+  and racing/target-pace prompts for easy/long/threshold/interval training types — grounded in
+  the actual MCP tools this add-on exposes (`training_baseline`'s lactate-threshold pace/HR and
+  race predictions, `pace_cadence_hr_trend`, `training_load_summary`), not generic examples
+  disconnected from what StrideSync can actually answer.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
