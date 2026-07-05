@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-05
+
 ### Added
 - Pre-release/dev channel: `stridesync-dev/config.yaml` + `build.yaml` (slug `stridesync_dev`,
   host port `8766` alongside a stable install on `8765`) and
@@ -241,5 +243,6 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nsaputro/stride-sync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nsaputro/stride-sync/releases/tag/v0.1.0
