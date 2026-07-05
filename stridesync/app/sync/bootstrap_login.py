@@ -13,26 +13,21 @@ Standalone (docker run):
 Real HA install (via the "Terminal & SSH" add-on):
     ha addons exec <slug> python3 -m app.sync.bootstrap_login
 
-Logs in, prompts for the MFA code Garmin sends you, and persists the resulting OAuth1/OAuth2
-tokens to `garmin_token_dir` (default `/data/.garmin_tokens`) — the same location every
-scheduled sync reads from. Re-run this if a sync ever reports the session was lost (e.g. the
-underlying OAuth1 token was itself revoked or expired) and a fresh MFA login is needed again.
+Logs in, prompts for the MFA code Garmin sends you, and persists the resulting session tokens to
+`garmin_token_dir` (default `/data/.garmin_tokens`) — the same location every scheduled sync
+reads from. Re-run this if a sync ever reports the session was lost (e.g. the underlying token
+was itself revoked or expired) and a fresh MFA login is needed again.
 """
 
 from __future__ import annotations
 
 import sys
 
-from garmy import AuthClient
-from garmy.core.exceptions import AuthError
+from garminconnect import Garmin, GarminConnectAuthenticationError
 
 from app.config import Settings
-from app.sync import garmy_login_delay, garmy_tls_impersonation, garmy_ua_override, mfa_login
+from app.sync import mfa_login
 from app.sync.garmin_client import TRANSPORT_ERRORS, describe_transport_error
-
-garmy_ua_override.apply()
-garmy_tls_impersonation.apply()
-garmy_login_delay.apply()
 
 
 def main() -> int:
@@ -42,29 +37,27 @@ def main() -> int:
         print("GARMIN_USERNAME and GARMIN_PASSWORD must be set.", file=sys.stderr)
         return 1
 
-    auth_client = AuthClient(token_dir=settings.garmin_token_dir)
+    garmin = Garmin(
+        email=settings.garmin_username,
+        password=settings.garmin_password,
+        return_on_mfa=True,
+    )
 
     try:
-        result = mfa_login.start_login(
-            auth_client, settings.garmin_username, settings.garmin_password
-        )
-    except AuthError as exc:
+        result = mfa_login.start_login(garmin, settings.garmin_token_dir)
+    except GarminConnectAuthenticationError as exc:
         print(f"Login failed: {exc}", file=sys.stderr)
         return 1
     except TRANSPORT_ERRORS as exc:
         print(f"Could not reach Garmin Connect: {describe_transport_error(exc)}", file=sys.stderr)
         return 1
 
-    if isinstance(result, mfa_login.LoginResult) and result.already_authenticated:
-        print(f"Already have a valid cached session in {settings.garmin_token_dir} — nothing to do.")
-        return 0
-
     if isinstance(result, mfa_login.NeedsMfa):
         print("Garmin sent a multi-factor authentication code to your registered device/email.")
         mfa_code = input("Enter the MFA code: ").strip()
         try:
-            mfa_login.resume_login(auth_client, mfa_code, result.mfa_state)
-        except AuthError as exc:
+            mfa_login.resume_login(garmin, mfa_code)
+        except GarminConnectAuthenticationError as exc:
             print(f"MFA verification failed: {exc}", file=sys.stderr)
             return 1
         except TRANSPORT_ERRORS as exc:
@@ -74,7 +67,7 @@ def main() -> int:
             )
             return 1
 
-    if not auth_client.is_authenticated:
+    if not garmin.client.is_authenticated:
         print("Login did not produce a valid session.", file=sys.stderr)
         return 1
 

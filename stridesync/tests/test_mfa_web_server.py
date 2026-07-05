@@ -6,7 +6,7 @@ from starlette.testclient import TestClient
 
 from app.mfa_web import server as mfa_web_server
 from app.config import Settings
-from garmy.core.exceptions import AuthError
+from garminconnect import GarminConnectAuthenticationError
 
 
 def make_settings(tmp_path) -> Settings:
@@ -26,11 +26,9 @@ def make_settings(tmp_path) -> Settings:
 def _reset_pending_state():
     # mfa_web.server keeps one in-process pending-login slot (see its module docstring) —
     # reset it around every test so state can't leak between them.
-    mfa_web_server._pending_auth_client = None
-    mfa_web_server._pending_mfa_state = None
+    mfa_web_server._pending_garmin = None
     yield
-    mfa_web_server._pending_auth_client = None
-    mfa_web_server._pending_mfa_state = None
+    mfa_web_server._pending_garmin = None
 
 
 def _client(tmp_path) -> TestClient:
@@ -39,48 +37,43 @@ def _client(tmp_path) -> TestClient:
 
 
 def test_index_shows_not_logged_in_when_no_session(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_cls.return_value = mock_auth
-
-        response = _client(tmp_path).get("/")
+    response = _client(tmp_path).get("/")
 
     assert response.status_code == 200
     assert "No valid Garmin Connect session" in response.text
 
 
 def test_index_shows_logged_in_when_session_cached(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = True
-        mock_cls.return_value = mock_auth
+    token_dir = tmp_path / "garmin_tokens"
+    token_dir.mkdir()
+    (token_dir / "garmin_tokens.json").write_text("{}")
 
-        response = _client(tmp_path).get("/")
+    response = _client(tmp_path).get("/")
 
     assert response.status_code == 200
     assert "Already logged in" in response.text
 
 
 def test_start_success_without_mfa(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = (object(), object())
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = (None, None)
+        mock_cls.return_value = mock_garmin
 
         response = _client(tmp_path).post("/start")
 
     assert response.status_code == 200
-    assert "No valid Garmin Connect session" in response.text or "Already logged in" in response.text
+    assert (
+        "No valid Garmin Connect session" in response.text
+        or "Already logged in" in response.text
+    )
 
 
 def test_start_wraps_auth_error(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.side_effect = AuthError("bad credentials")
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.side_effect = GarminConnectAuthenticationError("bad credentials")
+        mock_cls.return_value = mock_garmin
 
         response = _client(tmp_path).post("/start")
 
@@ -90,11 +83,10 @@ def test_start_wraps_auth_error(tmp_path):
 
 
 def test_start_wraps_transport_error(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.side_effect = requests.exceptions.ConnectionError("no route")
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.side_effect = requests.exceptions.ConnectionError("no route")
+        mock_cls.return_value = mock_garmin
 
         response = _client(tmp_path).post("/start")
 
@@ -103,14 +95,13 @@ def test_start_wraps_transport_error(tmp_path):
 
 
 def test_start_never_returns_a_raw_500_on_unexpected_error(tmp_path):
-    # A real production incident: garmy raised something other than AuthError (e.g. an
-    # unexpected response shape from Garmin) and this route had no catch-all, so it crashed to
+    # A real production incident: an exception other than GarminConnectAuthenticationError (e.g.
+    # an unexpected response shape from Garmin) and this route had no catch-all, so it crashed to
     # Starlette's generic 500 page instead of a diagnosable message.
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.side_effect = ValueError("unexpected Garmin response shape")
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.side_effect = ValueError("unexpected Garmin response shape")
+        mock_cls.return_value = mock_garmin
 
         response = _client(tmp_path).post("/start")
 
@@ -119,11 +110,10 @@ def test_start_never_returns_a_raw_500_on_unexpected_error(tmp_path):
 
 
 def test_start_needs_mfa_then_verify_succeeds(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_cls.return_value = mock_garmin
 
         client = _client(tmp_path)
         start_response = client.post("/start")
@@ -133,18 +123,18 @@ def test_start_needs_mfa_then_verify_succeeds(tmp_path):
 
     assert verify_response.status_code == 200
     assert "Logged in successfully" in verify_response.text
-    mock_auth.resume_login.assert_called_once_with("123456", {"csrf_token": "abc"})
-    assert mfa_web_server._pending_auth_client is None
-    assert mfa_web_server._pending_mfa_state is None
+    mock_garmin.resume_login.assert_called_once_with({}, "123456")
+    assert mfa_web_server._pending_garmin is None
 
 
 def test_verify_wraps_auth_error(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        mock_auth.resume_login.side_effect = AuthError("MFA verification failed")
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_garmin.resume_login.side_effect = GarminConnectAuthenticationError(
+            "MFA verification failed"
+        )
+        mock_cls.return_value = mock_garmin
 
         client = _client(tmp_path)
         client.post("/start")
@@ -155,12 +145,11 @@ def test_verify_wraps_auth_error(tmp_path):
 
 
 def test_verify_wraps_transport_error(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        mock_auth.resume_login.side_effect = requests.exceptions.Timeout("timed out")
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_garmin.resume_login.side_effect = requests.exceptions.Timeout("timed out")
+        mock_cls.return_value = mock_garmin
 
         client = _client(tmp_path)
         client.post("/start")
@@ -171,12 +160,11 @@ def test_verify_wraps_transport_error(tmp_path):
 
 
 def test_verify_never_returns_a_raw_500_on_unexpected_error(tmp_path):
-    with patch("app.mfa_web.server.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        mock_auth.resume_login.side_effect = ValueError("unexpected Garmin response shape")
-        mock_cls.return_value = mock_auth
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_garmin.resume_login.side_effect = ValueError("unexpected Garmin response shape")
+        mock_cls.return_value = mock_garmin
 
         client = _client(tmp_path)
         client.post("/start")

@@ -54,6 +54,13 @@
   now also waits a few seconds (like a human filling in a form) between loading the login page
   and submitting credentials, matching another technique other Garmin Connect tools use for this
   same issue.
+- **None of the three fixes above cleared Garmin's Cloudflare challenge.** Switched the Garmin
+  Connect library entirely from `garmy` to `python-garminconnect`, which already implements
+  several login strategies (mobile app / web widget / full portal, each with TLS impersonation
+  and its own anti-bot timing) with automatic fallback between them, and is actively maintained
+  against Garmin's changes. Login behavior for users is unchanged — the same cached-session-first
+  login order and the fix above that stops repeated login attempts once MFA is known required
+  both carry over to the new library.
 
 ## [0.1.0] - 2026-07-04
 

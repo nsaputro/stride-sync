@@ -111,6 +111,17 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   submitting credentials, treating request timing as a separate Cloudflare signal from the TLS
   handshake. New `app/sync/garmy_login_delay.py` reproduces this (`GARMIN_LOGIN_DELAY_MIN_S`/
   `GARMIN_LOGIN_DELAY_MAX_S` env vars to override).
+- **None of the three fixes above (User-Agent, TLS impersonation, login delay) cleared Garmin's
+  Cloudflare challenge** — confirmed by live retesting after each one. Rather than layer a fourth
+  `garmy`-specific patch, **migrated the Garmin Connect library from `garmy` to
+  `python-garminconnect`**, which already implements a 5-strategy cascading login chain (mobile
+  app API / web widget / full portal, each tried with both `curl_cffi` TLS impersonation and
+  plain `requests`, falling through to the next strategy on any non-credential/non-MFA failure)
+  plus its own anti-bot timing delays, and is actively maintained against Garmin's changes.
+  Removed `garmy_ua_override.py`, `garmy_tls_impersonation.py`, and `garmy_login_delay.py` (and
+  their tests); rewrote `garmin_client.py`, `mfa_login.py`, `bootstrap_login.py`, and
+  `mfa_web/server.py` against the new library's `Garmin`/`Client` API, carrying over the same
+  cached-session-first login ordering and `.mfa_required` no-retry-storm marker behavior.
 
 ## [0.1.0] - 2026-07-04
 
