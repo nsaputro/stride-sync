@@ -526,6 +526,38 @@ class GarminClient:
                 f"{describe_transport_error(exc)}"
             ) from exc
 
+        return self._merge_with_detail(items)
+
+    def fetch_activities_since(self, start_date: str) -> List[GarminActivity]:
+        """Fetch every activity from `start_date` (YYYY-MM-DD) through today, with the same
+        distance/pace/cadence detail as `fetch_recent_activities` — used for a one-off backfill
+        (see PROJECT_PLAN.md milestone v0.8). Unlike `fetch_recent_activities`'s count-based
+        `limit`, this is date-based and can return far more than 20 activities, so a wide date
+        range can take a while and make many Garmin API calls (one list page per 20 activities,
+        plus 4 detail calls per activity — the same per-activity cost a regular sync already
+        pays, just for more activities at once).
+
+        Args:
+            start_date: First date to include, `YYYY-MM-DD`.
+
+        Raises:
+            ValueError: if `start_date` isn't a valid `YYYY-MM-DD` date (raised by
+                `python-garminconnect` itself before any network call).
+            GarminAPIError: if the activity list or a detail request fails.
+        """
+        try:
+            items = self._garmin.get_activities_by_date(start_date)
+        except (GarminConnectConnectionError, GarminConnectTooManyRequestsError) as exc:
+            raise GarminAPIError(f"Failed to fetch activities since {start_date}: {exc}") from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to list activities since {start_date}: "
+                f"{describe_transport_error(exc)}"
+            ) from exc
+
+        return self._merge_with_detail(items)
+
+    def _merge_with_detail(self, items: Optional[List[Dict[str, Any]]]) -> List[GarminActivity]:
         activities: List[GarminActivity] = []
         for item in items or []:
             activity_id = item["activityId"]

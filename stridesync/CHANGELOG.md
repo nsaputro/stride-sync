@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **New "Settings" tab with a one-off activity backfill** (milestone v0.8): regular syncs are
+  count-based (the most recent N activities), so there was no way to pull in older history
+  beyond whatever that covers. Pick a start date and StrideSync fetches every activity from then
+  through today via Garmin's date-range endpoint (`GarminClient.fetch_activities_since`), reusing
+  the same per-activity write path a regular sync uses (`scheduler.run_backfill_sync`, sharing
+  `_sync_activities` with `run_sync_once` rather than duplicating it). Doesn't touch
+  `training_baseline` — that stays the regular scheduled sync's job. A wide date range can take a
+  while (several Garmin API calls per activity); the UI warns about this and progress already
+  made is saved even if the request itself times out.
+
 ## [0.2.0] - 2026-07-05
 
 ### Added

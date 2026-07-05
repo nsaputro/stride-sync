@@ -160,6 +160,33 @@ def _upsert_training_baseline(
     )
 
 
+def _sync_activities(
+    conn: sqlite3.Connection,
+    client: GarminClient,
+    activities: Sequence[GarminActivity],
+    synced_at: str,
+):
+    """Write a fetched activity list (with laps/HR-zones/samples) to the DB, one at a time —
+    shared by `run_sync_once` and `run_backfill_sync`, which only differ in how the activity
+    list itself was fetched (most-recent-N vs. a date range) and whether `training_baseline`
+    gets refreshed.
+
+    A generator (yields once per completed activity) rather than returning a final count, so a
+    caller iterating it still knows how many completed even if a later activity's fetch raises
+    partway through — matching the "partial progress is still recorded in sync_log" behavior
+    this already had before being extracted into its own function.
+    """
+    for activity in activities:
+        _upsert_activity(conn, activity, synced_at)
+        laps = client.fetch_activity_laps(activity.activity_id)
+        _replace_laps(conn, activity.activity_id, laps)
+        hr_zones = client.fetch_activity_hr_zones(activity.activity_id)
+        _replace_hr_zones(conn, activity.activity_id, hr_zones)
+        samples = client.fetch_activity_samples(activity.activity_id)
+        _replace_samples(conn, activity.activity_id, samples)
+        yield
+
+
 def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> int:
     """Run a single sync pass: login, fetch recent activities + laps, write to SQLite.
 
@@ -183,14 +210,7 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
 
         synced_at = datetime.now(timezone.utc).isoformat()
         _upsert_training_baseline(conn, client.fetch_training_baseline(), synced_at)
-        for activity in activities:
-            _upsert_activity(conn, activity, synced_at)
-            laps = client.fetch_activity_laps(activity.activity_id)
-            _replace_laps(conn, activity.activity_id, laps)
-            hr_zones = client.fetch_activity_hr_zones(activity.activity_id)
-            _replace_hr_zones(conn, activity.activity_id, hr_zones)
-            samples = client.fetch_activity_samples(activity.activity_id)
-            _replace_samples(conn, activity.activity_id, samples)
+        for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
         conn.commit()
     except (GarminAuthError, GarminAPIError) as exc:
@@ -214,6 +234,69 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
         )
         conn.commit()
         logger.info("StrideSync sync succeeded: %d activities", activities_synced)
+    finally:
+        conn.close()
+
+    return activities_synced
+
+
+def run_backfill_sync(settings: Settings, client: GarminClient, start_date: str) -> int:
+    """One-off backfill: fetch every activity from `start_date` through today and write it the
+    same way a regular sync does — a separate entry point from `run_sync_once` (see
+    PROJECT_PLAN.md milestone v0.8) since it's date-based rather than count-based, and can cover
+    far more activities in one call. Does not refresh `training_baseline` — that stays the
+    regular scheduled sync's job.
+
+    Returns:
+        Number of activities backfilled.
+
+    Raises:
+        ValueError: if `start_date` isn't a valid `YYYY-MM-DD` date — raised by
+            `client.fetch_activities_since` before any network call, so nothing is written or
+            logged to `sync_log` for this case; it's a caller-input error, not a sync attempt.
+        GarminAuthError: if login fails.
+        GarminAPIError: if fetching activities or per-activity detail fails.
+    """
+    started_at = datetime.now(timezone.utc).isoformat()
+    conn = db.connect(settings.db_path)
+    activities_synced = 0
+
+    try:
+        client.login()
+        activities = client.fetch_activities_since(start_date)
+
+        synced_at = datetime.now(timezone.utc).isoformat()
+        for _ in _sync_activities(conn, client, activities, synced_at):
+            activities_synced += 1
+        conn.commit()
+    except (GarminAuthError, GarminAPIError) as exc:
+        conn.execute(
+            """
+            INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
+            VALUES (?, ?, 'failed', ?, ?)
+            """,
+            (
+                started_at,
+                datetime.now(timezone.utc).isoformat(),
+                activities_synced,
+                f"Backfill since {start_date} failed: {exc}",
+            ),
+        )
+        conn.commit()
+        logger.error("StrideSync backfill since %s failed: %s", start_date, exc)
+        raise
+    else:
+        conn.execute(
+            """
+            INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
+            VALUES (?, ?, 'success', ?, NULL)
+            """,
+            (started_at, datetime.now(timezone.utc).isoformat(), activities_synced),
+        )
+        conn.commit()
+        logger.info(
+            "StrideSync backfill since %s succeeded: %d activities", start_date, activities_synced
+        )
     finally:
         conn.close()
 

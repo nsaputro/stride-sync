@@ -40,7 +40,7 @@ from app.sync.garmin_client import (
     GarminClient,
     describe_transport_error,
 )
-from app.sync.scheduler import run_sync_once
+from app.sync.scheduler import run_backfill_sync, run_sync_once
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,11 @@ document.addEventListener("submit", function (event) {
 """
 
 
-_TABS = (("dashboard", ".", "Dashboard"), ("running", "running", "Running"))
+_TABS = (
+    ("dashboard", ".", "Dashboard"),
+    ("running", "running", "Running"),
+    ("settings", "settings", "Settings"),
+)
 
 
 def _nav_html(active_tab: str) -> str:
@@ -359,6 +363,82 @@ async def running(request: Request) -> HTMLResponse:
     return _page("Running", _weekly_distance_html(settings), active_tab="running")
 
 
+def _settings_body() -> str:
+    return (
+        "<h2>Backfill activities</h2>"
+        "<p>Regular syncs only fetch your most recent activities. Use this to pull in older "
+        "history from a specific date onward.</p>"
+        '<p class="error">A wide date range can take a while and make many Garmin API calls '
+        "(each activity needs several) — this page will wait for it to finish, so don't close "
+        "the tab. If it looks stuck, check the add-on log; progress already made is saved even "
+        "if the request itself times out.</p>"
+        '<form method="post" action="backfill">'
+        '<input type="date" name="start_date" required>'
+        '<button type="submit" class="primary">Backfill</button></form>'
+    )
+
+
+async def settings_tab(request: Request) -> HTMLResponse:
+    return _page("Settings", _settings_body(), active_tab="settings")
+
+
+async def backfill(request: Request) -> HTMLResponse:
+    """One-off backfill from a user-chosen start date, reusing `scheduler.run_backfill_sync` —
+    see that function's docstring for why it's a separate entry point from the regular
+    `run_sync_once`/"Sync now" flow (date-based, not count-based; can cover far more activities).
+
+    Blocking network calls run directly in this async handler, same rationale as `sync()` above
+    — and here, potentially for much longer, since a wide date range means many more Garmin API
+    calls than a normal sync's fixed top-20.
+    """
+    settings: Settings = request.app.state.settings
+    form = await request.form()
+    start_date = str(form.get("start_date", "")).strip()
+
+    if not start_date:
+        return _page(
+            "Backfill failed",
+            '<p class="error">Choose a start date.</p><p><a href="settings">Back</a></p>',
+            active_tab="settings",
+        )
+
+    client = GarminClient(
+        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+    )
+
+    try:
+        count = run_backfill_sync(settings, client, start_date)
+    except ValueError as exc:
+        return _page(
+            "Backfill failed",
+            f'<p class="error">Invalid start date: {escape(str(exc))}</p>'
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
+        )
+    except (GarminAuthError, GarminAPIError) as exc:
+        return _page(
+            "Backfill failed",
+            f'<p class="error">Backfill failed: {escape(str(exc))}</p>'
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
+        )
+    except Exception:
+        logger.exception("Unexpected error during backfill")
+        return _page(
+            "Backfill failed",
+            '<p class="error">Backfill failed unexpectedly — check the add-on log for '
+            'details.</p><p><a href="settings">Back</a></p>',
+            active_tab="settings",
+        )
+
+    return _page(
+        "Backfill complete",
+        f'<p class="ok">Backfilled {_activity_count(count)} since {escape(start_date)}.</p>'
+        '<p><a href=".">Back to dashboard</a></p>',
+        active_tab="settings",
+    )
+
+
 def _status_body(settings: Settings) -> str:
     has_session = _has_cached_session(settings.garmin_token_dir)
     if has_session:
@@ -539,9 +619,11 @@ def create_app(settings: Settings) -> Starlette:
         routes=[
             Route("/", index, methods=["GET"]),
             Route("/running", running, methods=["GET"]),
+            Route("/settings", settings_tab, methods=["GET"]),
             Route("/start", start, methods=["POST"]),
             Route("/verify", verify, methods=["POST"]),
             Route("/sync", sync, methods=["POST"]),
+            Route("/backfill", backfill, methods=["POST"]),
         ]
     )
     app.state.settings = settings

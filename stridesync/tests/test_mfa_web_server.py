@@ -451,6 +451,101 @@ def test_sync_route_never_returns_a_raw_500_on_unexpected_error(tmp_path):
     assert "Sync failed unexpectedly" in response.text
 
 
+def test_settings_tab_shows_nav_with_settings_active(tmp_path):
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert '<nav class="tabs">' in response.text
+    assert 'href="settings" class="active"' in response.text
+
+
+def test_settings_tab_shows_backfill_form(tmp_path):
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert 'action="backfill"' in response.text
+    assert 'input type="date" name="start_date"' in response.text
+
+
+def test_backfill_route_reports_activity_count(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync", return_value=42
+    ) as mock_run:
+        response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
+
+    assert response.status_code == 200
+    assert "Backfilled 42 activities since 2020-01-01" in response.text
+    mock_run.assert_called_once()
+    assert mock_run.call_args.args[2] == "2020-01-01"
+
+
+def test_backfill_route_uses_singular_wording_for_one_activity(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync", return_value=1
+    ):
+        response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
+
+    assert response.status_code == 200
+    assert "Backfilled 1 activity since 2020-01-01" in response.text
+
+
+def test_backfill_route_requires_a_start_date(tmp_path):
+    response = _client(tmp_path).post("/backfill", data={"start_date": ""})
+
+    assert response.status_code == 200
+    assert "Choose a start date" in response.text
+
+
+def test_backfill_route_wraps_bad_date_value_error(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync",
+        side_effect=ValueError("startdate must be in format 'YYYY-MM-DD', got: garbage"),
+    ):
+        response = _client(tmp_path).post("/backfill", data={"start_date": "garbage"})
+
+    assert response.status_code == 200
+    assert "Invalid start date" in response.text
+    assert "YYYY-MM-DD" in response.text
+
+
+def test_backfill_route_wraps_auth_error(tmp_path):
+    from app.sync.garmin_client import GarminAuthError
+
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync",
+        side_effect=GarminAuthError("requires a multi-factor authentication (MFA) code"),
+    ):
+        response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
+
+    assert response.status_code == 200
+    assert "Backfill failed" in response.text
+    assert "multi-factor authentication" in response.text
+
+
+def test_backfill_route_wraps_api_error(tmp_path):
+    from app.sync.garmin_client import GarminAPIError
+
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync",
+        side_effect=GarminAPIError("Failed to fetch activities since 2020-01-01"),
+    ):
+        response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
+
+    assert response.status_code == 200
+    assert "Backfill failed" in response.text
+    assert "Failed to fetch activities" in response.text
+
+
+def test_backfill_route_never_returns_a_raw_500_on_unexpected_error(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync", side_effect=RuntimeError("unexpected shape")
+    ):
+        response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
+
+    assert response.status_code == 200
+    assert "Backfill failed unexpectedly" in response.text
+
+
 def test_format_timestamp_drops_microseconds_and_offset():
     assert (
         mfa_web_server._format_timestamp("2026-07-05T07:06:51.539869+00:00")
