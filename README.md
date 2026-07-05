@@ -55,8 +55,9 @@ home, rather than standing up a new always-on service from scratch:
   for free — no separate mobile app, port, or login to set up.
 - **Reuses your existing tunnel for MCP.** Many HA users already run the **Cloudflare Tunnel**
   add-on (or a similar reverse-proxy add-on) to reach their instance remotely. Pointing that same
-  tunnel at StrideSync's MCP port (with `mcp_auth_token` set) is how Claude on mobile reaches your
-  Garmin data — no new domain, certificate, or hosting to manage.
+  tunnel at StrideSync's MCP port is how Claude on mobile reaches your Garmin data — no new
+  domain, certificate, or hosting to manage (see `stridesync/DOCS.md` for how to secure that
+  path, since Claude's mobile connector can't send `mcp_auth_token`).
 - **Backed up for free.** Home Assistant's built-in **Settings → System → Backups** includes
   every add-on's `/data` by default, so your synced Garmin history is covered by whatever backup
   schedule you already have for the rest of your HA config — nothing extra to configure or

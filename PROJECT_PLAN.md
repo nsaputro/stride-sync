@@ -290,15 +290,19 @@ all.** v0.6 below shipped `mcp_auth_token` on the assumption that it was merely 
 whether Claude's connector UI could attach a custom `Authorization` header; verified since then
 that it definitively cannot — the UI only offers OAuth (Client ID/Secret) or no auth, with no
 field for a static bearer token (tracked upstream as a known gap, e.g.
-`anthropics/claude-ai-mcp` issues #112 and #411). That means `mcp_auth_token` alone does **not**
-protect a Cloudflare-Tunnel-exposed MCP endpoint against Claude's own official connector traffic,
-which arrives with no auth header regardless. Real protection for this specific client has to
-come from restricting *who can reach the tunnel hostname*, not from a header StrideSync checks —
-see `DOCS.md`'s Cloudflare WAF IP-allowlist step (Anthropic's published MCP-connector egress
-ranges) for the approach actually taken. `mcp_auth_token` is kept anyway as defense-in-depth
-against any other client and in case Claude adds header support later — it still fully protects
-the `mcp-proxy`/Claude-Desktop path (§2 above), since that's a local process that can send any
-header.
+`anthropics/claude-ai-mcp` issues #112 and #411). There is only one MCP server (and one
+`mcp_auth_token` setting) regardless of whether a request arrives over the LAN or through the
+tunnel, and `SharedSecretVerifier` rejects any request without a valid token when it's set (see
+v0.6 below) — so this isn't "set it anyway, it can only help": if `mcp_auth_token` is set,
+**every** request from Claude's own connector gets `401`'d too, since it can never send one.
+Setting `mcp_auth_token` and getting Claude's official mobile connector to work are mutually
+exclusive on the same server. `DOCS.md` documents leaving `mcp_auth_token` empty for this path
+and relying entirely on a Cloudflare WAF rule restricting the tunnel hostname to Anthropic's
+published MCP-connector egress ranges instead — the only access control left once the token is
+disabled for the connector's sake. `mcp_auth_token` remains worth setting for installs that only
+use the `mcp-proxy`/Claude-Desktop path (§2 above) and don't need Claude's official mobile
+connector at all — that path is a local process and can send any header — but it's an either/or
+choice per install, not both at once.
 
 Cloudflare Access alone (gating the tunnel hostname via Cloudflare's own Zero Trust login) was
 considered and rejected as the *only* protection for the same underlying reason: it needs either
@@ -580,9 +584,13 @@ training-pace recommendations.
   [Anthropic's IP-address reference](https://platform.claude.com/docs/en/api/ip-addresses)) —
   real, checkable access control that doesn't depend on the connecting client sending any header.
   `DOCS.md` documents adding a Cloudflare WAF rule restricting the tunnel hostname to these
-  ranges, chosen over the weaker "obscure hostname only" alternative after asking directly.
-  `mcp_auth_token` is kept regardless, as defense-in-depth against any other client and since it
-  still fully protects the Desktop/`mcp-proxy` path (a local process can send any header).
+  ranges, chosen over the weaker "obscure hostname only" alternative after asking directly. This
+  is the *only* protection on this path — `mcp_auth_token` must be left empty for Claude's
+  connector to work at all (there's one server-wide setting, and it 401's every request without
+  a token, including the connector's own), so it isn't "defense-in-depth on top of" the WAF rule
+  here. `mcp_auth_token` is still worth setting for installs that only use the
+  Desktop/`mcp-proxy` path and don't need Claude's official mobile connector — but that's an
+  either/or choice per install, not both at once.
 - ✅ New "Example prompts" section in `DOCS.md`: recent-run review, trend analysis over time,
   and racing/target-pace prompts for easy/long/threshold/interval training types — grounded in
   the actual MCP tools this add-on exposes (`training_baseline`'s lactate-threshold pace/HR and

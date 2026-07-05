@@ -7,10 +7,12 @@
   setups: Claude Desktop (direct LAN, via `mcp-proxy`) and Claude mobile (via an existing
   Cloudflare Tunnel install). Also documents a real limitation discovered while writing this:
   Claude's "Add custom connector" UI has no field for a static bearer token (OAuth or no-auth
-  only), so `mcp_auth_token` can't gate Claude's own connector traffic over a tunnel — real
-  protection there comes from a Cloudflare WAF rule restricting the tunnel hostname to
-  Anthropic's published MCP-connector egress IP ranges instead. Added an "Example prompts"
-  section covering run analysis and racing/target-pace questions by training type.
+  only), and the MCP server 401's every request when `mcp_auth_token` is set — including
+  Claude's own connector, since it can never send one. So `mcp_auth_token` must be left empty for
+  the mobile/connector setup to work at all; real protection there comes from a Cloudflare WAF
+  rule restricting the tunnel hostname to Anthropic's published MCP-connector egress IP ranges
+  instead. Added an "Example prompts" section covering run analysis and racing/target-pace
+  questions by training type.
 
 ## [0.2.1] - 2026-07-05
 
