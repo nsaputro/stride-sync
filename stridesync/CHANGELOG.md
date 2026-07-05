@@ -24,6 +24,11 @@
   SQLite's default rollback-journal mode with no busy timeout. Switched `/data/stridesync.db` to
   WAL mode (readers never block on the one writer) and added a 5s busy timeout to every
   connection as defense-in-depth.
+- **Backfill progress bar disappearing when switching tabs**: the "Settings" nav tab always
+  rendered the plain start-a-backfill form, regardless of whether a backfill was already running
+  — so switching to another tab mid-backfill and clicking back into Settings made the progress
+  bar (and the running backfill itself) look like it had vanished. Settings now shows the live
+  progress bar while a backfill is running, and the last backfill's result/error once it's done.
 
 ## [0.2.0] - 2026-07-05
 
