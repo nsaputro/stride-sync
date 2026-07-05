@@ -56,7 +56,7 @@ def main() -> int:
         print("Garmin sent a multi-factor authentication code to your registered device/email.")
         mfa_code = input("Enter the MFA code: ").strip()
         try:
-            mfa_login.resume_login(garmin, mfa_code)
+            mfa_login.resume_login(garmin, mfa_code, settings.garmin_token_dir)
         except GarminConnectAuthenticationError as exc:
             print(f"MFA verification failed: {exc}", file=sys.stderr)
             return 1

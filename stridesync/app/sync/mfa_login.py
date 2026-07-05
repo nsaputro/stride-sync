@@ -12,6 +12,16 @@ for why it was replaced), `python-garminconnect` keeps pending MFA state on the 
 instance itself rather than an external state object, so there is no `mfa_state` to thread
 through to `resume_login()` — the caller just needs to keep the same `Garmin` instance alive
 between `start_login()` and `resume_login()`.
+
+**Persisting the session is this module's job, not the library's, on this flow.**
+`Garmin.login()` only calls `Client.dump(tokenstore_path)` internally on the code path taken
+when `return_on_mfa=False` — with `return_on_mfa=True` (required here so an MFA requirement is
+signaled via a return value instead of an exception), it returns immediately after either a
+clean login or detecting `needs_mfa`, before ever reaching that `dump()` call, and
+`Client.resume_login()` doesn't persist anything either. Without the explicit `_persist_session`
+calls below, a "successful" login/MFA-resume through this flow would never actually be saved to
+`token_dir` — confirmed live: the web UI kept showing "not logged in" after a real, successful
+login, because nothing had been written to disk for it to detect.
 """
 
 from __future__ import annotations
@@ -43,10 +53,11 @@ def start_login(garmin: Garmin, token_dir: Optional[str]) -> Union[LoginResult, 
     mfa_status, _legacy_token = garmin.login(tokenstore=token_dir)
     if mfa_status == "needs_mfa":
         return NeedsMfa()
+    _persist_session(garmin, token_dir)
     return LoginResult()
 
 
-def resume_login(garmin: Garmin, mfa_code: str) -> None:
+def resume_login(garmin: Garmin, mfa_code: str, token_dir: Optional[str]) -> None:
     """Complete a pending MFA login on the same `Garmin` instance `start_login` was called on.
 
     Raises:
@@ -54,3 +65,11 @@ def resume_login(garmin: Garmin, mfa_code: str) -> None:
             verification fails.
     """
     garmin.resume_login({}, mfa_code)
+    _persist_session(garmin, token_dir)
+
+
+def _persist_session(garmin: Garmin, token_dir: Optional[str]) -> None:
+    """Save the now-authenticated session to `token_dir` — see module docstring for why this
+    flow (unlike `GarminClient.login()`'s plain, non-MFA login) has to do this explicitly."""
+    if token_dir:
+        garmin.client.dump(token_dir)

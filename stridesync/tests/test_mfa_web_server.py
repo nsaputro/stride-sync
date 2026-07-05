@@ -41,6 +41,7 @@ def test_index_shows_not_logged_in_when_no_session(tmp_path):
 
     assert response.status_code == 200
     assert "No valid Garmin Connect session" in response.text
+    assert 'action="sync"' not in response.text
 
 
 def test_index_shows_logged_in_when_session_cached(tmp_path):
@@ -52,6 +53,7 @@ def test_index_shows_logged_in_when_session_cached(tmp_path):
 
     assert response.status_code == 200
     assert "Already logged in" in response.text
+    assert 'action="sync"' in response.text
 
 
 def test_start_reports_clear_error_when_credentials_missing(tmp_path):
@@ -143,6 +145,11 @@ def test_start_needs_mfa_then_verify_succeeds(tmp_path):
     assert "Logged in successfully" in verify_response.text
     mock_garmin.resume_login.assert_called_once_with({}, "123456")
     assert mfa_web_server._pending_garmin is None
+    # Regression check: a real production incident where a "successful" MFA login was never
+    # actually saved, because Garmin.login()/resume_login() skip persisting to disk on the
+    # return_on_mfa=True path this module has to use (see mfa_login.py's module docstring) — the
+    # web UI kept showing "not logged in" even after login had genuinely succeeded.
+    mock_garmin.client.dump.assert_called_once_with(str(tmp_path / "garmin_tokens"))
 
 
 def test_verify_wraps_auth_error(tmp_path):
@@ -197,3 +204,61 @@ def test_verify_without_pending_flow_shows_error(tmp_path):
 
     assert response.status_code == 200
     assert "No login is currently waiting" in response.text
+
+
+def test_sync_route_reports_activity_count(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_sync_once", return_value=5
+    ) as mock_run:
+        response = _client(tmp_path).post("/sync")
+
+    assert response.status_code == 200
+    assert "Synced 5 activities" in response.text
+    mock_run.assert_called_once()
+
+
+def test_sync_route_uses_singular_wording_for_one_activity(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_sync_once", return_value=1
+    ):
+        response = _client(tmp_path).post("/sync")
+
+    assert response.status_code == 200
+    assert "Synced 1 activity." in response.text
+
+
+def test_sync_route_wraps_auth_error(tmp_path):
+    from app.sync.garmin_client import GarminAuthError
+
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_sync_once",
+        side_effect=GarminAuthError("requires a multi-factor authentication (MFA) code"),
+    ):
+        response = _client(tmp_path).post("/sync")
+
+    assert response.status_code == 200
+    assert "Sync failed" in response.text
+    assert "multi-factor authentication" in response.text
+
+
+def test_sync_route_wraps_api_error(tmp_path):
+    from app.sync.garmin_client import GarminAPIError
+
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_sync_once", side_effect=GarminAPIError("Failed to fetch activities")
+    ):
+        response = _client(tmp_path).post("/sync")
+
+    assert response.status_code == 200
+    assert "Sync failed" in response.text
+    assert "Failed to fetch activities" in response.text
+
+
+def test_sync_route_never_returns_a_raw_500_on_unexpected_error(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_sync_once", side_effect=ValueError("unexpected shape")
+    ):
+        response = _client(tmp_path).post("/sync")
+
+    assert response.status_code == 200
+    assert "Sync failed unexpectedly" in response.text

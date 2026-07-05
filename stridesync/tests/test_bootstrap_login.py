@@ -60,6 +60,10 @@ def test_mfa_account_prompts_and_resumes(monkeypatch, tmp_path):
 
     mock_input.assert_called_once()
     mock_garmin.resume_login.assert_called_once_with({}, "123456")
+    # Regression check: Garmin.login()/resume_login() skip persisting to disk on the
+    # return_on_mfa=True path this CLI has to use (see mfa_login.py's module docstring) — without
+    # the explicit dump() this asserts, a "successful" bootstrap login was never actually saved.
+    mock_garmin.client.dump.assert_called_once_with(str(tmp_path / "tokens"))
 
 
 def test_mfa_resume_failure_returns_error(monkeypatch, tmp_path):
