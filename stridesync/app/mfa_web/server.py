@@ -31,7 +31,14 @@ from starlette.routing import Route
 
 from app.config import Settings
 from app.sync import mfa_login
-from app.sync.garmin_client import TRANSPORT_ERRORS, describe_transport_error
+from app.sync.garmin_client import (
+    TRANSPORT_ERRORS,
+    GarminAPIError,
+    GarminAuthError,
+    GarminClient,
+    describe_transport_error,
+)
+from app.sync.scheduler import run_sync_once
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +77,8 @@ def _has_cached_session(token_dir: Optional[str]) -> bool:
 
 
 def _status_body(settings: Settings) -> str:
-    if _has_cached_session(settings.garmin_token_dir):
+    has_session = _has_cached_session(settings.garmin_token_dir)
+    if has_session:
         message = (
             '<p class="ok">Already logged in to Garmin Connect — scheduled syncs are using '
             "this session.</p>"
@@ -83,11 +91,16 @@ def _status_body(settings: Settings) -> str:
         )
         button_label = "Log in to Garmin Connect"
 
-    return (
+    body = (
         f"{message}"
         f'<form method="post" action="start"><button type="submit">{escape(button_label)}'
         "</button></form>"
     )
+    if has_session:
+        body += (
+            '<form method="post" action="sync"><button type="submit">Sync now</button></form>'
+        )
+    return body
 
 
 async def index(request: Request) -> HTMLResponse:
@@ -150,6 +163,7 @@ async def start(request: Request) -> HTMLResponse:
 
 async def verify(request: Request) -> HTMLResponse:
     global _pending_garmin
+    settings: Settings = request.app.state.settings
 
     form = await request.form()
     code = str(form.get("code", "")).strip()
@@ -165,7 +179,7 @@ async def verify(request: Request) -> HTMLResponse:
         )
 
     try:
-        mfa_login.resume_login(garmin, code)
+        mfa_login.resume_login(garmin, code, settings.garmin_token_dir)
     except GarminConnectAuthenticationError as exc:
         return _page(
             "MFA verification failed",
@@ -197,12 +211,49 @@ async def verify(request: Request) -> HTMLResponse:
     )
 
 
+async def sync(request: Request) -> HTMLResponse:
+    """On-demand sync, reusing the same `run_sync_once` the sync-scheduler service calls on its
+    own interval — this button doesn't duplicate that logic, it just triggers it early, e.g. to
+    verify a just-completed login actually works end-to-end without waiting for the next
+    scheduled run.
+
+    Blocking network calls run directly in this async handler, same as `start`/`verify` above —
+    consistent with the rest of this module, and acceptable for a single-account ingress panel.
+    """
+    settings: Settings = request.app.state.settings
+    client = GarminClient(
+        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+    )
+
+    try:
+        count = run_sync_once(settings, client)
+    except (GarminAuthError, GarminAPIError) as exc:
+        return _page(
+            "Sync failed",
+            f'<p class="error">Sync failed: {escape(str(exc))}</p><p><a href=".">Back</a></p>',
+        )
+    except Exception:
+        logger.exception("Unexpected error during on-demand sync")
+        return _page(
+            "Sync failed",
+            '<p class="error">Sync failed unexpectedly — check the add-on log for details.</p>'
+            '<p><a href=".">Back</a></p>',
+        )
+
+    return _page(
+        "Sync complete",
+        f'<p class="ok">Synced {count} activit{"y" if count == 1 else "ies"}.</p>'
+        '<p><a href=".">Back</a></p>',
+    )
+
+
 def create_app(settings: Settings) -> Starlette:
     app = Starlette(
         routes=[
             Route("/", index, methods=["GET"]),
             Route("/start", start, methods=["POST"]),
             Route("/verify", verify, methods=["POST"]),
+            Route("/sync", sync, methods=["POST"]),
         ]
     )
     app.state.settings = settings
