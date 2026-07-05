@@ -194,6 +194,7 @@ class ActivitySample:
     elevation_meters: Optional[float]
     latitude: Optional[float]
     longitude: Optional[float]
+    temperature_celsius: Optional[float]
 
 
 def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
@@ -333,6 +334,7 @@ _SAMPLE_METRIC_KEYS: Dict[str, tuple] = {
     "latitude": ("directLatitude",),
     "longitude": ("directLongitude",),
     "cadence_spm": ("directRunCadence", "directDoubleCadence"),
+    "temperature_celsius": ("directTemperature",),
 }
 
 
@@ -384,6 +386,7 @@ def _normalize_samples(activity_id: int, raw: Dict[str, Any]) -> List[ActivitySa
                 elevation_meters=_value(values, "elevation_meters"),
                 latitude=_value(values, "latitude"),
                 longitude=_value(values, "longitude"),
+                temperature_celsius=_value(values, "temperature_celsius"),
             )
         )
     return samples

@@ -93,16 +93,17 @@ CREATE TABLE IF NOT EXISTS activity_hr_zones (
 -- cardiac-drift or precise negative-split detection that 1km auto-lap averages hide. See
 -- PROJECT_PLAN.md milestone v0.5.
 CREATE TABLE IF NOT EXISTS activity_samples (
-    activity_id      INTEGER NOT NULL,
-    sample_index     INTEGER NOT NULL,
-    elapsed_seconds  REAL,
-    heart_rate       INTEGER,
-    speed_mps        REAL,
-    pace_sec_per_km  REAL,
-    cadence_spm      REAL,
-    elevation_meters REAL,
-    latitude         REAL,
-    longitude        REAL,
+    activity_id         INTEGER NOT NULL,
+    sample_index        INTEGER NOT NULL,
+    elapsed_seconds     REAL,
+    heart_rate          INTEGER,
+    speed_mps           REAL,
+    pace_sec_per_km     REAL,
+    cadence_spm         REAL,
+    elevation_meters    REAL,
+    latitude            REAL,
+    longitude           REAL,
+    temperature_celsius REAL,
     PRIMARY KEY (activity_id, sample_index),
     FOREIGN KEY (activity_id) REFERENCES activities (activity_id)
 );

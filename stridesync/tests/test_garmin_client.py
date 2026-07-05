@@ -181,10 +181,11 @@ class TestNormalizeSamples:
                 {"key": "directLatitude", "metricsIndex": 4},
                 {"key": "directLongitude", "metricsIndex": 5},
                 {"key": "directRunCadence", "metricsIndex": 6},
+                {"key": "directTemperature", "metricsIndex": 7},
             ],
             "activityDetailMetrics": [
-                {"metrics": [10.0, 150, 2.78, 12.5, 37.0, -122.0, 170.0]},
-                {"metrics": [20.0, 152, 2.80, 12.8, 37.001, -122.001, 172.0]},
+                {"metrics": [10.0, 150, 2.78, 12.5, 37.0, -122.0, 170.0, 18.5]},
+                {"metrics": [20.0, 152, 2.80, 12.8, 37.001, -122.001, 172.0, 18.6]},
             ],
         }
 
@@ -201,7 +202,9 @@ class TestNormalizeSamples:
         assert samples[0].elevation_meters == 12.5
         assert samples[0].latitude == 37.0
         assert samples[0].longitude == -122.0
+        assert samples[0].temperature_celsius == 18.5
         assert samples[1].sample_index == 1
+        assert samples[1].temperature_celsius == 18.6
 
     def test_missing_descriptors_returns_empty(self):
         assert _normalize_samples(123, {}) == []
@@ -217,6 +220,7 @@ class TestNormalizeSamples:
         assert len(samples) == 1
         assert samples[0].heart_rate is None
         assert samples[0].speed_mps is None
+        assert samples[0].temperature_celsius is None
 
 
 class TestDescribeTransportError:

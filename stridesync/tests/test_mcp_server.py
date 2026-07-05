@@ -103,8 +103,9 @@ def seed_db(db_path: str) -> None:
             """
             INSERT INTO activity_samples (
                 activity_id, sample_index, elapsed_seconds, heart_rate, speed_mps,
-                pace_sec_per_km, cadence_spm, elevation_meters, latitude, longitude
-            ) VALUES (1, ?, ?, ?, 2.78, 359.7, 170.0, 12.5, 37.0, -122.0)
+                pace_sec_per_km, cadence_spm, elevation_meters, latitude, longitude,
+                temperature_celsius
+            ) VALUES (1, ?, ?, ?, 2.78, 359.7, 170.0, 12.5, 37.0, -122.0, 18.5)
             """,
             [(i, float(i * 10), 150 + i) for i in range(5)],
         )
@@ -295,6 +296,7 @@ class TestQueries:
             samples = get_activity_samples(conn, 1, max_points=200)
             assert len(samples) == 5
             assert samples[0]["heart_rate"] == 150
+            assert samples[0]["temperature_celsius"] == 18.5
         finally:
             conn.close()
 

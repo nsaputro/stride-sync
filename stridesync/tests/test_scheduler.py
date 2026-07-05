@@ -110,6 +110,7 @@ def make_sample(activity_id=1, sample_index=0) -> ActivitySample:
         elevation_meters=12.5,
         latitude=37.0,
         longitude=-122.0,
+        temperature_celsius=18.0,
     )
 
 
@@ -262,6 +263,7 @@ def test_run_sync_once_writes_hr_zones_and_samples(tmp_path):
         ).fetchone()
         assert sample_row["heart_rate"] == 150
         assert sample_row["pace_sec_per_km"] == 359.7
+        assert sample_row["temperature_celsius"] == 18.0
     finally:
         conn.close()
 

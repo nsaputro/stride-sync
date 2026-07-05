@@ -59,6 +59,39 @@ def test_connect_sets_busy_timeout(tmp_path):
         conn.close()
 
 
+def test_connect_adds_temperature_column_to_an_older_database(tmp_path):
+    # Simulates an install that shipped before temperature_celsius existed: CREATE TABLE IF NOT
+    # EXISTS (in schema.sql) is a no-op against an already-existing table, so upgrading needs an
+    # explicit migration step, or every sync afterward would fail inserting into this column.
+    db_path = str(tmp_path / "stridesync.db")
+    old_conn = sqlite3.connect(db_path)
+    old_conn.execute(
+        """
+        CREATE TABLE activity_samples (
+            activity_id INTEGER NOT NULL,
+            sample_index INTEGER NOT NULL,
+            heart_rate INTEGER,
+            PRIMARY KEY (activity_id, sample_index)
+        )
+        """
+    )
+    old_conn.execute(
+        "INSERT INTO activity_samples (activity_id, sample_index, heart_rate) VALUES (1, 0, 150)"
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    conn = db.connect(db_path)
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(activity_samples)")}
+        assert "temperature_celsius" in columns
+        # Pre-existing data must survive the migration untouched.
+        row = conn.execute("SELECT heart_rate FROM activity_samples WHERE activity_id = 1").fetchone()
+        assert row["heart_rate"] == 150
+    finally:
+        conn.close()
+
+
 def test_readonly_reader_does_not_block_writer_in_wal_mode(tmp_path):
     """A read-only connection must not stop the write connection from committing.
 

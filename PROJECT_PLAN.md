@@ -636,6 +636,32 @@ account, which never showed the MFA prompt at all — clicking it appeared to do
   fixable from StrideSync's side. Left as a known, non-fatal, already-gracefully-handled
   limitation (milestone v0.5) rather than a bug to chase further here.
 
+### v0.11 — Temperature in per-activity time-series samples 🔄
+
+Requested directly: is temperature synced with activity data? It wasn't — checked the schema and
+sync code and confirmed no temperature field existed anywhere, despite Garmin's per-second chart
+data (already fetched for `activity_samples`, milestone v0.5) including it for devices that
+record it.
+
+- ✅ New `temperature_celsius` field: `ActivitySample` dataclass, `_SAMPLE_METRIC_KEYS` gains
+  `"temperature_celsius": ("directTemperature",)` (same "direct"-prefixed chart-data key
+  convention as `directHeartRate`/`directSpeed`/`directElevation` already in use, inferred from
+  the wider Garmin Connect tooling ecosystem, not yet confirmed against a live account — same
+  caveat as the rest of this metric-key table), `activity_samples` table column, and the
+  `activity_samples` MCP tool's SELECT — nullable throughout, same graceful-degradation pattern
+  as every other sample field for a device/activity that doesn't report it.
+- ✅ **Real schema-migration gap found and fixed**: `activity_samples` already existed in shipped
+  databases (unlike every previous milestone's schema addition, which was always a brand-new
+  table `CREATE TABLE IF NOT EXISTS` handles for free) — adding a column to `schema.sql` alone is
+  a no-op against an already-existing table, so every install upgrading from before this column
+  existed would have started failing every sample INSERT with "table activity_samples has no
+  column named temperature_celsius". Added `db._add_column_if_missing()`, called from `init_db()`
+  on every startup (checks `PRAGMA table_info`, `ALTER TABLE ... ADD COLUMN` only if missing) —
+  this is this codebase's first real column-migration, since nothing needed one before. Verified
+  with a test that creates an old-shape `activity_samples` table by hand, connects through
+  `db.connect()`, and confirms both the new column appears and pre-existing data survives
+  untouched.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added

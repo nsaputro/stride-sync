@@ -8,6 +8,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Added
+- **Temperature in per-activity time-series samples** (`activity_samples` table / the
+  `activity_samples` MCP tool): Garmin's per-second chart data includes ambient temperature for
+  devices that record it (`directTemperature`), alongside the existing pace/HR/cadence/elevation
+  fields — previously fetched but discarded. New `temperature_celsius` column, nullable like
+  every other sample field for devices/activities that don't report it. Existing databases get
+  the new column via an explicit migration on next startup (`CREATE TABLE IF NOT EXISTS` alone
+  doesn't add columns to an already-existing table).
+
 ### Changed
 - **Rewrote `DOCS.md`'s Claude connection instructions** (milestone v0.9) into two concrete
   setups: Claude Desktop (direct LAN, via `mcp-proxy`) and Claude mobile (via an existing

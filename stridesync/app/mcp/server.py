@@ -197,10 +197,10 @@ def get_activity_hr_zones(conn: sqlite3.Connection, activity_id: int) -> List[Di
 def get_activity_samples(
     conn: sqlite3.Connection, activity_id: int, max_points: int = 200
 ) -> List[Dict[str, Any]]:
-    """Time-series pace/HR/cadence/elevation for one activity, evenly downsampled to at most
-    `max_points` points — fine-grained enough to spot pacing consistency or HR drift (e.g.
-    cardiac drift over a long run) at a finer resolution than 1km lap averages, without dumping
-    thousands of raw rows into a single tool response.
+    """Time-series pace/HR/cadence/elevation/temperature for one activity, evenly downsampled to
+    at most `max_points` points — fine-grained enough to spot pacing consistency or HR drift
+    (e.g. cardiac drift over a long run) at a finer resolution than 1km lap averages, without
+    dumping thousands of raw rows into a single tool response.
     """
     max_points = _clamp(max_points, _MIN_LIMIT, _MAX_SAMPLE_POINTS)
     total = conn.execute(
@@ -213,7 +213,7 @@ def get_activity_samples(
     rows = conn.execute(
         """
         SELECT sample_index, elapsed_seconds, heart_rate, speed_mps, pace_sec_per_km,
-               cadence_spm, elevation_meters, latitude, longitude
+               cadence_spm, elevation_meters, latitude, longitude, temperature_celsius
         FROM activity_samples
         WHERE activity_id = ? AND sample_index % ? = 0
         ORDER BY sample_index
