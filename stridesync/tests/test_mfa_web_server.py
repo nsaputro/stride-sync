@@ -88,7 +88,7 @@ def test_index_shows_total_activities_and_last_sync_success(tmp_path):
 
     assert response.status_code == 200
     assert "Total activities synced: 3" in response.text
-    assert "Last sync: success at 2026-07-01T06:05:00 (3 activities)" in response.text
+    assert "Last sync: success at 2026-07-01 06:05 UTC (3 activities)" in response.text
 
 
 def test_index_shows_last_sync_error(tmp_path):
@@ -109,7 +109,7 @@ def test_index_shows_last_sync_error(tmp_path):
     response = TestClient(mfa_web_server.create_app(settings)).get("/")
 
     assert response.status_code == 200
-    assert "Last sync: failed at 2026-07-01T06:00:05 (0 activities)" in response.text
+    assert "Last sync: failed at 2026-07-01 06:00 UTC (0 activities)" in response.text
     assert "Last sync error: Could not reach Garmin Connect" in response.text
 
 
@@ -319,3 +319,18 @@ def test_sync_route_never_returns_a_raw_500_on_unexpected_error(tmp_path):
 
     assert response.status_code == 200
     assert "Sync failed unexpectedly" in response.text
+
+
+def test_format_timestamp_drops_microseconds_and_offset():
+    assert (
+        mfa_web_server._format_timestamp("2026-07-05T07:06:51.539869+00:00")
+        == "2026-07-05 07:06 UTC"
+    )
+
+
+def test_format_timestamp_handles_missing_value():
+    assert mfa_web_server._format_timestamp(None) == "unknown"
+
+
+def test_format_timestamp_falls_back_to_raw_string_on_bad_input():
+    assert mfa_web_server._format_timestamp("not-a-timestamp") == "not-a-timestamp"
