@@ -122,6 +122,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   their tests); rewrote `garmin_client.py`, `mfa_login.py`, `bootstrap_login.py`, and
   `mfa_web/server.py` against the new library's `Garmin`/`Client` API, carrying over the same
   cached-session-first login ordering and `.mfa_required` no-retry-storm marker behavior.
+- **The MFA login web UI failed with `Login failed: Username and password are required`** on the
+  very first login attempt (the whole point of the UI — no cached session yet): unlike
+  `sync-scheduler/run`, the `mfa-web` s6 service's `run` script never exported
+  `GARMIN_USERNAME`/`GARMIN_PASSWORD`, so the web UI always saw empty credentials regardless of
+  the add-on's configuration. Pure-Python tests never caught this since they call `create_app()`
+  directly, bypassing the run script entirely. Fixed the run script, and added an explicit
+  missing-credentials check to `mfa_web/server.py`'s `start()` (matching `bootstrap_login.py`'s
+  existing one) so a genuinely misconfigured install fails with a clear message instead of the
+  library's generic one.
 
 ## [0.1.0] - 2026-07-04
 

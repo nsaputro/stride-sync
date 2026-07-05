@@ -3,8 +3,12 @@
 # alternative to `python3 -m app.sync.bootstrap_login` for HA users without terminal/`docker
 # exec` access. See PROJECT_PLAN.md §1, "Known risk" section.
 
+GARMIN_USERNAME=$(bashio::config 'garmin_username')
+GARMIN_PASSWORD=$(bashio::config 'garmin_password')
 LOG_LEVEL=$(bashio::config 'log_level')
 
+export GARMIN_USERNAME
+export GARMIN_PASSWORD
 export LOG_LEVEL
 # Fixed internal port, matching config.yaml's ingress_port — not a user-configurable option
 # (ingress traffic is reached through HA's own proxy, so there's nothing for a user to set).

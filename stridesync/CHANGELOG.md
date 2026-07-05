@@ -61,6 +61,11 @@
   against Garmin's changes. Login behavior for users is unchanged — the same cached-session-first
   login order and the fix above that stops repeated login attempts once MFA is known required
   both carry over to the new library.
+- **The MFA login web UI failed with "Username and password are required" on a first-time
+  login** — the `mfa-web` service's startup script wasn't passing your Garmin credentials
+  through to it at all (a packaging bug, unrelated to what you entered). Fixed, and the web UI
+  now shows a clear message if the add-on's `garmin_username`/`garmin_password` options are
+  genuinely unset.
 
 ## [0.1.0] - 2026-07-04
 
