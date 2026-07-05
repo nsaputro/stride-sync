@@ -28,7 +28,7 @@ before they're promoted to a stable release; see `CHANGELOG.md` for the full ver
 - **MCP server** (Streamable HTTP, port `8765`) exposing 8 tools to any MCP client — recent
   activities, per-lap splits, pace/cadence/HR trend over N days, aggregate training load,
   training baseline (lactate threshold, race predictions), per-activity HR zones, per-activity
-  time-series samples, and last-sync status.
+  time-series samples (pace/HR/cadence/elevation/temperature), and last-sync status.
 - **Web UI** (Home Assistant sidebar panel, or standalone on port `8767`) with three tabs:
   - **Dashboard** — login status, total activities synced, last-sync outcome, and your most
     recent activities.

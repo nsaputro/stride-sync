@@ -34,3 +34,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     """Create tables if they don't already exist. Safe to call on every startup."""
     conn.executescript(_SCHEMA_PATH.read_text())
     conn.commit()
+    _add_column_if_missing(conn, "activity_samples", "temperature_celsius", "REAL")
+    conn.commit()
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    """Add a column to an already-shipped table if it isn't there yet.
+
+    `CREATE TABLE IF NOT EXISTS` (above) only helps brand-new tables — it's a no-op against a
+    database file created by an older version of this schema, so a column added to an existing
+    table needs an explicit `ALTER TABLE` here, or every install upgrading from before this
+    column existed would start failing every INSERT that includes it.
+    """
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")

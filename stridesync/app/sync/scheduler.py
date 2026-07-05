@@ -116,10 +116,11 @@ def _replace_samples(
         """
         INSERT INTO activity_samples (
             activity_id, sample_index, elapsed_seconds, heart_rate, speed_mps, pace_sec_per_km,
-            cadence_spm, elevation_meters, latitude, longitude
+            cadence_spm, elevation_meters, latitude, longitude, temperature_celsius
         ) VALUES (
             :activity_id, :sample_index, :elapsed_seconds, :heart_rate, :speed_mps,
-            :pace_sec_per_km, :cadence_spm, :elevation_meters, :latitude, :longitude
+            :pace_sec_per_km, :cadence_spm, :elevation_meters, :latitude, :longitude,
+            :temperature_celsius
         )
         """,
         [sample.__dict__ for sample in samples],
