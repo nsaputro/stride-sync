@@ -310,6 +310,39 @@ def test_start_success_without_mfa(tmp_path):
     )
 
 
+def test_start_uses_real_token_dir_when_no_session_cached_yet(tmp_path):
+    # First-ever login: nothing to force past, so the tokenstore-resume path is harmless (and
+    # correct — there's nothing there to resume anyway).
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = (None, None)
+        mock_cls.return_value = mock_garmin
+
+        _client(tmp_path).post("/start")
+
+    mock_garmin.login.assert_called_once_with(tokenstore=str(tmp_path / "garmin_tokens"))
+
+
+def test_start_forces_fresh_login_when_session_already_cached(tmp_path):
+    # Regression test: an MFA-enabled account clicking "Log in again" while a still-valid
+    # session existed never saw the MFA prompt, because Garmin.login() silently resumed the
+    # cached session instead of re-authenticating. tokenstore=None is what forces a real login.
+    token_dir = tmp_path / "garmin_tokens"
+    token_dir.mkdir()
+    (token_dir / "garmin_tokens.json").write_text("{}")
+
+    with patch("app.mfa_web.server.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_cls.return_value = mock_garmin
+
+        response = _client(tmp_path).post("/start")
+
+    mock_garmin.login.assert_called_once_with(tokenstore=None)
+    assert response.status_code == 200
+    assert "Enter MFA code" in response.text
+
+
 def test_start_wraps_auth_error(tmp_path):
     with patch("app.mfa_web.server.Garmin") as mock_cls:
         mock_garmin = MagicMock()

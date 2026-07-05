@@ -590,7 +590,7 @@ def _status_body(settings: Settings) -> str:
             '<p class="ok">Already logged in to Garmin Connect — scheduled syncs are using '
             "this session.</p>"
         )
-        button_label = "Log in again"
+        button_label = "Log in again (forces a fresh login, including MFA if required)"
     else:
         message = (
             "<p>No valid Garmin Connect session yet. Click below to log in — if your account "
@@ -635,8 +635,16 @@ async def start(request: Request) -> HTMLResponse:
         password=settings.garmin_password,
         return_on_mfa=True,
     )
+    # If a session is already cached, this click is "Log in again" (see _status_body) — the user
+    # explicitly wants a real re-authentication, so force one instead of silently resuming the
+    # existing session, which would skip MFA entirely and look like clicking the button did
+    # nothing (a real reported bug: an MFA-enabled account clicking "Log in again" never saw the
+    # MFA prompt, because the still-valid cached session was resumed instead of re-authenticated).
+    force_fresh_login = _has_cached_session(settings.garmin_token_dir)
     try:
-        result = mfa_login.start_login(garmin, settings.garmin_token_dir)
+        result = mfa_login.start_login(
+            garmin, settings.garmin_token_dir, force=force_fresh_login
+        )
     except GarminConnectAuthenticationError as exc:
         return _page(
             "Login failed",

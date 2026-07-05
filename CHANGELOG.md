@@ -20,6 +20,17 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   instead. Added an "Example prompts" section covering run analysis and racing/target-pace
   questions by training type.
 
+### Fixed
+- **"Log in again" silently did nothing for MFA-enabled accounts with an existing session**:
+  `Garmin.login()` always prefers resuming a still-valid cached session over a real
+  credentials-based login, entirely skipping the MFA challenge, even when the user explicitly
+  clicked "Log in again" wanting a genuine re-authentication — reported live by an MFA-enabled
+  account that never saw the MFA prompt. `mfa_login.start_login()` gained a `force` parameter
+  (passes `tokenstore=None` instead of the real token directory, so `Garmin.login()` has nothing
+  to resume from) used whenever a cached session already exists; a failed forced re-login never
+  touches the existing session on disk, so scheduled syncs keep working with the old session if
+  the new attempt fails.
+
 ## [0.2.1] - 2026-07-05
 
 ### Added
