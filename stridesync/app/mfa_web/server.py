@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import threading
 from html import escape
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from garminconnect import Garmin, GarminConnectAuthenticationError
 from starlette.applications import Starlette
@@ -76,6 +77,60 @@ def _has_cached_session(token_dir: Optional[str]) -> bool:
     return os.path.exists(os.path.join(token_dir, "garmin_tokens.json"))
 
 
+def _activity_count(count: int) -> str:
+    return f"{count} activit{'y' if count == 1 else 'ies'}"
+
+
+def _sync_summary(db_path: str) -> Dict[str, Any]:
+    """Best-effort total-activities-synced + last-sync-outcome summary for display.
+
+    Opens its own read-only connection rather than reuse `app/mcp/server.py`'s (which serves the
+    same `sync_log`/`activities` data to MCP clients) — this module and the MCP server are meant
+    to stay independently runnable (CLAUDE.md), so importing one from the other for a two-query
+    lookup isn't worth coupling them. Returns defaults, not an error, if the DB file doesn't
+    exist yet (e.g. the sync-scheduler service hasn't completed its first pass).
+    """
+    if not os.path.exists(db_path):
+        return {"total_activities": 0, "last_sync": None}
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        total_activities = conn.execute("SELECT COUNT(*) AS n FROM activities").fetchone()["n"]
+        last_sync_row = conn.execute(
+            """
+            SELECT started_at, finished_at, status, activities_synced, error_message
+            FROM sync_log ORDER BY id DESC LIMIT 1
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    return {
+        "total_activities": total_activities,
+        "last_sync": dict(last_sync_row) if last_sync_row is not None else None,
+    }
+
+
+def _sync_summary_html(settings: Settings) -> str:
+    summary = _sync_summary(settings.db_path)
+    html = f"<p>Total activities synced: {summary['total_activities']}</p>"
+
+    last_sync = summary["last_sync"]
+    if last_sync is None:
+        return html + "<p>No sync has run yet.</p>"
+
+    css_class = "ok" if last_sync["status"] == "success" else "error"
+    when = last_sync["finished_at"] or last_sync["started_at"]
+    html += (
+        f'<p class="{css_class}">Last sync: {escape(last_sync["status"])} at {escape(when)} '
+        f'({_activity_count(last_sync["activities_synced"])})</p>'
+    )
+    if last_sync["status"] != "success" and last_sync["error_message"]:
+        html += f'<p class="error">Last sync error: {escape(last_sync["error_message"])}</p>'
+    return html
+
+
 def _status_body(settings: Settings) -> str:
     has_session = _has_cached_session(settings.garmin_token_dir)
     if has_session:
@@ -91,8 +146,8 @@ def _status_body(settings: Settings) -> str:
         )
         button_label = "Log in to Garmin Connect"
 
-    body = (
-        f"{message}"
+    body = f"{message}{_sync_summary_html(settings)}"
+    body += (
         f'<form method="post" action="start"><button type="submit">{escape(button_label)}'
         "</button></form>"
     )
@@ -242,8 +297,7 @@ async def sync(request: Request) -> HTMLResponse:
 
     return _page(
         "Sync complete",
-        f'<p class="ok">Synced {count} activit{"y" if count == 1 else "ies"}.</p>'
-        '<p><a href=".">Back</a></p>',
+        f'<p class="ok">Synced {_activity_count(count)}.</p><p><a href=".">Back</a></p>',
     )
 
 

@@ -30,6 +30,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `scheduler.run_sync_once` on demand, reusing the exact same sync logic the sync-scheduler
   service runs on its interval, so a fresh login can be verified end-to-end without waiting for
   the next scheduled sync.
+- **MFA login web UI now shows total activities synced and last-sync outcome** (status, time,
+  activity count, error if any) directly on the panel, reading the same `sync_log`/`activities`
+  tables the MCP server's `last_sync_status` tool already exposes — so staleness or a failed sync
+  is visible without needing an MCP client.
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the

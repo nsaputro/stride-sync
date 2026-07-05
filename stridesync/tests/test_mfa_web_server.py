@@ -56,6 +56,63 @@ def test_index_shows_logged_in_when_session_cached(tmp_path):
     assert 'action="sync"' in response.text
 
 
+def test_index_shows_no_sync_yet_when_db_missing(tmp_path):
+    response = _client(tmp_path).get("/")
+
+    assert response.status_code == 200
+    assert "Total activities synced: 0" in response.text
+    assert "No sync has run yet" in response.text
+
+
+def test_index_shows_total_activities_and_last_sync_success(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    for activity_id in (1, 2, 3):
+        conn.execute(
+            "INSERT INTO activities (activity_id, start_time_local, synced_at) VALUES (?, ?, ?)",
+            (activity_id, "2026-07-01 06:00:00", "2026-07-01T06:05:00"),
+        )
+    conn.execute(
+        """
+        INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
+        VALUES (?, ?, 'success', 3, NULL)
+        """,
+        ("2026-07-01T06:00:00", "2026-07-01T06:05:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/")
+
+    assert response.status_code == 200
+    assert "Total activities synced: 3" in response.text
+    assert "Last sync: success at 2026-07-01T06:05:00 (3 activities)" in response.text
+
+
+def test_index_shows_last_sync_error(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    conn.execute(
+        """
+        INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
+        VALUES (?, ?, 'failed', 0, ?)
+        """,
+        ("2026-07-01T06:00:00", "2026-07-01T06:00:05", "Could not reach Garmin Connect"),
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/")
+
+    assert response.status_code == 200
+    assert "Last sync: failed at 2026-07-01T06:00:05 (0 activities)" in response.text
+    assert "Last sync error: Could not reach Garmin Connect" in response.text
+
+
 def test_start_reports_clear_error_when_credentials_missing(tmp_path):
     # Real production incident: the mfa-web s6 service's `run` script never exported
     # GARMIN_USERNAME/GARMIN_PASSWORD (unlike sync-scheduler's), so Settings always saw empty
