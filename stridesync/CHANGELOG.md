@@ -12,6 +12,8 @@
   of waiting for the next scheduled interval — useful for confirming a login actually works.
 - The panel now also shows how many activities have been synced in total and the outcome of the
   most recent sync (success/failed, when, how many activities, and the error if it failed).
+- Redesigned the panel: clearer layout, dark mode support, easier-to-read timestamps, and
+  instant feedback when you click a button instead of it looking unresponsive while it works.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both

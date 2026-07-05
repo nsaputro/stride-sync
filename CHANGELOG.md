@@ -34,6 +34,11 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   activity count, error if any) directly on the panel, reading the same `sync_log`/`activities`
   tables the MCP server's `last_sync_status` tool already exposes — so staleness or a failed sync
   is visible without needing an MCP client.
+- **Redesigned the MFA login web UI**: card layout, light/dark theme support (follows the
+  browser's `prefers-color-scheme`), a clear primary action (Sync now once logged in, Log in
+  otherwise), human-readable timestamps instead of raw ISO-8601 with microseconds, a numeric
+  keypad + one-time-code autofill hint on the MFA input, and instant "Working…" button feedback
+  on submit (logins/syncs are blocking network calls that can take several seconds).
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the

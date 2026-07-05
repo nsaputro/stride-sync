@@ -21,6 +21,7 @@ import logging
 import os
 import sqlite3
 import threading
+from datetime import datetime
 from html import escape
 from typing import Any, Dict, Optional
 
@@ -47,19 +48,74 @@ _lock = threading.Lock()
 _pending_garmin: Optional[Garmin] = None
 
 _STYLE = """
-  body { font-family: sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
-  input, button { font-size: 1rem; padding: 0.4rem; }
-  .error { color: #b00020; }
-  .ok { color: #0a7d28; }
+  :root {
+    color-scheme: light dark;
+    --bg: #f2f3f5; --card: #ffffff; --text: #1a1a1a; --muted: #6b7280; --border: #e3e5e8;
+    --ok: #0a7d28; --ok-bg: #e6f4ea; --error: #b00020; --error-bg: #fbe9eb;
+    --primary: #1f6feb; --primary-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --card: #202329; --text: #e7e9ea; --muted: #9aa0a6; --border: #33373d;
+      --ok: #4ade80; --ok-bg: #113420; --error: #f87171; --error-bg: #3a1a1d;
+      --primary: #4c8dff; --primary-text: #0b1220;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    max-width: 26rem; margin: 0 auto; padding: 1.5rem 1rem 3rem;
+  }
+  h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem;
+    padding: 1.1rem 1.25rem; margin-bottom: 1rem;
+  }
+  p { line-height: 1.5; margin: 0.5rem 0; }
+  p.stat { font-weight: 600; }
+  p.error {
+    color: var(--error); background: var(--error-bg); padding: 0.6rem 0.75rem;
+    border-radius: 0.5rem;
+  }
+  p.ok { color: var(--ok); font-weight: 600; }
+  form { margin: 0.6rem 0; }
+  button, input[type=text] {
+    font-size: 1rem; padding: 0.7rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border);
+    width: 100%; font-family: inherit;
+  }
+  button {
+    cursor: pointer; font-weight: 600; background: var(--card); color: var(--text);
+  }
+  button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+  button:disabled { opacity: 0.6; cursor: default; }
+  input[type=text] { background: var(--card); color: var(--text); margin-bottom: 0.5rem; }
+  a { color: var(--primary); }
+"""
+
+_SCRIPT = """
+<script>
+document.addEventListener("submit", function (event) {
+  var button = event.target.querySelector("button[type=submit]");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Working…";
+  }
+});
+</script>
 """
 
 
 def _page(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(
         "<!doctype html>"
-        f'<html><head><meta charset="utf-8"><title>StrideSync — {escape(title)}</title>'
-        f"<style>{_STYLE}</style></head>"
-        f"<body><h1>StrideSync</h1>{body}</body></html>"
+        "<html><head>"
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>StrideSync — {escape(title)}</title>"
+        f"<style>{_STYLE}</style>"
+        "</head>"
+        f'<body><h1>StrideSync</h1><div class="card">{body}</div>{_SCRIPT}</body></html>'
     )
 
 
@@ -79,6 +135,21 @@ def _has_cached_session(token_dir: Optional[str]) -> bool:
 
 def _activity_count(count: int) -> str:
     return f"{count} activit{'y' if count == 1 else 'ies'}"
+
+
+def _format_timestamp(iso_str: Optional[str]) -> str:
+    """Format a stored timestamp for display — every timestamp this module reads is written by
+    `datetime.now(timezone.utc).isoformat()` (see scheduler.py), so it's always UTC; this just
+    drops the microseconds/offset noise raw isoformat() output has (e.g.
+    "2026-07-05T07:06:51.539869+00:00") that isn't useful to a person glancing at the panel.
+    """
+    if not iso_str:
+        return "unknown"
+    try:
+        dt = datetime.fromisoformat(iso_str)
+    except ValueError:
+        return iso_str
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _sync_summary(db_path: str) -> Dict[str, Any]:
@@ -114,14 +185,14 @@ def _sync_summary(db_path: str) -> Dict[str, Any]:
 
 def _sync_summary_html(settings: Settings) -> str:
     summary = _sync_summary(settings.db_path)
-    html = f"<p>Total activities synced: {summary['total_activities']}</p>"
+    html = f'<p class="stat">Total activities synced: {summary["total_activities"]}</p>'
 
     last_sync = summary["last_sync"]
     if last_sync is None:
         return html + "<p>No sync has run yet.</p>"
 
     css_class = "ok" if last_sync["status"] == "success" else "error"
-    when = last_sync["finished_at"] or last_sync["started_at"]
+    when = _format_timestamp(last_sync["finished_at"] or last_sync["started_at"])
     html += (
         f'<p class="{css_class}">Last sync: {escape(last_sync["status"])} at {escape(when)} '
         f'({_activity_count(last_sync["activities_synced"])})</p>'
@@ -147,14 +218,18 @@ def _status_body(settings: Settings) -> str:
         button_label = "Log in to Garmin Connect"
 
     body = f"{message}{_sync_summary_html(settings)}"
-    body += (
-        f'<form method="post" action="start"><button type="submit">{escape(button_label)}'
-        "</button></form>"
-    )
+    # The primary action is whichever one you'd reach for day-to-day: once logged in, that's
+    # syncing, not logging in again — so "Sync now" gets the prominent styling and comes first.
+    login_button_class = "" if has_session else " class=\"primary\""
     if has_session:
         body += (
-            '<form method="post" action="sync"><button type="submit">Sync now</button></form>'
+            '<form method="post" action="sync">'
+            '<button type="submit" class="primary">Sync now</button></form>'
         )
+    body += (
+        f'<form method="post" action="start"><button type="submit"{login_button_class}>'
+        f"{escape(button_label)}</button></form>"
+    )
     return body
 
 
@@ -209,8 +284,9 @@ async def start(request: Request) -> HTMLResponse:
             "<p>Garmin sent a multi-factor authentication code to your registered "
             "device/email.</p>"
             '<form method="post" action="verify">'
-            '<input type="text" name="code" placeholder="MFA code" autofocus required>'
-            '<button type="submit">Verify</button></form>',
+            '<input type="text" name="code" placeholder="MFA code" autofocus required '
+            'inputmode="numeric" autocomplete="one-time-code">'
+            '<button type="submit" class="primary">Verify</button></form>',
         )
 
     return _page("Garmin login", _status_body(settings))
