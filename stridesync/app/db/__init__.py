@@ -21,6 +21,11 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets the read-only connections used by the web UI and MCP server read while this
+    # connection holds a write transaction, instead of hitting "database is locked" — this
+    # matters most during backfill, which can hold this connection across hundreds of commits.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     init_db(conn)
     return conn
 

@@ -524,6 +524,17 @@ to pull in older history beyond whatever `limit` happens to cover.
   `with _backfill_lock:` block already holding that same non-reentrant lock — reproduced via a
   real test hang (not just a review-time guess), fixed by moving that call outside the lock's
   scope.
+- ✅ **Fixed a real production `sqlite3.OperationalError: database is locked` crash**, reported
+  live: the backfill's write connection (`app/db/connect`) stays open across hundreds of commits,
+  and the **Running** tab's read hit the DB at just the wrong moment and crashed with a 500.
+  Root cause was SQLite's default rollback-journal mode having no built-in tolerance for a reader
+  landing mid-write — any read during the writer's brief exclusive-lock window at commit time
+  fails immediately instead of waiting. Fixed by switching `/data/stridesync.db` to WAL mode
+  (readers and the one writer never block each other under WAL) plus a 5s busy-timeout on every
+  connection as defense-in-depth. Reproduced deterministically in
+  `tests/test_db.py::test_readonly_reader_does_not_block_writer_in_wal_mode` (a reader holding an
+  open transaction blocks the writer's commit without the fix, confirmed by reverting it and
+  watching the test fail with the exact same exception before re-applying).
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 

@@ -211,6 +211,18 @@ def _format_activity_time(raw: Optional[str]) -> str:
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
+def _connect_readonly(db_path: str) -> sqlite3.Connection:
+    """Open a read-only connection with a busy timeout.
+
+    Without a timeout, a read hitting the DB while the sync scheduler or a backfill holds a
+    write transaction raises "database is locked" immediately instead of waiting the write out.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    return conn
+
+
 def _sync_summary(db_path: str) -> Dict[str, Any]:
     """Best-effort total-activities-synced + last-sync-outcome summary for display.
 
@@ -223,8 +235,7 @@ def _sync_summary(db_path: str) -> Dict[str, Any]:
     if not os.path.exists(db_path):
         return {"total_activities": 0, "last_sync": None}
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_readonly(db_path)
     try:
         total_activities = conn.execute("SELECT COUNT(*) AS n FROM activities").fetchone()["n"]
         last_sync_row = conn.execute(
@@ -275,8 +286,7 @@ def _recent_activities(db_path: str, limit: int = 5) -> List[Dict[str, Any]]:
     if not os.path.exists(db_path):
         return []
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_readonly(db_path)
     try:
         rows = conn.execute(
             """
@@ -320,8 +330,7 @@ def _weekly_distance(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
     if not os.path.exists(db_path):
         return []
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_readonly(db_path)
     try:
         rows = conn.execute(
             "SELECT start_time_local, distance_meters FROM activities"
