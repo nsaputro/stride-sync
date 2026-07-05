@@ -376,7 +376,15 @@ async def running(request: Request) -> HTMLResponse:
 
 
 def _settings_body() -> str:
-    return (
+    """Reflects the current backfill state, not just a static form — the "Settings" nav tab is
+    reachable independently of the "/backfill" URL (e.g. the user switches to another tab and
+    back), so it must show a running backfill's progress bar, not silently reset to the plain
+    form and make it look like the backfill vanished.
+    """
+    with _backfill_lock:
+        state = dict(_backfill_state)
+
+    form_html = (
         "<h2>Backfill activities</h2>"
         "<p>Regular syncs only fetch your most recent activities. Use this to pull in older "
         "history from a specific date onward.</p>"
@@ -387,6 +395,22 @@ def _settings_body() -> str:
         '<input type="date" name="start_date" required>'
         '<button type="submit" class="primary">Backfill</button></form>'
     )
+
+    if state["running"]:
+        return _backfill_progress_body()
+
+    if state["done"] and state["start_date"] is not None:
+        start_date = escape(state["start_date"])
+        if state["error"]:
+            status_html = f'<p class="error">Last backfill failed: {escape(state["error"])}</p>'
+        else:
+            status_html = (
+                f'<p class="ok">Last backfill: {_activity_count(state["result_count"] or 0)} '
+                f"since {start_date}.</p>"
+            )
+        return status_html + form_html
+
+    return form_html
 
 
 async def settings_tab(request: Request) -> HTMLResponse:

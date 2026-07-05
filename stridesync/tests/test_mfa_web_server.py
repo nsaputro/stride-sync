@@ -501,6 +501,61 @@ def test_settings_tab_shows_backfill_form(tmp_path):
     assert 'input type="date" name="start_date"' in response.text
 
 
+def test_settings_tab_shows_progress_bar_while_backfill_is_running(tmp_path):
+    # Regression test: switching to another nav tab and back to Settings mid-backfill must not
+    # lose the progress bar — it used to always render the plain static form.
+    mfa_web_server._backfill_state.update(
+        {"running": True, "start_date": "2019-01-01", "total": 10, "completed": 3, "done": False}
+    )
+
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert "3 / 10 activities" in response.text
+    assert 'action="backfill"' not in response.text
+
+
+def test_settings_tab_shows_last_backfill_result_and_form_when_done(tmp_path):
+    mfa_web_server._backfill_state.update(
+        {
+            "running": False,
+            "start_date": "2019-01-01",
+            "total": 10,
+            "completed": 10,
+            "done": True,
+            "error": None,
+            "result_count": 10,
+        }
+    )
+
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert "Last backfill: 10 activities since 2019-01-01" in response.text
+    # The form to start a new backfill must still be reachable.
+    assert 'action="backfill"' in response.text
+
+
+def test_settings_tab_shows_last_backfill_error_and_form_when_done(tmp_path):
+    mfa_web_server._backfill_state.update(
+        {
+            "running": False,
+            "start_date": "2019-01-01",
+            "total": 0,
+            "completed": 0,
+            "done": True,
+            "error": "Backfill failed: rate limited",
+            "result_count": None,
+        }
+    )
+
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert "Last backfill failed: Backfill failed: rate limited" in response.text
+    assert 'action="backfill"' in response.text
+
+
 def test_backfill_get_redirects_to_settings_when_nothing_has_run(tmp_path):
     response = _client(tmp_path).get("/backfill", follow_redirects=False)
 

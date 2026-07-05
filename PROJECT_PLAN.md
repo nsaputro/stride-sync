@@ -535,6 +535,14 @@ to pull in older history beyond whatever `limit` happens to cover.
   `tests/test_db.py::test_readonly_reader_does_not_block_writer_in_wal_mode` (a reader holding an
   open transaction blocks the writer's commit without the fix, confirmed by reverting it and
   watching the test fail with the exact same exception before re-applying).
+- ✅ **Fixed the progress bar disappearing on tab-switch**, also reported live: the "Settings" nav
+  tab (`GET /settings`) always rendered the static backfill form regardless of `_backfill_state`,
+  so switching to another tab mid-backfill and clicking back into Settings replaced the live
+  progress bar with the plain form again — the backfill kept running server-side the whole time,
+  but there was no way to see it short of navigating directly to `/backfill`. `_settings_body()`
+  now checks `_backfill_state` itself: shows the progress bar while running, the last backfill's
+  result/error (plus the form, so a new one can still be started) once done, otherwise the plain
+  form as before.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
