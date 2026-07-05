@@ -14,7 +14,10 @@ from app.sync.garmin_client import (
     GarminAuthError,
     GarminClient,
     _normalize_activity,
+    _normalize_hr_zones,
     _normalize_lap,
+    _normalize_samples,
+    _normalize_training_baseline,
     _pace_sec_per_km,
     describe_transport_error,
 )
@@ -112,6 +115,108 @@ class TestNormalizeLap:
         assert lap.distance_meters == 1000.0
         assert lap.pace_sec_per_km == pytest.approx(1000.0 / 3.0)
         assert lap.average_cadence_spm == 172.0
+
+
+class TestNormalizeTrainingBaseline:
+    def test_merges_threshold_and_predictions(self):
+        threshold = {
+            "speed_and_heart_rate": {"speed": 3.2, "heartRate": 165},
+        }
+        predictions = {
+            "raceTime5K": 1200,
+            "raceTime10K": 2500,
+            "raceTimeHalfMarathon": 5600,
+            "raceTimeMarathon": 11800,
+        }
+
+        baseline = _normalize_training_baseline(threshold, predictions)
+
+        assert baseline.lactate_threshold_hr == 165
+        assert baseline.lactate_threshold_speed_mps == 3.2
+        assert baseline.lactate_threshold_pace_sec_per_km == pytest.approx(1000.0 / 3.2)
+        assert baseline.race_prediction_5k_seconds == 1200
+        assert baseline.race_prediction_10k_seconds == 2500
+        assert baseline.race_prediction_half_marathon_seconds == 5600
+        assert baseline.race_prediction_marathon_seconds == 11800
+
+    def test_missing_data_does_not_crash(self):
+        baseline = _normalize_training_baseline({}, {})
+
+        assert baseline.lactate_threshold_hr is None
+        assert baseline.race_prediction_marathon_seconds is None
+
+
+class TestNormalizeHrZones:
+    def test_normalizes_zone_list(self):
+        raw = [
+            {"zoneNumber": 1, "zoneLowBoundary": 100, "secsInZone": 120.0},
+            {"zoneNumber": 2, "zoneLowBoundary": 140, "secsInZone": 900.0},
+        ]
+
+        zones = _normalize_hr_zones(123, raw)
+
+        assert len(zones) == 2
+        assert zones[1].zone_number == 2
+        assert zones[1].zone_low_boundary_hr == 140
+        assert zones[1].seconds_in_zone == 900.0
+        assert all(z.activity_id == 123 for z in zones)
+
+    def test_non_list_input_returns_empty(self):
+        assert _normalize_hr_zones(123, {"unexpected": "shape"}) == []
+
+    def test_skips_entries_missing_zone_number(self):
+        raw = [{"secsInZone": 900.0}]
+
+        assert _normalize_hr_zones(123, raw) == []
+
+
+class TestNormalizeSamples:
+    def test_normalizes_metric_descriptor_columns(self):
+        raw = {
+            "metricDescriptors": [
+                {"key": "sumElapsedDuration", "metricsIndex": 0},
+                {"key": "directHeartRate", "metricsIndex": 1},
+                {"key": "directSpeed", "metricsIndex": 2},
+                {"key": "directElevation", "metricsIndex": 3},
+                {"key": "directLatitude", "metricsIndex": 4},
+                {"key": "directLongitude", "metricsIndex": 5},
+                {"key": "directRunCadence", "metricsIndex": 6},
+            ],
+            "activityDetailMetrics": [
+                {"metrics": [10.0, 150, 2.78, 12.5, 37.0, -122.0, 170.0]},
+                {"metrics": [20.0, 152, 2.80, 12.8, 37.001, -122.001, 172.0]},
+            ],
+        }
+
+        samples = _normalize_samples(123, raw)
+
+        assert len(samples) == 2
+        assert samples[0].activity_id == 123
+        assert samples[0].sample_index == 0
+        assert samples[0].elapsed_seconds == 10.0
+        assert samples[0].heart_rate == 150
+        assert samples[0].speed_mps == 2.78
+        assert samples[0].pace_sec_per_km == pytest.approx(1000.0 / 2.78)
+        assert samples[0].cadence_spm == 170.0
+        assert samples[0].elevation_meters == 12.5
+        assert samples[0].latitude == 37.0
+        assert samples[0].longitude == -122.0
+        assert samples[1].sample_index == 1
+
+    def test_missing_descriptors_returns_empty(self):
+        assert _normalize_samples(123, {}) == []
+
+    def test_unknown_metric_key_yields_none_field(self):
+        raw = {
+            "metricDescriptors": [{"key": "someUnknownMetric", "metricsIndex": 0}],
+            "activityDetailMetrics": [{"metrics": [42.0]}],
+        }
+
+        samples = _normalize_samples(123, raw)
+
+        assert len(samples) == 1
+        assert samples[0].heart_rate is None
+        assert samples[0].speed_mps is None
 
 
 class TestDescribeTransportError:
@@ -338,3 +443,63 @@ class TestGarminClientFetch:
 
         with pytest.raises(GarminAPIError):
             client.fetch_activity_laps(123)
+
+    def test_fetch_training_baseline_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_lactate_threshold.return_value = {
+            "speed_and_heart_rate": {"speed": 3.2, "heartRate": 165}
+        }
+        client._garmin.get_race_predictions.return_value = {"raceTimeMarathon": 11800}
+
+        baseline = client.fetch_training_baseline()
+
+        assert baseline.lactate_threshold_hr == 165
+        assert baseline.race_prediction_marathon_seconds == 11800
+        client._garmin.get_lactate_threshold.assert_called_once_with(latest=True)
+
+    def test_fetch_training_baseline_returns_none_on_failure(self):
+        # Not every account/device exposes this data -- see GarminClient.fetch_training_baseline's
+        # docstring: this must never fail the sync, unlike every other fetch_* method.
+        client = make_client()
+        client._garmin.get_lactate_threshold.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_training_baseline() is None
+
+    def test_fetch_activity_hr_zones_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_activity_hr_in_timezones.return_value = [
+            {"zoneNumber": 1, "zoneLowBoundary": 100, "secsInZone": 120.0}
+        ]
+
+        zones = client.fetch_activity_hr_zones(123)
+
+        assert len(zones) == 1
+        assert zones[0].zone_number == 1
+        client._garmin.get_activity_hr_in_timezones.assert_called_once_with("123")
+
+    def test_fetch_activity_hr_zones_returns_empty_on_failure(self):
+        client = make_client()
+        client._garmin.get_activity_hr_in_timezones.side_effect = GarminConnectConnectionError(
+            "boom"
+        )
+
+        assert client.fetch_activity_hr_zones(123) == []
+
+    def test_fetch_activity_samples_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_activity_details.return_value = {
+            "metricDescriptors": [{"key": "directHeartRate", "metricsIndex": 0}],
+            "activityDetailMetrics": [{"metrics": [150]}],
+        }
+
+        samples = client.fetch_activity_samples(123)
+
+        assert len(samples) == 1
+        assert samples[0].heart_rate == 150
+        client._garmin.get_activity_details.assert_called_once_with("123")
+
+    def test_fetch_activity_samples_returns_empty_on_failure(self):
+        client = make_client()
+        client._garmin.get_activity_details.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_activity_samples(123) == []

@@ -19,11 +19,14 @@ from typing import Callable, Optional, Sequence
 from app import db
 from app.config import Settings
 from app.sync.garmin_client import (
+    ActivitySample,
     GarminActivity,
     GarminAPIError,
     GarminAuthError,
     GarminClient,
     GarminLap,
+    HrZoneTime,
+    TrainingBaseline,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +94,72 @@ def _replace_laps(conn: sqlite3.Connection, activity_id: int, laps: Sequence[Gar
     )
 
 
+def _replace_hr_zones(
+    conn: sqlite3.Connection, activity_id: int, zones: Sequence[HrZoneTime]
+) -> None:
+    conn.execute("DELETE FROM activity_hr_zones WHERE activity_id = ?", (activity_id,))
+    conn.executemany(
+        """
+        INSERT INTO activity_hr_zones (
+            activity_id, zone_number, zone_low_boundary_hr, seconds_in_zone
+        ) VALUES (:activity_id, :zone_number, :zone_low_boundary_hr, :seconds_in_zone)
+        """,
+        [zone.__dict__ for zone in zones],
+    )
+
+
+def _replace_samples(
+    conn: sqlite3.Connection, activity_id: int, samples: Sequence[ActivitySample]
+) -> None:
+    conn.execute("DELETE FROM activity_samples WHERE activity_id = ?", (activity_id,))
+    conn.executemany(
+        """
+        INSERT INTO activity_samples (
+            activity_id, sample_index, elapsed_seconds, heart_rate, speed_mps, pace_sec_per_km,
+            cadence_spm, elevation_meters, latitude, longitude
+        ) VALUES (
+            :activity_id, :sample_index, :elapsed_seconds, :heart_rate, :speed_mps,
+            :pace_sec_per_km, :cadence_spm, :elevation_meters, :latitude, :longitude
+        )
+        """,
+        [sample.__dict__ for sample in samples],
+    )
+
+
+def _upsert_training_baseline(
+    conn: sqlite3.Connection, baseline: Optional[TrainingBaseline], synced_at: str
+) -> None:
+    """No-op if `baseline` is `None` — see `GarminClient.fetch_training_baseline`'s docstring:
+    not every account has this data, and that's not treated as a sync failure."""
+    if baseline is None:
+        return
+    conn.execute(
+        """
+        INSERT INTO training_baseline (
+            id, synced_at, lactate_threshold_hr, lactate_threshold_speed_mps,
+            lactate_threshold_pace_sec_per_km, race_prediction_5k_seconds,
+            race_prediction_10k_seconds, race_prediction_half_marathon_seconds,
+            race_prediction_marathon_seconds
+        ) VALUES (
+            1, :synced_at, :lactate_threshold_hr, :lactate_threshold_speed_mps,
+            :lactate_threshold_pace_sec_per_km, :race_prediction_5k_seconds,
+            :race_prediction_10k_seconds, :race_prediction_half_marathon_seconds,
+            :race_prediction_marathon_seconds
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            synced_at = excluded.synced_at,
+            lactate_threshold_hr = excluded.lactate_threshold_hr,
+            lactate_threshold_speed_mps = excluded.lactate_threshold_speed_mps,
+            lactate_threshold_pace_sec_per_km = excluded.lactate_threshold_pace_sec_per_km,
+            race_prediction_5k_seconds = excluded.race_prediction_5k_seconds,
+            race_prediction_10k_seconds = excluded.race_prediction_10k_seconds,
+            race_prediction_half_marathon_seconds = excluded.race_prediction_half_marathon_seconds,
+            race_prediction_marathon_seconds = excluded.race_prediction_marathon_seconds
+        """,
+        {**baseline.__dict__, "synced_at": synced_at},
+    )
+
+
 def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> int:
     """Run a single sync pass: login, fetch recent activities + laps, write to SQLite.
 
@@ -113,10 +182,15 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
         activities = client.fetch_recent_activities(limit=limit)
 
         synced_at = datetime.now(timezone.utc).isoformat()
+        _upsert_training_baseline(conn, client.fetch_training_baseline(), synced_at)
         for activity in activities:
             _upsert_activity(conn, activity, synced_at)
             laps = client.fetch_activity_laps(activity.activity_id)
             _replace_laps(conn, activity.activity_id, laps)
+            hr_zones = client.fetch_activity_hr_zones(activity.activity_id)
+            _replace_hr_zones(conn, activity.activity_id, hr_zones)
+            samples = client.fetch_activity_samples(activity.activity_id)
+            _replace_samples(conn, activity.activity_id, samples)
             activities_synced += 1
         conn.commit()
     except (GarminAuthError, GarminAPIError) as exc:

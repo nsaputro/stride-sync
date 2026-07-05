@@ -5,7 +5,15 @@ import time
 import pytest
 
 from app.config import Settings
-from app.sync.garmin_client import GarminActivity, GarminAPIError, GarminAuthError, GarminLap
+from app.sync.garmin_client import (
+    ActivitySample,
+    GarminActivity,
+    GarminAPIError,
+    GarminAuthError,
+    GarminLap,
+    HrZoneTime,
+    TrainingBaseline,
+)
 from app.sync.scheduler import _install_shutdown_handler, run_forever, run_sync_once
 
 
@@ -64,12 +72,60 @@ def make_lap(activity_id=1, lap_index=0) -> GarminLap:
     )
 
 
+def make_training_baseline() -> TrainingBaseline:
+    return TrainingBaseline(
+        lactate_threshold_hr=165,
+        lactate_threshold_speed_mps=3.2,
+        lactate_threshold_pace_sec_per_km=312.5,
+        race_prediction_5k_seconds=1200,
+        race_prediction_10k_seconds=2500,
+        race_prediction_half_marathon_seconds=5600,
+        race_prediction_marathon_seconds=11800,
+    )
+
+
+def make_hr_zone(activity_id=1, zone_number=2) -> HrZoneTime:
+    return HrZoneTime(
+        activity_id=activity_id,
+        zone_number=zone_number,
+        zone_low_boundary_hr=140,
+        seconds_in_zone=900.0,
+    )
+
+
+def make_sample(activity_id=1, sample_index=0) -> ActivitySample:
+    return ActivitySample(
+        activity_id=activity_id,
+        sample_index=sample_index,
+        elapsed_seconds=10.0,
+        heart_rate=150,
+        speed_mps=2.78,
+        pace_sec_per_km=359.7,
+        cadence_spm=170.0,
+        elevation_meters=12.5,
+        latitude=37.0,
+        longitude=-122.0,
+    )
+
+
 class FakeGarminClient:
-    def __init__(self, activities=None, laps=None, login_error=None, fetch_error=None):
+    def __init__(
+        self,
+        activities=None,
+        laps=None,
+        login_error=None,
+        fetch_error=None,
+        baseline=None,
+        hr_zones=None,
+        samples=None,
+    ):
         self._activities = activities or []
         self._laps = laps or {}
         self._login_error = login_error
         self._fetch_error = fetch_error
+        self._baseline = baseline
+        self._hr_zones = hr_zones or {}
+        self._samples = samples or {}
         self.login_called = False
 
     def login(self):
@@ -84,6 +140,15 @@ class FakeGarminClient:
 
     def fetch_activity_laps(self, activity_id):
         return self._laps.get(activity_id, [])
+
+    def fetch_training_baseline(self):
+        return self._baseline
+
+    def fetch_activity_hr_zones(self, activity_id):
+        return self._hr_zones.get(activity_id, [])
+
+    def fetch_activity_samples(self, activity_id):
+        return self._samples.get(activity_id, [])
 
 
 def test_run_sync_once_writes_activities_and_laps(tmp_path):
@@ -115,6 +180,72 @@ def test_run_sync_once_writes_activities_and_laps(tmp_path):
         ).fetchone()
         assert log_row["status"] == "success"
         assert log_row["activities_synced"] == 1
+    finally:
+        conn.close()
+
+
+def test_run_sync_once_writes_training_baseline(tmp_path):
+    settings = make_settings(tmp_path)
+    baseline = make_training_baseline()
+    client = FakeGarminClient(activities=[make_activity()], baseline=baseline)
+
+    run_sync_once(settings, client)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        row = conn.execute("SELECT * FROM training_baseline WHERE id = 1").fetchone()
+        assert row["lactate_threshold_hr"] == 165
+        assert row["race_prediction_marathon_seconds"] == 11800
+    finally:
+        conn.close()
+
+
+def test_run_sync_once_skips_training_baseline_when_unavailable(tmp_path):
+    # See GarminClient.fetch_training_baseline's docstring: not every account has this data, and
+    # that must not be treated as an error -- just nothing to store.
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(activities=[make_activity()], baseline=None)
+
+    run_sync_once(settings, client)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        row = conn.execute("SELECT * FROM training_baseline WHERE id = 1").fetchone()
+        assert row is None
+    finally:
+        conn.close()
+
+
+def test_run_sync_once_writes_hr_zones_and_samples(tmp_path):
+    settings = make_settings(tmp_path)
+    zone = make_hr_zone()
+    sample = make_sample()
+    client = FakeGarminClient(
+        activities=[make_activity()],
+        hr_zones={1: [zone]},
+        samples={1: [sample]},
+    )
+
+    run_sync_once(settings, client)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        zone_row = conn.execute(
+            "SELECT * FROM activity_hr_zones WHERE activity_id = 1 AND zone_number = 2"
+        ).fetchone()
+        assert zone_row["seconds_in_zone"] == 900.0
+
+        sample_row = conn.execute(
+            "SELECT * FROM activity_samples WHERE activity_id = 1 AND sample_index = 0"
+        ).fetchone()
+        assert sample_row["heart_rate"] == 150
+        assert sample_row["pace_sec_per_km"] == 359.7
     finally:
         conn.close()
 

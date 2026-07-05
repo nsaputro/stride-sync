@@ -381,6 +381,43 @@ tools/resources should appear in a new conversation.
   the add-on can genuinely be called "released" — see the Getting Started section for the
   standalone `docker build`/`docker run` steps that substitute for it pre-release.
 
+### v0.5 — Training baseline & effort granularity for marathon pacing 🔄
+
+Average pace/HR per activity (v0.1–v0.3) answers "was this run fast or slow," but not "was this
+the *right* effort for a marathon-training plan" — that needs a physiological reference point
+(what's this athlete's threshold?) and, ideally, effort *distribution* within a run, not just its
+average. Requested directly by the account owner after reviewing the synced data for exactly
+this use case (target pacing, target HR). See §1's Garmin Connect sync section for the concrete
+gap analysis that led to this scope.
+
+- ✅ `training_baseline` table (single row, replaced each sync): lactate threshold HR/pace
+  (`Client.get_lactate_threshold(latest=True)`) and Garmin's own 5k/10k/half/marathon race
+  predictions (`Client.get_race_predictions()`) — fetched once per sync, not per activity. This
+  is the reference point everything else (is 165bpm easy or hard for *this* person?) gets
+  computed against.
+- ✅ `activity_hr_zones` table: seconds spent in each HR zone per activity
+  (`Client.get_activity_hr_in_timezones(activity_id)`) — one extra call per activity per sync,
+  same call pattern as the existing per-activity laps fetch.
+- ✅ `activity_samples` table: fine-grained time-series per activity (pace/HR/cadence/elevation
+  at up to ~2000 points, from `Client.get_activity_details(activity_id)`) — enables cardiac-drift
+  and negative-split detection at a finer resolution than 1km auto-lap splits.
+- ✅ New MCP tools exposing all three (`training_baseline`, `activity_hr_zones`,
+  `activity_samples` — the last one evenly downsampled to a `max_points` cap rather than dumping
+  up to 2000 raw rows into a single tool response), so Claude can reason over target pace/HR in
+  conversation rather than this codebase baking in training-science formulas itself (matches the
+  existing philosophy: purpose-built data access, not opinionated analysis logic server-side).
+- ⬜ Field mappings for all three endpoints are **best-effort, not yet verified against a live
+  account** — same caveat as v0.1's still-open item for the activity-list endpoint. None of
+  these three endpoints are normalized by `python-garminconnect` itself (all return raw
+  `connectapi()` JSON), so the exact key names are inferred from the wider Garmin Connect tooling
+  ecosystem. Verify against a real account and adjust field lookups if anything comes back
+  unexpectedly `NULL`.
+- ✅ Not every Garmin device/account has lactate-threshold or race-prediction data (e.g.
+  non-running-focused watches) — confirmed this must degrade gracefully (log + store nothing)
+  rather than fail the whole sync, unlike a genuine auth/network failure. `GarminClient`'s three
+  new `fetch_*` methods for this milestone catch broadly and return `None`/`[]` rather than
+  raising, unlike every other `fetch_*` method on the class — documented inline on each.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all five config options, MCP connection instructions
