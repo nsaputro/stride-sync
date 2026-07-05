@@ -56,6 +56,9 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
     of this to Claude directly, rather than baking training-science formulas into this codebase.
   - Not every Garmin device/account has lactate-threshold/race-prediction data — that's handled
     as "nothing to store," never as a sync failure.
+- **MFA login web UI's front page is now more of a dashboard**: below the total-activities/last-
+  sync summary, it lists the most recent activities with their name, local start time, and
+  distance (in km).
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the
