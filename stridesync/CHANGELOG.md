@@ -8,6 +8,8 @@
 - **Ingress web UI for the one-time Garmin MFA login**: a StrideSync panel now appears in the HA
   sidebar with a "Log in to Garmin Connect" button — an alternative to the `docker exec`-based
   CLI bootstrap (`python3 -m app.sync.bootstrap_login`) for users without terminal access.
+- **"Sync now" button** on that same panel (once logged in): triggers a sync immediately instead
+  of waiting for the next scheduled interval — useful for confirming a login actually works.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both
@@ -68,6 +70,10 @@
   genuinely unset.
 - Confirmed on a real install: login now succeeds, including for accounts that previously hit
   Garmin's Cloudflare block.
+- **The login web UI kept showing "not logged in" even right after a successful login** —
+  the session was never actually being saved to disk on this flow (a library-level quirk of how
+  MFA detection works). Fixed; a completed login is now saved correctly and immediately reflected
+  on the panel.
 
 ## [0.1.0] - 2026-07-04
 
