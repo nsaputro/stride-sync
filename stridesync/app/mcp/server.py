@@ -72,6 +72,7 @@ def _connect_readonly(db_path: str) -> sqlite3.Connection:
     """Open a read-only connection — the MCP server must never write to the sync scheduler's DB."""
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

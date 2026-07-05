@@ -22,6 +22,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   live "N / total activities" count; you can navigate away and back without losing progress, and
   a second backfill can't be started while one is already running.
 
+### Fixed
+- **"database is locked" errors on the web UI during a backfill**: the sync scheduler and
+  backfill hold a single write connection open across many commits, and any page load hitting
+  the DB at the wrong moment (e.g. the **Running** tab) could raise
+  `sqlite3.OperationalError: database is locked` instead of just waiting, since the DB used
+  SQLite's default rollback-journal mode with no busy timeout. Switched `/data/stridesync.db` to
+  WAL mode (readers never block on the one writer) and added a 5s busy timeout to every
+  connection as defense-in-depth.
+
 ## [0.2.0] - 2026-07-05
 
 ### Added
