@@ -21,7 +21,7 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 from typing import Any, Dict, List, Optional
 
@@ -68,6 +68,20 @@ _STYLE = """
     max-width: 26rem; margin: 0 auto; padding: 1.5rem 1rem 3rem;
   }
   h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
+  nav.tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  nav.tabs a {
+    display: inline-block; padding: 0.5rem 0.1rem; margin-bottom: -1px; text-decoration: none;
+    color: var(--muted); font-weight: 600; border-bottom: 2px solid transparent;
+  }
+  nav.tabs a.active { color: var(--text); border-bottom-color: var(--primary); }
+  ul.week-list { list-style: none; margin: 0; padding: 0; }
+  ul.week-list li {
+    display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0;
+    border-top: 1px solid var(--border);
+  }
+  ul.week-list li:first-child { border-top: none; }
+  .week-range { color: var(--muted); }
+  .week-total { font-weight: 600; }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem;
     padding: 1.1rem 1.25rem; margin-bottom: 1rem;
@@ -115,7 +129,19 @@ document.addEventListener("submit", function (event) {
 """
 
 
-def _page(title: str, body: str) -> HTMLResponse:
+_TABS = (("dashboard", ".", "Dashboard"), ("running", "running", "Running"))
+
+
+def _nav_html(active_tab: str) -> str:
+    active_class = ' class="active"'
+    links = "".join(
+        f'<a href="{href}"{active_class if tab_id == active_tab else ""}>{escape(label)}</a>'
+        for tab_id, href, label in _TABS
+    )
+    return f'<nav class="tabs">{links}</nav>'
+
+
+def _page(title: str, body: str, active_tab: str = "dashboard") -> HTMLResponse:
     return HTMLResponse(
         "<!doctype html>"
         "<html><head>"
@@ -124,7 +150,8 @@ def _page(title: str, body: str) -> HTMLResponse:
         f"<title>StrideSync — {escape(title)}</title>"
         f"<style>{_STYLE}</style>"
         "</head>"
-        f'<body><h1>StrideSync</h1><div class="card">{body}</div>{_SCRIPT}</body></html>'
+        f"<body><h1>StrideSync</h1>{_nav_html(active_tab)}"
+        f'<div class="card">{body}</div>{_SCRIPT}</body></html>'
     )
 
 
@@ -272,6 +299,70 @@ def _recent_activities_html(settings: Settings) -> str:
         for activity in activities
     )
     return f'<h2>Recent activities</h2><ul class="activity-list">{items}</ul>'
+
+
+def _weekly_distance(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
+    """Total distance per calendar week (Monday-Sunday), most recent week first.
+
+    Grouped in Python rather than via SQLite date modifiers — `start_time_local` is Garmin's
+    local-time string for the activity (see `_format_activity_time`), and Python's
+    `date.weekday()` (Monday=0) makes "which Monday does this date belong to" a one-line, easily
+    verified computation rather than a `strftime`/`'weekday N'` modifier expression that's easy
+    to get subtly wrong. Same "no DB yet" tolerance as `_sync_summary`/`_recent_activities`.
+    """
+    if not os.path.exists(db_path):
+        return []
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT start_time_local, distance_meters FROM activities"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    totals: Dict[Any, float] = {}
+    for row in rows:
+        raw = row["start_time_local"]
+        if not raw:
+            continue
+        try:
+            activity_date = datetime.fromisoformat(raw).date()
+        except ValueError:
+            continue
+        week_start = activity_date - timedelta(days=activity_date.weekday())
+        totals[week_start] = totals.get(week_start, 0.0) + (row["distance_meters"] or 0.0)
+
+    weeks_sorted = sorted(totals.items(), key=lambda kv: kv[0], reverse=True)[:weeks]
+    return [
+        {
+            "week_start": week_start,
+            "week_end": week_start + timedelta(days=6),
+            "distance_km": total_meters / 1000.0,
+        }
+        for week_start, total_meters in weeks_sorted
+    ]
+
+
+def _weekly_distance_html(settings: Settings) -> str:
+    weeks = _weekly_distance(settings.db_path)
+    if not weeks:
+        return "<p>No activities synced yet.</p>"
+
+    items = "".join(
+        '<li><span class="week-range">'
+        f'{escape(week["week_start"].strftime("%Y-%m-%d"))} – '
+        f'{escape(week["week_end"].strftime("%Y-%m-%d"))}</span>'
+        f'<span class="week-total">{week["distance_km"]:.2f} km</span></li>'
+        for week in weeks
+    )
+    return f'<h2>Weekly total distance</h2><ul class="week-list">{items}</ul>'
+
+
+async def running(request: Request) -> HTMLResponse:
+    settings: Settings = request.app.state.settings
+    return _page("Running", _weekly_distance_html(settings), active_tab="running")
 
 
 def _status_body(settings: Settings) -> str:
@@ -453,6 +544,7 @@ def create_app(settings: Settings) -> Starlette:
     app = Starlette(
         routes=[
             Route("/", index, methods=["GET"]),
+            Route("/running", running, methods=["GET"]),
             Route("/start", start, methods=["POST"]),
             Route("/verify", verify, methods=["POST"]),
             Route("/sync", sync, methods=["POST"]),

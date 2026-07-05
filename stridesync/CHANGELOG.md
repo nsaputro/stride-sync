@@ -26,6 +26,8 @@
   your phone, over a Cloudflare Tunnel). Set the new `mcp_auth_token` option to a random secret,
   point your tunnel at the MCP port, and give Claude that token — see DOCS.md's "Remote access"
   section. Leave it blank and nothing changes from today's LAN-only behavior.
+- **New "Running" tab** next to the dashboard: shows your total distance for each week
+  (Monday–Sunday), most recent week first.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both

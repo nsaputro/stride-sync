@@ -467,6 +467,20 @@ itself rather than relied on Cloudflare Access alone.
   attaching a bearer token / custom `Authorization` header to a remote MCP connection is
   unconfirmed. Verify on a real HA instance with the tunnel configured per DOCS.md.
 
+### v0.7 — "Running" tab: weekly mileage on the web UI 🔄
+
+Requested directly, as a first step toward the web UI showing more than login/sync status.
+
+- ✅ Tab navigation (`Dashboard` / `Running`) added to every page of the ingress web UI, not just
+  the index page — a `_page()` parameter (`active_tab`) rather than a per-route special case.
+- ✅ `/running` route: total distance per calendar week (Monday–Sunday), most recent week first.
+  Grouped in Python (`date.weekday()`), not via SQLite date modifiers — deliberately, to keep the
+  "which Monday does this date belong to" logic easy to verify by inspection rather than trusting
+  a `strftime`/`'weekday N'` expression to be exactly right.
+- ✅ Graceful degradation matches the rest of this module: no DB yet → empty list, not a crash;
+  a malformed `start_time_local` on one row is skipped rather than failing the whole page; a
+  missing `distance_meters` counts as 0 toward that week's total rather than crashing.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added
