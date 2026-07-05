@@ -99,6 +99,13 @@ async def start(request: Request) -> HTMLResponse:
     global _pending_garmin
     settings: Settings = request.app.state.settings
 
+    if not settings.garmin_username or not settings.garmin_password:
+        return _page(
+            "Login failed",
+            '<p class="error">Login failed: garmin_username and garmin_password are not set '
+            "in the add-on configuration.</p><p><a href=\".\">Back</a></p>",
+        )
+
     garmin = Garmin(
         email=settings.garmin_username,
         password=settings.garmin_password,

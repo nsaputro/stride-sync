@@ -54,6 +54,24 @@ def test_index_shows_logged_in_when_session_cached(tmp_path):
     assert "Already logged in" in response.text
 
 
+def test_start_reports_clear_error_when_credentials_missing(tmp_path):
+    # Real production incident: the mfa-web s6 service's `run` script never exported
+    # GARMIN_USERNAME/GARMIN_PASSWORD (unlike sync-scheduler's), so Settings always saw empty
+    # credentials and the first login attempt (no cached session yet, the whole point of this
+    # UI) hit garminconnect's generic "Username and password are required" — this checks the
+    # app-level guard added alongside the run-script fix, so a misconfigured install still fails
+    # clearly instead of relying on the library's message.
+    settings = make_settings(tmp_path)
+    blank_settings = Settings(**{**settings.__dict__, "garmin_username": "", "garmin_password": ""})
+    app = mfa_web_server.create_app(blank_settings)
+    client = TestClient(app)
+
+    response = client.post("/start")
+
+    assert response.status_code == 200
+    assert "garmin_username and garmin_password are not set" in response.text
+
+
 def test_start_success_without_mfa(tmp_path):
     with patch("app.mfa_web.server.Garmin") as mock_cls:
         mock_garmin = MagicMock()
