@@ -89,10 +89,21 @@ Setup:
    step 3 below (restricting who can reach the tunnel hostname), not from anything StrideSync
    checks — there's no app-level auth once you disable it for Claude's connector's sake, so
    treat the tunnel hostname itself as the thing that must stay locked down.
-2. **Point your Cloudflare Tunnel at the MCP port**, not the ingress port: add a public hostname
-   in your tunnel config routing to `http://homeassistant.local:8765` (`8765` = `mcp_port`). Don't
-   route the tunnel at `8767` (ingress) — that's the browser-only MFA login page, not the MCP
-   protocol.
+2. **Point your Cloudflare Tunnel at the MCP port**, not the ingress port, using a **separate
+   hostname** — not a path under your existing HA hostname (Cloudflare Tunnel routes by
+   hostname, not by URL path, so this needs its own subdomain either way). If you're using the
+   popular community **Cloudflared** HA add-on, that's the `additional_hosts` option
+   (Configuration tab): add an entry with a new subdomain and the MCP port as its `service`:
+   ```yaml
+   additional_hosts:
+     - hostname: stridesync-mcp.yourdomain.com
+       service: http://homeassistant.local:8765
+   ```
+   Cloudflare auto-creates the DNS record for the new hostname, the same way it does for your
+   main `external_hostname`. The tunnel forwards the full request path through untouched, so
+   `https://stridesync-mcp.yourdomain.com/mcp` reaches `http://homeassistant.local:8765/mcp`
+   correctly — there's no `/mcp` to add to the `service` field itself. Don't route this hostname
+   at `8767` (ingress) — that's the browser-only MFA login page, not the MCP protocol.
 3. **Add a Cloudflare WAF rule restricting that hostname to Anthropic's published MCP-connector
    egress ranges** (Cloudflare dashboard → Security → WAF → Custom rules): block or challenge all
    traffic to the tunnel hostname *except* from Anthropic's current ranges (at the time of
