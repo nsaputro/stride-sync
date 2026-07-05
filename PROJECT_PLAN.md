@@ -481,6 +481,35 @@ Requested directly, as a first step toward the web UI showing more than login/sy
   a malformed `start_time_local` on one row is skipped rather than failing the whole page; a
   missing `distance_meters` counts as 0 toward that week's total rather than crashing.
 
+### v0.8 — Settings tab: one-off backfill from a start date 🔄
+
+Requested directly, after clarifying that regular syncs are count-based (top N most recent
+activities, see `GarminClient.fetch_recent_activities`) rather than date-based — there was no way
+to pull in older history beyond whatever `limit` happens to cover.
+
+- ✅ New `Settings` tab (third nav tab, alongside `Dashboard`/`Running`) with a date picker +
+  "Backfill" button.
+- ✅ `GarminClient.fetch_activities_since(start_date)` — uses
+  `Client.get_activities_by_date(startdate)` (genuinely date-based, auto-paginating in Garmin's
+  own library, unlike the count-based `get_activities` regular syncs use) — merged with the same
+  per-activity detail (`_merge_with_detail`, extracted from `fetch_recent_activities` to be
+  shared rather than duplicated).
+- ✅ `scheduler.run_backfill_sync(settings, client, start_date)` — a separate entry point from
+  `run_sync_once`, sharing the actual per-activity write loop via a new `_sync_activities`
+  generator (yields once per completed activity, so partial progress is still counted/logged
+  correctly even if a later activity's fetch fails partway through — the same behavior
+  `run_sync_once` already had, now shared instead of duplicated). Does not refresh
+  `training_baseline` — that stays the regular scheduled sync's job.
+- ✅ A bad start date raises a plain `ValueError` (from `python-garminconnect`'s own date-format
+  validation, before any network call) rather than a `GarminAPIError` — deliberately not logged
+  to `sync_log` as a failed sync attempt, since it's caller-input validation, not a real sync
+  failure. The web UI catches it separately with a clear "Invalid start date" message.
+- ✅ UI warns explicitly that a wide date range can take a while (many Garmin API calls — each
+  activity costs 4: detail, laps, HR zones, samples) and that progress already made is saved
+  even if the request itself times out client-side — since this reuses the same "blocking call
+  directly in the async handler" pattern as the existing "Sync now" button, just potentially for
+  much longer.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added

@@ -14,7 +14,12 @@ from app.sync.garmin_client import (
     HrZoneTime,
     TrainingBaseline,
 )
-from app.sync.scheduler import _install_shutdown_handler, run_forever, run_sync_once
+from app.sync.scheduler import (
+    _install_shutdown_handler,
+    run_backfill_sync,
+    run_forever,
+    run_sync_once,
+)
 
 
 def make_settings(tmp_path) -> Settings:
@@ -118,6 +123,8 @@ class FakeGarminClient:
         baseline=None,
         hr_zones=None,
         samples=None,
+        since_activities=None,
+        since_error=None,
     ):
         self._activities = activities or []
         self._laps = laps or {}
@@ -126,7 +133,10 @@ class FakeGarminClient:
         self._baseline = baseline
         self._hr_zones = hr_zones or {}
         self._samples = samples or {}
+        self._since_activities = since_activities if since_activities is not None else activities or []
+        self._since_error = since_error
         self.login_called = False
+        self.since_start_date = None
 
     def login(self):
         self.login_called = True
@@ -137,6 +147,12 @@ class FakeGarminClient:
         if self._fetch_error:
             raise self._fetch_error
         return self._activities
+
+    def fetch_activities_since(self, start_date):
+        self.since_start_date = start_date
+        if self._since_error:
+            raise self._since_error
+        return self._since_activities
 
     def fetch_activity_laps(self, activity_id):
         return self._laps.get(activity_id, [])
@@ -308,6 +324,105 @@ def test_run_sync_once_logs_failure_on_fetch_error(tmp_path):
         ).fetchone()
         assert log_row["status"] == "failed"
         assert "garmin is down" in log_row["error_message"]
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_writes_activities(tmp_path):
+    settings = make_settings(tmp_path)
+    activity = make_activity()
+    lap = make_lap()
+    client = FakeGarminClient(since_activities=[activity], laps={1: [lap]})
+
+    count = run_backfill_sync(settings, client, "2020-01-01")
+
+    assert count == 1
+    assert client.login_called
+    assert client.since_start_date == "2020-01-01"
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        row = conn.execute("SELECT * FROM activities WHERE activity_id = 1").fetchone()
+        assert row["activity_name"] == "Morning Run"
+
+        log_row = conn.execute("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+        assert log_row["status"] == "success"
+        assert log_row["activities_synced"] == 1
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_does_not_touch_training_baseline(tmp_path):
+    # Backfill is about historical activities, not the athlete's current physiological
+    # baseline -- that stays the regular scheduled sync's job (run_sync_once).
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(since_activities=[make_activity()])
+
+    run_backfill_sync(settings, client, "2020-01-01")
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        assert conn.execute("SELECT * FROM training_baseline").fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_logs_failure_on_auth_error(tmp_path):
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(login_error=GarminAuthError("bad credentials"))
+
+    with pytest.raises(GarminAuthError):
+        run_backfill_sync(settings, client, "2020-01-01")
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        log_row = conn.execute("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+        assert log_row["status"] == "failed"
+        assert "bad credentials" in log_row["error_message"]
+        assert log_row["activities_synced"] == 0
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_logs_failure_on_fetch_error(tmp_path):
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(since_error=GarminAPIError("garmin is down"))
+
+    with pytest.raises(GarminAPIError):
+        run_backfill_sync(settings, client, "2020-01-01")
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        log_row = conn.execute("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+        assert log_row["status"] == "failed"
+        assert "Backfill since 2020-01-01 failed" in log_row["error_message"]
+        assert "garmin is down" in log_row["error_message"]
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_propagates_bad_date_without_logging(tmp_path):
+    # A bad start_date is a caller-input error, not a sync attempt -- see
+    # run_backfill_sync's docstring: nothing gets written or logged for this case.
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(since_error=ValueError("startdate must be in format 'YYYY-MM-DD'"))
+
+    with pytest.raises(ValueError):
+        run_backfill_sync(settings, client, "not-a-date")
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        assert conn.execute("SELECT * FROM sync_log").fetchone() is None
     finally:
         conn.close()
 

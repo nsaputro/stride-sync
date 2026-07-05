@@ -34,6 +34,23 @@ http://homeassistant.local:8765/mcp
 For Claude Desktop, see the config snippet in
 [`PROJECT_PLAN.md`](https://github.com/nsaputro/stride-sync/blob/main/PROJECT_PLAN.md#2-mcp-connection).
 
+## Web UI
+
+Open the **StrideSync** panel in the Home Assistant sidebar for a small dashboard alongside the
+Garmin login flow:
+
+- **Dashboard** — login status, total activities synced, last-sync outcome, and your most recent
+  activities (name, date, distance).
+- **Running** — total distance per calendar week (Monday–Sunday), most recent week first.
+- **Settings** — one-off backfill: pick a start date and StrideSync fetches every activity from
+  then through today, in addition to what regular syncs already cover. Regular syncs only fetch
+  your most recent activities (`sync_interval_hours`, count-based); backfill is for pulling in
+  older history a regular sync would never reach. A wide date range can take a while — each
+  activity costs several Garmin API calls, so backfilling years of daily activity could take
+  minutes. The page waits for it to finish; if the request itself times out (e.g. over a
+  Cloudflare Tunnel), the backfill keeps running server-side and whatever it completed is saved —
+  check the **Dashboard** tab afterward to confirm.
+
 ## Remote access (e.g. Claude on mobile, over a Cloudflare Tunnel)
 
 StrideSync's MCP server is reachable over the network by design (Streamable HTTP, not stdio) —

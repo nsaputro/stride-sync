@@ -422,6 +422,53 @@ class TestGarminClientFetch:
         client._garmin.get_activities.assert_called_once_with(limit=5)
         client._garmin.get_activity.assert_called_once_with("123")
 
+    def test_fetch_activities_since_merges_detail_per_activity(self):
+        client = make_client()
+        client._garmin.get_activities_by_date.return_value = [make_list_item()]
+        client._garmin.get_activity.return_value = {
+            "summaryDTO": {"distance": 5000.0, "averageSpeed": 2.78}
+        }
+
+        activities = client.fetch_activities_since("2020-01-01")
+
+        assert len(activities) == 1
+        assert activities[0].distance_meters == 5000.0
+        client._garmin.get_activities_by_date.assert_called_once_with("2020-01-01")
+
+    def test_fetch_activities_since_empty_when_no_activities(self):
+        client = make_client()
+        client._garmin.get_activities_by_date.return_value = []
+
+        assert client.fetch_activities_since("2020-01-01") == []
+
+    def test_fetch_activities_since_wraps_connection_error(self):
+        client = make_client()
+        client._garmin.get_activities_by_date.side_effect = GarminConnectConnectionError("boom")
+
+        with pytest.raises(GarminAPIError):
+            client.fetch_activities_since("2020-01-01")
+
+    def test_fetch_activities_since_wraps_transport_error(self):
+        client = make_client()
+        client._garmin.get_activities_by_date.side_effect = requests.exceptions.ConnectionError(
+            "connection reset"
+        )
+
+        with pytest.raises(GarminAPIError):
+            client.fetch_activities_since("2020-01-01")
+
+    def test_fetch_activities_since_propagates_bad_date_value_error(self):
+        # python-garminconnect itself validates the date format before any network call and
+        # raises a plain ValueError -- not a GarminAPIError, since this is caller input
+        # validation, not a Garmin Connect failure. The web UI catches ValueError separately.
+        client = make_client()
+        client._garmin.get_activities_by_date.side_effect = ValueError(
+            "startdate must be in format 'YYYY-MM-DD', got: not-a-date"
+        )
+
+        with pytest.raises(ValueError):
+            client.fetch_activities_since("not-a-date")
+
     def test_fetch_activity_laps_empty_when_no_lap_dtos(self):
         client = make_client()
         client._garmin.get_activity_splits.return_value = {}
