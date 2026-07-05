@@ -26,6 +26,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   entry points implement the flow exactly once. This revisits milestone v0.4's original "no
   ingress" decision — the MCP server itself still has no ingress route, since MCP clients reach
   it directly over the network, not through HA's UI.
+- **"Sync now" button on the MFA login web UI** (shown once a session exists): triggers
+  `scheduler.run_sync_once` on demand, reusing the exact same sync logic the sync-scheduler
+  service runs on its interval, so a fresh login can be verified end-to-end without waiting for
+  the next scheduled sync.
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the
@@ -138,6 +142,12 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   returning `429` (IP rate-limited by Garmin, likely from repeated logins during this debugging
   process) and falling through to a later strategy that succeeded — expected behavior, no code
   change needed.
+- **The MFA login web UI kept showing "not logged in" even after a real, successful login**:
+  `python-garminconnect`'s `Garmin.login()`/`resume_login()` only persist the session to disk
+  internally on the `return_on_mfa=False` code path — the MFA web UI and CLI bootstrap both
+  require `return_on_mfa=True` (to detect an MFA requirement via a return value instead of an
+  exception), so every login through either of them was silently never saved. `mfa_login.py` now
+  persists the session itself right after a non-MFA success or a completed MFA resume.
 
 ## [0.1.0] - 2026-07-04
 
