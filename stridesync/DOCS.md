@@ -47,9 +47,10 @@ Garmin login flow:
   your most recent activities (`sync_interval_hours`, count-based); backfill is for pulling in
   older history a regular sync would never reach. A wide date range can take a while — each
   activity costs several Garmin API calls, so backfilling years of daily activity could take
-  minutes. The page waits for it to finish; if the request itself times out (e.g. over a
-  Cloudflare Tunnel), the backfill keeps running server-side and whatever it completed is saved —
-  check the **Dashboard** tab afterward to confirm.
+  minutes. The backfill runs in the background and the page shows a live progress bar
+  ("N / total activities"); it's safe to navigate away and come back — the backfill keeps
+  running server-side either way, and reopening the **Settings** tab picks the progress bar back
+  up (or shows the result, once it's done).
 
 ## Remote access (e.g. Claude on mobile, over a Cloudflare Tunnel)
 

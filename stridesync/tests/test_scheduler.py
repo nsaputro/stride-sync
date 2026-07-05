@@ -354,6 +354,19 @@ def test_run_backfill_sync_writes_activities(tmp_path):
         conn.close()
 
 
+def test_run_backfill_sync_reports_progress(tmp_path):
+    settings = make_settings(tmp_path)
+    activities = [make_activity(1), make_activity(2)]
+    client = FakeGarminClient(since_activities=activities)
+    calls = []
+
+    run_backfill_sync(settings, client, "2020-01-01", progress_callback=lambda c, t: calls.append((c, t)))
+
+    # Called once up front with the known total (before any activity is processed), then once
+    # per completed activity.
+    assert calls == [(0, 2), (1, 2), (2, 2)]
+
+
 def test_run_backfill_sync_does_not_touch_training_baseline(tmp_path):
     # Backfill is about historical activities, not the athlete's current physiological
     # baseline -- that stays the regular scheduled sync's job (run_sync_once).

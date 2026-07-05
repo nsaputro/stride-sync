@@ -15,9 +15,12 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   through today via Garmin's date-range endpoint (`GarminClient.fetch_activities_since`), reusing
   the same per-activity write path a regular sync uses (`scheduler.run_backfill_sync`, sharing
   `_sync_activities` with `run_sync_once` rather than duplicating it). Doesn't touch
-  `training_baseline` — that stays the regular scheduled sync's job. A wide date range can take a
-  while (several Garmin API calls per activity); the UI warns about this and progress already
-  made is saved even if the request itself times out.
+  `training_baseline` — that stays the regular scheduled sync's job.
+- **Live progress bar for the backfill**: a wide date range can take a while (several Garmin API
+  calls per activity), so the backfill now runs in a background thread instead of blocking the
+  request. The Settings tab polls `GET /backfill/status` and shows a `<progress>` bar with a
+  live "N / total activities" count; you can navigate away and back without losing progress, and
+  a second backfill can't be started while one is already running.
 
 ## [0.2.0] - 2026-07-05
 
