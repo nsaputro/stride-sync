@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-05
+
 ### Added
 - **New "Settings" tab with a one-off activity backfill** (milestone v0.8): regular syncs are
   count-based (the most recent N activities), so there was no way to pull in older history
@@ -271,6 +273,7 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/nsaputro/stride-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nsaputro/stride-sync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nsaputro/stride-sync/releases/tag/v0.1.0
