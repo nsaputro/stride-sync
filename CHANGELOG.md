@@ -39,6 +39,23 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   otherwise), human-readable timestamps instead of raw ISO-8601 with microseconds, a numeric
   keypad + one-time-code autofill hint on the MFA input, and instant "Working…" button feedback
   on submit (logins/syncs are blocking network calls that can take several seconds).
+- **Training-zone data for marathon pace/HR targeting** (milestone v0.5): average pace/HR per
+  activity can tell you a run was fast or slow, but not whether it was the *right effort* for a
+  marathon-training plan — that needs a physiological reference point and, ideally, effort
+  distribution within a run. Three additions, all requested directly after reviewing synced data
+  for exactly this use case:
+  - `training_baseline` table: lactate threshold HR/pace and Garmin's own 5k/10k/half/marathon
+    race predictions, fetched once per sync — the reference point that turns "average HR 150"
+    into an actual effort level for a given athlete.
+  - `activity_hr_zones` table: seconds spent in each HR zone per activity, not just its single
+    average HR.
+  - `activity_samples` table: fine-grained pace/HR/cadence/elevation time-series per activity
+    (up to Garmin's ~2000-point cap), for cardiac-drift and precise negative-split detection at a
+    finer resolution than 1km auto-lap splits.
+  - Three new MCP tools (`training_baseline`, `activity_hr_zones`, `activity_samples`) expose all
+    of this to Claude directly, rather than baking training-science formulas into this codebase.
+  - Not every Garmin device/account has lactate-threshold/race-prediction data — that's handled
+    as "nothing to store," never as a sync failure.
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the

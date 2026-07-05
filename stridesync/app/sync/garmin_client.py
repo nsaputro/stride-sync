@@ -152,6 +152,50 @@ class GarminLap:
     max_cadence_spm: Optional[float]
 
 
+@dataclass(frozen=True)
+class TrainingBaseline:
+    """Physiological reference point (see PROJECT_PLAN.md milestone v0.5) for interpreting an
+    activity's HR/pace as *effort* rather than raw numbers — see app/db/schema.sql
+    `training_baseline` table.
+    """
+
+    lactate_threshold_hr: Optional[int]
+    lactate_threshold_speed_mps: Optional[float]
+    lactate_threshold_pace_sec_per_km: Optional[float]
+    race_prediction_5k_seconds: Optional[int]
+    race_prediction_10k_seconds: Optional[int]
+    race_prediction_half_marathon_seconds: Optional[int]
+    race_prediction_marathon_seconds: Optional[int]
+
+
+@dataclass(frozen=True)
+class HrZoneTime:
+    """Seconds spent in one heart-rate zone during an activity — the actual training stimulus
+    of a run, not just its single average HR. See `activity_hr_zones` table.
+    """
+
+    activity_id: int
+    zone_number: int
+    zone_low_boundary_hr: Optional[int]
+    seconds_in_zone: Optional[float]
+
+
+@dataclass(frozen=True)
+class ActivitySample:
+    """One point of an activity's fine-grained time-series — see `activity_samples` table."""
+
+    activity_id: int
+    sample_index: int
+    elapsed_seconds: Optional[float]
+    heart_rate: Optional[int]
+    speed_mps: Optional[float]
+    pace_sec_per_km: Optional[float]
+    cadence_spm: Optional[float]
+    elevation_meters: Optional[float]
+    latitude: Optional[float]
+    longitude: Optional[float]
+
+
 def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
     """Convert average speed (m/s) to pace (seconds per km). None if speed is missing/zero."""
     if not speed_mps:
@@ -226,6 +270,123 @@ def _normalize_lap(activity_id: int, lap_index: int, raw: Dict[str, Any]) -> Gar
         average_cadence_spm=_get(raw, "averageRunCadence"),
         max_cadence_spm=_get(raw, "maxRunCadence"),
     )
+
+
+def _normalize_training_baseline(
+    threshold: Dict[str, Any], predictions: Dict[str, Any]
+) -> TrainingBaseline:
+    """Merge `Client.get_lactate_threshold(latest=True)` + `Client.get_race_predictions()`.
+
+    Neither endpoint is normalized by `python-garminconnect` itself (both return raw
+    `connectapi()` JSON) — field names below are inferred from the wider Garmin Connect tooling
+    ecosystem, not yet confirmed against a live account (see PROJECT_PLAN.md milestone v0.5).
+    `_get()`'s multi-candidate-key lookup means a wrong guess degrades to `None`, not a crash.
+    """
+    speed_and_hr = threshold.get("speed_and_heart_rate") or {}
+    speed = speed_and_hr.get("speed")
+
+    return TrainingBaseline(
+        lactate_threshold_hr=speed_and_hr.get("heartRate"),
+        lactate_threshold_speed_mps=speed,
+        lactate_threshold_pace_sec_per_km=_pace_sec_per_km(speed),
+        race_prediction_5k_seconds=_get(predictions, "raceTime5K", "raceTime5k"),
+        race_prediction_10k_seconds=_get(predictions, "raceTime10K", "raceTime10k"),
+        race_prediction_half_marathon_seconds=_get(
+            predictions, "raceTimeHalfMarathon", "raceTimeHalf"
+        ),
+        race_prediction_marathon_seconds=_get(predictions, "raceTimeMarathon"),
+    )
+
+
+def _normalize_hr_zones(activity_id: int, raw: Any) -> List[HrZoneTime]:
+    """Convert `Client.get_activity_hr_in_timezones(activity_id)`'s raw list into `HrZoneTime`s.
+
+    Best-effort field mapping, same caveat as `_normalize_training_baseline` — see
+    PROJECT_PLAN.md milestone v0.5. Any shape other than a list of zone dicts (or a zone dict
+    missing its zone number) yields an empty/partial result rather than raising, since not every
+    activity has HR zone data (e.g. no HR strap that day).
+    """
+    zones = raw if isinstance(raw, list) else []
+    result = []
+    for entry in zones:
+        if not isinstance(entry, dict):
+            continue
+        zone_number = _get(entry, "zoneNumber")
+        if zone_number is None:
+            continue
+        result.append(
+            HrZoneTime(
+                activity_id=activity_id,
+                zone_number=int(zone_number),
+                zone_low_boundary_hr=_get(entry, "zoneLowBoundary"),
+                seconds_in_zone=_get(entry, "secsInZone"),
+            )
+        )
+    return result
+
+
+_SAMPLE_METRIC_KEYS: Dict[str, tuple] = {
+    "elapsed_seconds": ("sumElapsedDuration", "directElapsedDuration"),
+    "heart_rate": ("directHeartRate",),
+    "speed_mps": ("directSpeed",),
+    "elevation_meters": ("directElevation",),
+    "latitude": ("directLatitude",),
+    "longitude": ("directLongitude",),
+    "cadence_spm": ("directRunCadence", "directDoubleCadence"),
+}
+
+
+def _normalize_samples(activity_id: int, raw: Dict[str, Any]) -> List[ActivitySample]:
+    """Convert `Client.get_activity_details(activity_id)`'s columnar chart data into
+    `ActivitySample`s (one per elapsed-time point).
+
+    Garmin's raw shape here is index-mapped, not keyed: `metricDescriptors` maps a metric name
+    (e.g. "directHeartRate") to a position in each `activityDetailMetrics` entry's flat `metrics`
+    list — so every activity's response can use a different column order/subset depending on
+    what its recording device captured. Best-effort field mapping, same caveat as
+    `_normalize_training_baseline` — see PROJECT_PLAN.md milestone v0.5. A wrong or missing key
+    degrades to `None` for that field, not a crash; a malformed/empty response yields `[]`.
+    """
+    descriptors = raw.get("metricDescriptors") or []
+    key_to_index: Dict[str, int] = {
+        d["key"]: d["metricsIndex"]
+        for d in descriptors
+        if isinstance(d, dict) and "key" in d and "metricsIndex" in d
+    }
+
+    field_index: Dict[str, Optional[int]] = {}
+    for field, candidate_keys in _SAMPLE_METRIC_KEYS.items():
+        field_index[field] = next(
+            (key_to_index[key] for key in candidate_keys if key in key_to_index), None
+        )
+
+    def _value(values: List[Any], field: str) -> Any:
+        index = field_index[field]
+        if index is None or index >= len(values):
+            return None
+        return values[index]
+
+    samples: List[ActivitySample] = []
+    for sample_index, entry in enumerate(raw.get("activityDetailMetrics") or []):
+        if not isinstance(entry, dict):
+            continue
+        values = entry.get("metrics") or []
+        speed = _value(values, "speed_mps")
+        samples.append(
+            ActivitySample(
+                activity_id=activity_id,
+                sample_index=sample_index,
+                elapsed_seconds=_value(values, "elapsed_seconds"),
+                heart_rate=_value(values, "heart_rate"),
+                speed_mps=speed,
+                pace_sec_per_km=_pace_sec_per_km(speed),
+                cadence_spm=_value(values, "cadence_spm"),
+                elevation_meters=_value(values, "elevation_meters"),
+                latitude=_value(values, "latitude"),
+                longitude=_value(values, "longitude"),
+            )
+        )
+    return samples
 
 
 class GarminClient:
@@ -394,6 +555,56 @@ class GarminClient:
         return [
             _normalize_lap(activity_id, index, lap) for index, lap in enumerate(lap_dtos)
         ]
+
+    def fetch_training_baseline(self) -> Optional[TrainingBaseline]:
+        """Fetch the athlete's current lactate threshold + race predictions (see
+        PROJECT_PLAN.md milestone v0.5) — the reference point that turns a raw HR/pace number
+        into an effort level.
+
+        Unlike every other `fetch_*` method on this class, a failure here logs a warning and
+        returns `None` instead of raising: not every Garmin device/account exposes this data
+        (e.g. non-running-focused watches), and there's no clean way to distinguish "this
+        account doesn't have this data" from "a request failed" without live-account testing —
+        so this supplementary data is always best-effort and never fails the sync as a whole.
+        """
+        try:
+            threshold = self._garmin.get_lactate_threshold(latest=True) or {}
+            predictions = self._garmin.get_race_predictions() or {}
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning("Could not fetch training baseline (non-fatal): %s", exc)
+            return None
+        return _normalize_training_baseline(threshold, predictions)
+
+    def fetch_activity_hr_zones(self, activity_id: int) -> List[HrZoneTime]:
+        """Fetch seconds-in-each-HR-zone for one activity (see PROJECT_PLAN.md milestone v0.5).
+
+        Best-effort, same reasoning as `fetch_training_baseline`: not every activity has HR zone
+        data (e.g. no HR strap that day), so a failure here is logged and treated as "no zone
+        data for this activity" rather than failing the whole sync.
+        """
+        try:
+            raw = self._garmin.get_activity_hr_in_timezones(str(activity_id))
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning(
+                "Could not fetch HR zones for activity %s (non-fatal): %s", activity_id, exc
+            )
+            return []
+        return _normalize_hr_zones(activity_id, raw)
+
+    def fetch_activity_samples(self, activity_id: int) -> List[ActivitySample]:
+        """Fetch the fine-grained time-series for one activity (see PROJECT_PLAN.md milestone
+        v0.5). Best-effort, same reasoning as `fetch_activity_hr_zones`.
+        """
+        try:
+            raw = self._garmin.get_activity_details(str(activity_id))
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning(
+                "Could not fetch time-series samples for activity %s (non-fatal): %s",
+                activity_id,
+                exc,
+            )
+            return []
+        return _normalize_samples(activity_id, raw if isinstance(raw, dict) else {})
 
     def _fetch_activity_detail(self, activity_id: int) -> Dict[str, Any]:
         try:

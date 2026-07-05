@@ -36,6 +36,7 @@ _MIN_LIMIT = 1
 _MAX_LIMIT = 200
 _MIN_DAYS = 1
 _MAX_DAYS = 365
+_MAX_SAMPLE_POINTS = 500
 
 
 def _connect_readonly(db_path: str) -> sqlite3.Connection:
@@ -125,6 +126,73 @@ def get_training_load_summary(conn: sqlite3.Connection, days: int = 30) -> Dict[
     return result
 
 
+def get_training_baseline(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """The athlete's current lactate threshold HR/pace + Garmin's own race-time predictions —
+    see PROJECT_PLAN.md milestone v0.5. This is the reference point for judging whether an
+    activity's HR/pace represents an easy, threshold, or hard effort; without it, "average HR
+    150" has no meaning. Not every account/device has this data (see
+    `GarminClient.fetch_training_baseline`'s docstring) — returns a clear "unavailable" status
+    rather than a row of nulls when that's the case.
+    """
+    row = conn.execute(
+        """
+        SELECT synced_at, lactate_threshold_hr, lactate_threshold_speed_mps,
+               lactate_threshold_pace_sec_per_km, race_prediction_5k_seconds,
+               race_prediction_10k_seconds, race_prediction_half_marathon_seconds,
+               race_prediction_marathon_seconds
+        FROM training_baseline
+        WHERE id = 1
+        """
+    ).fetchone()
+    if row is None:
+        return {"status": "unavailable"}
+    return dict(row)
+
+
+def get_activity_hr_zones(conn: sqlite3.Connection, activity_id: int) -> List[Dict[str, Any]]:
+    """Seconds spent in each heart-rate zone for one activity — the actual effort distribution
+    of a run (e.g. 80% Zone 2, 20% Zone 4), not just its single average HR number."""
+    rows = conn.execute(
+        """
+        SELECT zone_number, zone_low_boundary_hr, seconds_in_zone
+        FROM activity_hr_zones
+        WHERE activity_id = ?
+        ORDER BY zone_number
+        """,
+        (activity_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_activity_samples(
+    conn: sqlite3.Connection, activity_id: int, max_points: int = 200
+) -> List[Dict[str, Any]]:
+    """Time-series pace/HR/cadence/elevation for one activity, evenly downsampled to at most
+    `max_points` points — fine-grained enough to spot pacing consistency or HR drift (e.g.
+    cardiac drift over a long run) at a finer resolution than 1km lap averages, without dumping
+    thousands of raw rows into a single tool response.
+    """
+    max_points = _clamp(max_points, _MIN_LIMIT, _MAX_SAMPLE_POINTS)
+    total = conn.execute(
+        "SELECT COUNT(*) AS n FROM activity_samples WHERE activity_id = ?", (activity_id,)
+    ).fetchone()["n"]
+    if total == 0:
+        return []
+
+    stride = max(1, -(-total // max_points))  # ceil(total / max_points)
+    rows = conn.execute(
+        """
+        SELECT sample_index, elapsed_seconds, heart_rate, speed_mps, pace_sec_per_km,
+               cadence_spm, elevation_meters, latitude, longitude
+        FROM activity_samples
+        WHERE activity_id = ? AND sample_index % ? = 0
+        ORDER BY sample_index
+        """,
+        (activity_id, stride),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_last_sync_status(conn: sqlite3.Connection) -> Dict[str, Any]:
     """Outcome of the most recent sync attempt, so staleness is never silent (see CLAUDE.md)."""
     row = conn.execute(
@@ -194,6 +262,51 @@ def create_server(settings: Settings) -> FastMCP:
         conn = _connect_readonly(settings.db_path)
         try:
             return get_training_load_summary(conn, days)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def training_baseline() -> Dict[str, Any]:
+        """Get the athlete's current lactate threshold HR/pace and Garmin's own race-time
+        predictions (5k/10k/half/marathon). Check this before answering questions about target
+        pace or target heart rate — it's the reference point that turns a raw number like
+        "average HR 150" into an actual effort level (easy/threshold/hard) for this person.
+        Returns {"status": "unavailable"} if this account/device doesn't have this data.
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_training_baseline(conn)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def activity_hr_zones(activity_id: int) -> List[Dict[str, Any]]:
+        """Get seconds spent in each heart-rate zone for one activity — shows the actual effort
+        distribution of a run (e.g. 80% Zone 2, 20% Zone 4), not just its single average HR.
+
+        Args:
+            activity_id: The activity's id, from `recent_activities`.
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_activity_hr_zones(conn, activity_id)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def activity_samples(activity_id: int, max_points: int = 200) -> List[Dict[str, Any]]:
+        """Get a time-series of pace/HR/cadence/elevation within one activity, evenly
+        downsampled to at most max_points points. Use this for finer-grained pacing/HR-drift
+        analysis (e.g. detecting cardiac drift over a long run, or precise negative splits) than
+        1km lap averages allow.
+
+        Args:
+            activity_id: The activity's id, from `recent_activities`.
+            max_points: Maximum number of time-series points to return (1-500, default 200).
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_activity_samples(conn, activity_id, max_points)
         finally:
             conn.close()
 

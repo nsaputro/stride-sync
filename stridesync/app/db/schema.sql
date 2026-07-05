@@ -59,3 +59,50 @@ CREATE TABLE IF NOT EXISTS sync_log (
     activities_synced  INTEGER NOT NULL DEFAULT 0,
     error_message      TEXT
 );
+
+-- training_baseline: the athlete's current physiological reference point (lactate threshold
+-- HR/pace, Garmin's own race-time predictions) — see PROJECT_PLAN.md milestone v0.5. A single
+-- row, replaced (not appended) on every sync: it's "current state," not a time series. Without
+-- this, an activity's average HR/pace has no reference point to judge effort against.
+CREATE TABLE IF NOT EXISTS training_baseline (
+    id                                     INTEGER PRIMARY KEY CHECK (id = 1),
+    synced_at                              TEXT NOT NULL,
+    lactate_threshold_hr                   INTEGER,
+    lactate_threshold_speed_mps            REAL,
+    lactate_threshold_pace_sec_per_km      REAL,
+    race_prediction_5k_seconds             INTEGER,
+    race_prediction_10k_seconds            INTEGER,
+    race_prediction_half_marathon_seconds  INTEGER,
+    race_prediction_marathon_seconds       INTEGER
+);
+
+-- activity_hr_zones: seconds spent in each Garmin heart-rate zone (1-5) per activity — the
+-- actual training stimulus of a run (how much of it was easy vs. threshold effort), not just its
+-- single average HR number. See PROJECT_PLAN.md milestone v0.5.
+CREATE TABLE IF NOT EXISTS activity_hr_zones (
+    activity_id          INTEGER NOT NULL,
+    zone_number          INTEGER NOT NULL,
+    zone_low_boundary_hr INTEGER,
+    seconds_in_zone      REAL,
+    PRIMARY KEY (activity_id, zone_number),
+    FOREIGN KEY (activity_id) REFERENCES activities (activity_id)
+);
+
+-- activity_samples: fine-grained time-series within an activity (pace/HR/cadence/elevation over
+-- elapsed time, up to Garmin's own ~2000-point chart-resolution cap) — enables things like
+-- cardiac-drift or precise negative-split detection that 1km auto-lap averages hide. See
+-- PROJECT_PLAN.md milestone v0.5.
+CREATE TABLE IF NOT EXISTS activity_samples (
+    activity_id      INTEGER NOT NULL,
+    sample_index     INTEGER NOT NULL,
+    elapsed_seconds  REAL,
+    heart_rate       INTEGER,
+    speed_mps        REAL,
+    pace_sec_per_km  REAL,
+    cadence_spm      REAL,
+    elevation_meters REAL,
+    latitude         REAL,
+    longitude        REAL,
+    PRIMARY KEY (activity_id, sample_index),
+    FOREIGN KEY (activity_id) REFERENCES activities (activity_id)
+);

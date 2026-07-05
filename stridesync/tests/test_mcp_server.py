@@ -8,9 +8,12 @@ from app.mcp.server import (
     _clamp,
     _connect_readonly,
     create_server,
+    get_activity_hr_zones,
     get_activity_laps,
+    get_activity_samples,
     get_last_sync_status,
     get_pace_cadence_hr_trend,
+    get_training_baseline,
     get_training_load_summary,
     list_recent_activities,
 )
@@ -77,6 +80,31 @@ def seed_db(db_path: str) -> None:
             INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
             VALUES ('2026-06-01T00:00:00+00:00', '2026-06-01T00:00:05+00:00', 'success', 2, NULL)
             """
+        )
+        conn.execute(
+            """
+            INSERT INTO training_baseline (
+                id, synced_at, lactate_threshold_hr, lactate_threshold_speed_mps,
+                lactate_threshold_pace_sec_per_km, race_prediction_5k_seconds,
+                race_prediction_10k_seconds, race_prediction_half_marathon_seconds,
+                race_prediction_marathon_seconds
+            ) VALUES (1, datetime('now'), 165, 3.2, 312.5, 1200, 2500, 5600, 11800)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO activity_hr_zones (activity_id, zone_number, zone_low_boundary_hr, seconds_in_zone)
+            VALUES (1, 1, 100, 120.0), (1, 2, 140, 900.0)
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO activity_samples (
+                activity_id, sample_index, elapsed_seconds, heart_rate, speed_mps,
+                pace_sec_per_km, cadence_spm, elevation_meters, latitude, longitude
+            ) VALUES (1, ?, ?, ?, 2.78, 359.7, 170.0, 12.5, 37.0, -122.0)
+            """,
+            [(i, float(i * 10), 150 + i) for i in range(5)],
         )
         conn.commit()
     finally:
@@ -216,6 +244,78 @@ class TestQueries:
         finally:
             conn.close()
 
+    def test_get_training_baseline(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            baseline = get_training_baseline(conn)
+            assert baseline["lactate_threshold_hr"] == 165
+            assert baseline["race_prediction_marathon_seconds"] == 11800
+        finally:
+            conn.close()
+
+    def test_get_training_baseline_unavailable(self, tmp_path):
+        settings = make_settings(tmp_path)
+        db.connect(settings.db_path).close()  # schema only, no training_baseline row
+        conn = db.connect(settings.db_path)
+        try:
+            assert get_training_baseline(conn) == {"status": "unavailable"}
+        finally:
+            conn.close()
+
+    def test_get_activity_hr_zones(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            zones = get_activity_hr_zones(conn, 1)
+            assert len(zones) == 2
+            assert zones[0]["zone_number"] == 1
+            assert zones[1]["seconds_in_zone"] == 900.0
+        finally:
+            conn.close()
+
+    def test_get_activity_hr_zones_empty_for_unknown_activity(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            assert get_activity_hr_zones(conn, 999) == []
+        finally:
+            conn.close()
+
+    def test_get_activity_samples_returns_all_when_under_max_points(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            samples = get_activity_samples(conn, 1, max_points=200)
+            assert len(samples) == 5
+            assert samples[0]["heart_rate"] == 150
+        finally:
+            conn.close()
+
+    def test_get_activity_samples_downsamples_when_over_max_points(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            samples = get_activity_samples(conn, 1, max_points=2)
+            # 5 samples, stride = ceil(5/2) = 3 -> indices 0, 3
+            assert [s["sample_index"] for s in samples] == [0, 3]
+        finally:
+            conn.close()
+
+    def test_get_activity_samples_empty_for_unknown_activity(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            assert get_activity_samples(conn, 999) == []
+        finally:
+            conn.close()
+
 
 class TestCreateServer:
     def test_registers_expected_tools(self, tmp_path):
@@ -231,6 +331,9 @@ class TestCreateServer:
             "activity_laps",
             "pace_cadence_hr_trend",
             "training_load_summary",
+            "training_baseline",
+            "activity_hr_zones",
+            "activity_samples",
             "last_sync_status",
         }
 

@@ -14,6 +14,12 @@
   most recent sync (success/failed, when, how many activities, and the error if it failed).
 - Redesigned the panel: clearer layout, dark mode support, easier-to-read timestamps, and
   instant feedback when you click a button instead of it looking unresponsive while it works.
+- **Synced data now includes what's needed for real marathon-training analysis**: your lactate
+  threshold heart rate/pace and Garmin's own race-time predictions, how long each run spent in
+  each heart-rate zone (not just its average), and a fine-grained pace/HR time-series within
+  each run. Ask Claude things like "what pace should I target for my marathon" or "was my long
+  run today too hard" and it now has the data to answer properly instead of just a single
+  average number per run.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both
