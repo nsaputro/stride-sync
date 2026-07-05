@@ -240,12 +240,25 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
     return activities_synced
 
 
-def run_backfill_sync(settings: Settings, client: GarminClient, start_date: str) -> int:
+def run_backfill_sync(
+    settings: Settings,
+    client: GarminClient,
+    start_date: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> int:
     """One-off backfill: fetch every activity from `start_date` through today and write it the
     same way a regular sync does — a separate entry point from `run_sync_once` (see
     PROJECT_PLAN.md milestone v0.8) since it's date-based rather than count-based, and can cover
     far more activities in one call. Does not refresh `training_baseline` — that stays the
     regular scheduled sync's job.
+
+    Args:
+        progress_callback: If given, called as `progress_callback(completed, total)` — once
+            immediately after the activity list is fetched (`completed=0`, so a caller showing a
+            progress bar knows the total right away rather than waiting for the first activity
+            to finish), then once per completed activity. A large date range can cover hundreds
+            of activities and take a long time; this is how `app/mfa_web/server.py`'s Settings
+            tab reports live progress instead of the caller just staring at a blank page.
 
     Returns:
         Number of activities backfilled.
@@ -264,10 +277,14 @@ def run_backfill_sync(settings: Settings, client: GarminClient, start_date: str)
     try:
         client.login()
         activities = client.fetch_activities_since(start_date)
+        if progress_callback:
+            progress_callback(0, len(activities))
 
         synced_at = datetime.now(timezone.utc).isoformat()
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
+            if progress_callback:
+                progress_callback(activities_synced, len(activities))
         conn.commit()
     except (GarminAuthError, GarminAPIError) as exc:
         conn.execute(

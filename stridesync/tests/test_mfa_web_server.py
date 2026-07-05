@@ -31,6 +31,40 @@ def _reset_pending_state():
     mfa_web_server._pending_garmin = None
 
 
+_INITIAL_BACKFILL_STATE = {
+    "running": False,
+    "start_date": None,
+    "total": 0,
+    "completed": 0,
+    "done": False,
+    "error": None,
+    "result_count": None,
+}
+
+
+@pytest.fixture(autouse=True)
+def _reset_backfill_state():
+    # Same rationale as _reset_pending_state above, for the backfill background-thread state.
+    mfa_web_server._backfill_state.update(_INITIAL_BACKFILL_STATE)
+    yield
+    mfa_web_server._backfill_state.update(_INITIAL_BACKFILL_STATE)
+
+
+class ImmediateThread:
+    """Stand-in for threading.Thread that runs `target` synchronously on `.start()`, so tests
+    calling into the real backfill background-thread flow are deterministic instead of racing a
+    real OS thread against the test assertions that follow.
+    """
+
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self):
+        self._target(*self._args, **self._kwargs)
+
+
 def _client(tmp_path) -> TestClient:
     app = mfa_web_server.create_app(make_settings(tmp_path))
     return TestClient(app)
@@ -467,10 +501,17 @@ def test_settings_tab_shows_backfill_form(tmp_path):
     assert 'input type="date" name="start_date"' in response.text
 
 
+def test_backfill_get_redirects_to_settings_when_nothing_has_run(tmp_path):
+    response = _client(tmp_path).get("/backfill", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "settings"
+
+
 def test_backfill_route_reports_activity_count(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync", return_value=42
-    ) as mock_run:
+    ) as mock_run, patch("app.mfa_web.server.threading.Thread", ImmediateThread):
         response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
 
     assert response.status_code == 200
@@ -482,7 +523,7 @@ def test_backfill_route_reports_activity_count(tmp_path):
 def test_backfill_route_uses_singular_wording_for_one_activity(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync", return_value=1
-    ):
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
         response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
 
     assert response.status_code == 200
@@ -500,7 +541,7 @@ def test_backfill_route_wraps_bad_date_value_error(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync",
         side_effect=ValueError("startdate must be in format 'YYYY-MM-DD', got: garbage"),
-    ):
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
         response = _client(tmp_path).post("/backfill", data={"start_date": "garbage"})
 
     assert response.status_code == 200
@@ -514,7 +555,7 @@ def test_backfill_route_wraps_auth_error(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync",
         side_effect=GarminAuthError("requires a multi-factor authentication (MFA) code"),
-    ):
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
         response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
 
     assert response.status_code == 200
@@ -528,7 +569,7 @@ def test_backfill_route_wraps_api_error(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync",
         side_effect=GarminAPIError("Failed to fetch activities since 2020-01-01"),
-    ):
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
         response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
 
     assert response.status_code == 200
@@ -539,11 +580,66 @@ def test_backfill_route_wraps_api_error(tmp_path):
 def test_backfill_route_never_returns_a_raw_500_on_unexpected_error(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync", side_effect=RuntimeError("unexpected shape")
-    ):
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
         response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
 
     assert response.status_code == 200
     assert "Backfill failed unexpectedly" in response.text
+
+
+def test_backfill_get_shows_result_after_completion(tmp_path):
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync", return_value=7
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
+        _client_instance = _client(tmp_path)
+        _client_instance.post("/backfill", data={"start_date": "2020-01-01"})
+        response = _client_instance.get("/backfill")
+
+    assert response.status_code == 200
+    assert "Backfilled 7 activities since 2020-01-01" in response.text
+
+
+def test_backfill_route_rejects_second_concurrent_start(tmp_path):
+    # Simulate a backfill already in progress (as if a real background thread hadn't finished
+    # yet) -- a second POST must not kick off a second one.
+    mfa_web_server._backfill_state.update(
+        {"running": True, "start_date": "2019-01-01", "total": 10, "completed": 3, "done": False}
+    )
+
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync"
+    ) as mock_run, patch("app.mfa_web.server.threading.Thread", ImmediateThread):
+        response = _client(tmp_path).post("/backfill", data={"start_date": "2020-01-01"})
+
+    assert response.status_code == 200
+    mock_run.assert_not_called()
+    # Still reports the *original* in-progress backfill, not the newly-submitted date.
+    assert "2019-01-01" in response.text
+    assert "3 / 10 activities" in response.text
+
+
+def test_backfill_status_reports_progress(tmp_path):
+    mfa_web_server._backfill_state.update(
+        {"running": True, "start_date": "2020-01-01", "total": 50, "completed": 12, "done": False}
+    )
+
+    response = _client(tmp_path).get("/backfill/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {"running": True, "total": 50, "completed": 12, "done": False}
+
+
+def test_backfill_progress_body_shows_progress_bar_while_running():
+    mfa_web_server._backfill_state.update(
+        {"running": True, "start_date": "2020-01-01", "total": 50, "completed": 12, "done": False}
+    )
+
+    body = mfa_web_server._backfill_progress_body()
+
+    assert '<progress id="backfill-bar" value="12" max="50"' in body
+    assert "12 / 50 activities" in body
+    assert "backfill/status" in body  # the polling script is present
 
 
 def test_format_timestamp_drops_microseconds_and_offset():

@@ -504,11 +504,26 @@ to pull in older history beyond whatever `limit` happens to cover.
   validation, before any network call) rather than a `GarminAPIError` — deliberately not logged
   to `sync_log` as a failed sync attempt, since it's caller-input validation, not a real sync
   failure. The web UI catches it separately with a clear "Invalid start date" message.
-- ✅ UI warns explicitly that a wide date range can take a while (many Garmin API calls — each
-  activity costs 4: detail, laps, HR zones, samples) and that progress already made is saved
-  even if the request itself times out client-side — since this reuses the same "blocking call
-  directly in the async handler" pattern as the existing "Sync now" button, just potentially for
-  much longer.
+- ✅ **Live progress bar**, added after confirming a multi-year backfill covers hundreds of
+  activities and can genuinely take a long time (many Garmin API calls — each activity costs 4:
+  detail, laps, HR zones, samples). The original design ran the whole backfill synchronously
+  inside the request handler (same "blocking call in an async handler" pattern as the "Sync now"
+  button) — fine for a normal sync's fixed top-20, but a poor fit here since there's no way to
+  report progress mid-request on a single request/response cycle. Reworked to run
+  `run_backfill_sync` on a background thread (`POST /backfill` starts it and returns
+  immediately), with `GET /backfill` showing a live `<progress>` bar that polls a new
+  `GET /backfill/status` JSON endpoint roughly once a second. `run_backfill_sync` gained an
+  optional `progress_callback(completed, total)` parameter for this — called once immediately
+  after the activity list is fetched (so the bar's total is correct from the start) and once per
+  completed activity.
+- ✅ Only one backfill runs at a time (matches this add-on's single-account design) — a second
+  `POST /backfill` while one is already running is a no-op that just shows the existing one's
+  progress, rather than starting a second background thread against the same Garmin account.
+  Caught and fixed a real self-deadlock here during development: the "already running" branch
+  originally called `_backfill_progress_body()` (which acquires `_backfill_lock`) from inside a
+  `with _backfill_lock:` block already holding that same non-reentrant lock — reproduced via a
+  real test hang (not just a review-time guess), fixed by moving that call outside the lock's
+  scope.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 

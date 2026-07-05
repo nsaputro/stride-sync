@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 from garminconnect import Garmin, GarminConnectAuthenticationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 from app.config import Settings
@@ -103,7 +103,7 @@ _STYLE = """
   }
   p.ok { color: var(--ok); font-weight: 600; }
   form { margin: 0.6rem 0; }
-  button, input[type=text] {
+  button, input[type=text], input[type=date] {
     font-size: 1rem; padding: 0.7rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border);
     width: 100%; font-family: inherit;
   }
@@ -112,7 +112,10 @@ _STYLE = """
   }
   button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
   button:disabled { opacity: 0.6; cursor: default; }
-  input[type=text] { background: var(--card); color: var(--text); margin-bottom: 0.5rem; }
+  input[type=text], input[type=date] {
+    background: var(--card); color: var(--text); margin-bottom: 0.5rem;
+  }
+  progress { width: 100%; height: 0.9rem; margin: 0.5rem 0; accent-color: var(--primary); }
   a { color: var(--primary); }
 """
 
@@ -369,9 +372,8 @@ def _settings_body() -> str:
         "<p>Regular syncs only fetch your most recent activities. Use this to pull in older "
         "history from a specific date onward.</p>"
         '<p class="error">A wide date range can take a while and make many Garmin API calls '
-        "(each activity needs several) — this page will wait for it to finish, so don't close "
-        "the tab. If it looks stuck, check the add-on log; progress already made is saved even "
-        "if the request itself times out.</p>"
+        "(each activity needs several) — you'll see a progress bar once it starts, and can "
+        "safely navigate away and back; it keeps running either way.</p>"
         '<form method="post" action="backfill">'
         '<input type="date" name="start_date" required>'
         '<button type="submit" class="primary">Backfill</button></form>'
@@ -382,16 +384,122 @@ async def settings_tab(request: Request) -> HTMLResponse:
     return _page("Settings", _settings_body(), active_tab="settings")
 
 
-async def backfill(request: Request) -> HTMLResponse:
-    """One-off backfill from a user-chosen start date, reusing `scheduler.run_backfill_sync` —
-    see that function's docstring for why it's a separate entry point from the regular
-    `run_sync_once`/"Sync now" flow (date-based, not count-based; can cover far more activities).
+# Backfill state (see module docstring re: single-account, single-in-flight-operation design —
+# same rationale as _pending_garmin above, just for a background thread instead of a multi-step
+# form flow). Guarded by _backfill_lock since it's read/written from both the asyncio event loop
+# thread (handling requests) and the background thread actually running the backfill.
+_backfill_lock = threading.Lock()
+_backfill_state: Dict[str, Any] = {
+    "running": False,
+    "start_date": None,
+    "total": 0,
+    "completed": 0,
+    "done": False,
+    "error": None,
+    "result_count": None,
+}
 
-    Blocking network calls run directly in this async handler, same rationale as `sync()` above
-    — and here, potentially for much longer, since a wide date range means many more Garmin API
-    calls than a normal sync's fixed top-20.
+
+def _run_backfill_in_background(settings: Settings, start_date: str) -> None:
+    """Runs `scheduler.run_backfill_sync` on a background thread (started by `backfill()` below)
+    so the HTTP request that kicks it off can return immediately with a progress page, instead of
+    blocking for however long a wide date range takes. Reports outcome via `_backfill_state`
+    rather than a return value/exception, since nothing is left to receive either once the
+    triggering request has already returned.
+    """
+    client = GarminClient(
+        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+    )
+
+    def on_progress(completed: int, total: int) -> None:
+        with _backfill_lock:
+            _backfill_state["completed"] = completed
+            _backfill_state["total"] = total
+
+    error_message: Optional[str] = None
+    result_count: Optional[int] = None
+    try:
+        result_count = run_backfill_sync(settings, client, start_date, progress_callback=on_progress)
+    except ValueError as exc:
+        error_message = f"Invalid start date: {exc}"
+    except (GarminAuthError, GarminAPIError) as exc:
+        error_message = f"Backfill failed: {exc}"
+    except Exception:
+        logger.exception("Unexpected error during backfill")
+        error_message = "Backfill failed unexpectedly — check the add-on log for details."
+    finally:
+        with _backfill_lock:
+            _backfill_state["running"] = False
+            _backfill_state["done"] = True
+            _backfill_state["error"] = error_message
+            _backfill_state["result_count"] = result_count
+
+
+_BACKFILL_POLL_SCRIPT = """
+<script>
+(function () {
+  function poll() {
+    fetch("backfill/status").then(function (r) { return r.json(); }).then(function (s) {
+      if (s.done) {
+        location.reload();
+        return;
+      }
+      var bar = document.getElementById("backfill-bar");
+      if (bar) { bar.max = s.total || 1; bar.value = s.completed || 0; }
+      var status = document.getElementById("backfill-status");
+      if (status) { status.textContent = (s.completed || 0) + " / " + (s.total || "?") + " activities"; }
+      setTimeout(poll, 1000);
+    });
+  }
+  poll();
+})();
+</script>
+"""
+
+
+def _backfill_progress_body() -> str:
+    with _backfill_lock:
+        state = dict(_backfill_state)
+
+    start_date = escape(state["start_date"] or "")
+
+    if state["done"]:
+        if state["error"]:
+            return f'<p class="error">{escape(state["error"])}</p><p><a href="settings">Back</a></p>'
+        return (
+            f'<p class="ok">Backfilled {_activity_count(state["result_count"] or 0)} since '
+            f"{start_date}.</p>"
+            '<p><a href=".">Back to dashboard</a></p>'
+        )
+
+    total = state["total"] or 0
+    completed = state["completed"] or 0
+    return (
+        f"<p>Backfilling activities since {start_date}…</p>"
+        f'<progress id="backfill-bar" value="{completed}" max="{max(total, 1)}" '
+        'style="width:100%"></progress>'
+        f'<p id="backfill-status">{completed} / {total if total else "?"} activities</p>'
+        "<p>Feel free to navigate away — this keeps running, and this page will show the "
+        "result next time you open it.</p>"
+        f"{_BACKFILL_POLL_SCRIPT}"
+    )
+
+
+async def backfill(request: Request) -> HTMLResponse:
+    """GET shows the current backfill's progress (or redirects to Settings if none has run yet
+    this process); POST starts a new one. Reusing `scheduler.run_backfill_sync` on a background
+    thread — see that function's docstring for why it's a separate entry point from the regular
+    `run_sync_once`/"Sync now" flow (date-based, not count-based; can cover far more activities).
     """
     settings: Settings = request.app.state.settings
+
+    if request.method == "GET":
+        with _backfill_lock:
+            has_run = _backfill_state["start_date"] is not None
+        if not has_run:
+            return RedirectResponse(url="settings", status_code=303)
+        return _page("Backfill", _backfill_progress_body(), active_tab="settings")
+
     form = await request.form()
     start_date = str(form.get("start_date", "")).strip()
 
@@ -402,41 +510,44 @@ async def backfill(request: Request) -> HTMLResponse:
             active_tab="settings",
         )
 
-    client = GarminClient(
-        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
-    )
+    with _backfill_lock:
+        already_running = _backfill_state["running"]
+        if not already_running:
+            _backfill_state.update(
+                {
+                    "running": True,
+                    "start_date": start_date,
+                    "total": 0,
+                    "completed": 0,
+                    "done": False,
+                    "error": None,
+                    "result_count": None,
+                }
+            )
 
-    try:
-        count = run_backfill_sync(settings, client, start_date)
-    except ValueError as exc:
-        return _page(
-            "Backfill failed",
-            f'<p class="error">Invalid start date: {escape(str(exc))}</p>'
-            '<p><a href="settings">Back</a></p>',
-            active_tab="settings",
-        )
-    except (GarminAuthError, GarminAPIError) as exc:
-        return _page(
-            "Backfill failed",
-            f'<p class="error">Backfill failed: {escape(str(exc))}</p>'
-            '<p><a href="settings">Back</a></p>',
-            active_tab="settings",
-        )
-    except Exception:
-        logger.exception("Unexpected error during backfill")
-        return _page(
-            "Backfill failed",
-            '<p class="error">Backfill failed unexpectedly — check the add-on log for '
-            'details.</p><p><a href="settings">Back</a></p>',
-            active_tab="settings",
-        )
+    # _backfill_progress_body() below acquires _backfill_lock itself (it's not reentrant), so it
+    # must only ever be called after the `with` block above has already exited.
+    if already_running:
+        return _page("Backfill in progress", _backfill_progress_body(), active_tab="settings")
 
-    return _page(
-        "Backfill complete",
-        f'<p class="ok">Backfilled {_activity_count(count)} since {escape(start_date)}.</p>'
-        '<p><a href=".">Back to dashboard</a></p>',
-        active_tab="settings",
-    )
+    threading.Thread(
+        target=_run_backfill_in_background, args=(settings, start_date), daemon=True
+    ).start()
+
+    return _page("Backfill", _backfill_progress_body(), active_tab="settings")
+
+
+async def backfill_status(request: Request) -> JSONResponse:
+    """Polled by `_BACKFILL_POLL_SCRIPT` above roughly once a second while a backfill runs."""
+    with _backfill_lock:
+        return JSONResponse(
+            {
+                "running": _backfill_state["running"],
+                "total": _backfill_state["total"],
+                "completed": _backfill_state["completed"],
+                "done": _backfill_state["done"],
+            }
+        )
 
 
 def _status_body(settings: Settings) -> str:
@@ -623,7 +734,8 @@ def create_app(settings: Settings) -> Starlette:
             Route("/start", start, methods=["POST"]),
             Route("/verify", verify, methods=["POST"]),
             Route("/sync", sync, methods=["POST"]),
-            Route("/backfill", backfill, methods=["POST"]),
+            Route("/backfill", backfill, methods=["GET", "POST"]),
+            Route("/backfill/status", backfill_status, methods=["GET"]),
         ]
     )
     app.state.settings = settings
