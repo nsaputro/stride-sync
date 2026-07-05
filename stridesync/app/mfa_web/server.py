@@ -336,11 +336,7 @@ def _weekly_distance(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
 
     weeks_sorted = sorted(totals.items(), key=lambda kv: kv[0], reverse=True)[:weeks]
     return [
-        {
-            "week_start": week_start,
-            "week_end": week_start + timedelta(days=6),
-            "distance_km": total_meters / 1000.0,
-        }
+        {"week_start": week_start, "distance_km": total_meters / 1000.0}
         for week_start, total_meters in weeks_sorted
     ]
 
@@ -351,9 +347,7 @@ def _weekly_distance_html(settings: Settings) -> str:
         return "<p>No activities synced yet.</p>"
 
     items = "".join(
-        '<li><span class="week-range">'
-        f'{escape(week["week_start"].strftime("%Y-%m-%d"))} – '
-        f'{escape(week["week_end"].strftime("%Y-%m-%d"))}</span>'
+        f'<li><span class="week-range">{escape(week["week_start"].strftime("%Y-%m-%d"))}</span>'
         f'<span class="week-total">{week["distance_km"]:.2f} km</span></li>'
         for week in weeks
     )

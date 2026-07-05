@@ -235,10 +235,10 @@ def test_running_page_groups_by_monday_sunday_week(tmp_path):
 
     assert response.status_code == 200
     # Week of 2026-06-29 sums the Monday + Thursday runs (5km + 3km = 8.00 km).
-    assert "2026-06-29 – 2026-07-05" in response.text
+    assert "2026-06-29" in response.text
     assert "8.00 km" in response.text
     # The following week has only the 10km run, and appears first (most recent week first).
-    assert "2026-07-06 – 2026-07-12" in response.text
+    assert "2026-07-06" in response.text
     assert "10.00 km" in response.text
     assert response.text.index("2026-07-06") < response.text.index("2026-06-29")
 
