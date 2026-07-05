@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-05
+
 ### Added
 - **Temperature in per-activity time-series samples** (`activity_samples` table / the
   `activity_samples` MCP tool): Garmin's per-second chart data includes ambient temperature for
@@ -305,7 +307,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/nsaputro/stride-sync/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/nsaputro/stride-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nsaputro/stride-sync/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nsaputro/stride-sync/releases/tag/v0.1.0
