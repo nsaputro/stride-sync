@@ -34,6 +34,27 @@ def test_start_login_does_not_persist_when_no_token_dir():
     garmin.client.dump.assert_not_called()
 
 
+def test_start_login_force_skips_tokenstore_resume():
+    # force=True must pass tokenstore=None so Garmin.login() has nothing to resume from and
+    # always performs a full credentials login (which can then trigger MFA) — see the module
+    # docstring's rationale for why plain start_login() alone isn't enough for "Log in again".
+    garmin = MagicMock()
+    garmin.login.return_value = (None, None)
+
+    mfa_login.start_login(garmin, "/data/.garmin_tokens", force=True)
+
+    garmin.login.assert_called_once_with(tokenstore=None)
+
+
+def test_start_login_force_still_persists_to_the_real_token_dir():
+    garmin = MagicMock()
+    garmin.login.return_value = (None, None)
+
+    mfa_login.start_login(garmin, "/data/.garmin_tokens", force=True)
+
+    garmin.client.dump.assert_called_once_with("/data/.garmin_tokens")
+
+
 def test_start_login_returns_needs_mfa_when_library_signals_it():
     garmin = MagicMock()
     garmin.login.return_value = ("needs_mfa", None)

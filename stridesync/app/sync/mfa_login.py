@@ -42,15 +42,27 @@ class NeedsMfa:
     """A login attempt that needs an MFA code to complete — see `resume_login`."""
 
 
-def start_login(garmin: Garmin, token_dir: Optional[str]) -> Union[LoginResult, NeedsMfa]:
-    """Log in, preferring a cached/refreshed session over a fresh one.
+def start_login(
+    garmin: Garmin, token_dir: Optional[str], *, force: bool = False
+) -> Union[LoginResult, NeedsMfa]:
+    """Log in, preferring a cached/refreshed session over a fresh one — unless `force` is set.
+
+    `Garmin.login(tokenstore=token_dir)` resumes a still-valid cached session whenever one
+    exists at `token_dir`, entirely skipping the credentials-based login path (and therefore any
+    MFA challenge) — even when the caller explicitly wants a real re-authentication (e.g. the web
+    UI's "Log in again", clicked by a user whose account *does* have MFA enabled, expecting to be
+    prompted). `force=True` passes `tokenstore=None` instead, which `Garmin.login()` treats as
+    "nothing to resume" and always performs a full credentials login. This never touches the
+    existing session on disk before a new one is confirmed good — `_persist_session` below only
+    overwrites `token_dir` on success, so a failed forced re-login leaves the old (still working)
+    session in place for the sync scheduler to keep using.
 
     Raises:
         garminconnect.GarminConnectAuthenticationError: on bad credentials or a broken login
             chain. With `return_on_mfa=True` (required on the `Garmin` instance passed in), an
             MFA requirement is signaled via the return value instead of an exception.
     """
-    mfa_status, _legacy_token = garmin.login(tokenstore=token_dir)
+    mfa_status, _legacy_token = garmin.login(tokenstore=None if force else token_dir)
     if mfa_status == "needs_mfa":
         return NeedsMfa()
     _persist_session(garmin, token_dir)

@@ -597,6 +597,45 @@ training-pace recommendations.
   race predictions, `pace_cadence_hr_trend`, `training_load_summary`), not generic examples
   disconnected from what StrideSync can actually answer.
 
+### v0.10 — Fix: "Log in again" silently resumed the cached session instead of re-authenticating 🔄
+
+Found live while walking through the v0.9 Cloudflare Tunnel setup end-to-end: once the tunnel
+was working, a display-name profile issue led to trying "Log in again" on an MFA-enabled
+account, which never showed the MFA prompt at all — clicking it appeared to do nothing.
+
+- ✅ **Root-caused via the installed `garminconnect` library's actual source**: `Garmin.login()`
+  does `tokenstore = tokenstore or os.getenv("GARMINTOKENS")`, then tries to resume a session
+  from that tokenstore before ever attempting a credentials-based login — and only a
+  credentials-based login can trigger an MFA challenge. Since `mfa_login.start_login()` always
+  passed the real `token_dir`, a still-valid cached session was silently resumed every time,
+  regardless of the user's intent, so "Log in again" was a no-op whenever a session already
+  existed — exactly backwards from what the button's label promises.
+- ✅ `mfa_login.start_login()` gained a `force: bool = False` parameter: when true, passes
+  `tokenstore=None` instead of `token_dir`, so `Garmin.login()` has nothing to resume from and
+  always performs a full credentials login (triggering MFA if the account requires it).
+  Deliberately does **not** delete the cached session up front — `_persist_session()` only
+  overwrites `token_dir` on a *successful* new login, so a failed forced re-login (bad
+  credentials, Garmin unreachable) leaves the old, still-working session in place for the sync
+  scheduler rather than leaving the account logged out entirely.
+- ✅ `app/mfa_web/server.py`'s `start()` route sets `force=True` whenever
+  `_has_cached_session(settings.garmin_token_dir)` is true — i.e. exactly the "Log in again"
+  case (see `_status_body`) — and leaves it `False` for a first-ever login, where there's
+  nothing to resume anyway. Button label updated to "Log in again (forces a fresh login,
+  including MFA if required)" so the behavior is self-explanatory.
+- ✅ Verified the fix actually discriminates: reverted it locally and confirmed the new tests
+  fail with the literal wrong call (`login(tokenstore='<real token dir>')` instead of
+  `login(tokenstore=None)`), not just that they pass with the fix applied.
+- ⬜ Separately investigated (not a StrideSync bug): the same live account also hit
+  `GarminClient.fetch_training_baseline`'s "Display name is not set" warning even after setting
+  a display name on connect.garmin.com and forcing a fresh login. Traced to
+  `python-garminconnect`'s `_require_display_name()` reading `self.display_name`, populated from
+  `prof.get("displayName", self.username)` on Garmin's `/userprofile-service/socialProfile`
+  response — `dict.get(key, default)` only falls back when the key is *absent*, not when
+  present with an explicit `null`, so this looks like a Garmin-side data issue (or the account
+  editing a different profile field than the one this specific endpoint reads), not something
+  fixable from StrideSync's side. Left as a known, non-fatal, already-gracefully-handled
+  limitation (milestone v0.5) rather than a bug to chase further here.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added
