@@ -66,6 +66,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   (empty = disabled, matching current behavior — nothing breaks for existing installs); when set,
   every request must include `Authorization: Bearer <token>` or gets rejected with `401`. See
   DOCS.md's "Remote access" section for the full Cloudflare Tunnel setup.
+- **New "Running" tab on the MFA login web UI**, alongside the existing dashboard: shows total
+  distance per calendar week (Monday–Sunday), most recent week first.
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the

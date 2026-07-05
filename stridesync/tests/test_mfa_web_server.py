@@ -183,6 +183,66 @@ def test_index_recent_activities_falls_back_to_activity_type_when_name_missing(t
     assert "—" in response.text  # missing distance shown as an em dash, not a crash
 
 
+def test_index_shows_nav_with_dashboard_active(tmp_path):
+    response = _client(tmp_path).get("/")
+
+    assert response.status_code == 200
+    assert '<nav class="tabs">' in response.text
+    assert 'href="." class="active"' in response.text
+    assert 'href="running"' in response.text
+
+
+def test_running_page_shows_nav_with_running_active(tmp_path):
+    response = _client(tmp_path).get("/running")
+
+    assert response.status_code == 200
+    assert '<nav class="tabs">' in response.text
+    assert 'href="running" class="active"' in response.text
+
+
+def test_running_page_shows_no_activities_message_when_none_synced(tmp_path):
+    response = _client(tmp_path).get("/running")
+
+    assert response.status_code == 200
+    assert "No activities synced yet." in response.text
+
+
+def test_running_page_groups_by_monday_sunday_week(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    # 2026-06-29 is a Monday; 2026-07-02 is the Thursday of the same week.
+    # 2026-07-06 is the following Monday (next week).
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES
+            (1, 'Mon Run', 'running', '2026-06-29 06:00:00', '2026-06-29 13:00:00', 5000.0,
+             datetime('now')),
+            (2, 'Thu Run', 'running', '2026-07-02 06:00:00', '2026-07-02 13:00:00', 3000.0,
+             datetime('now')),
+            (3, 'Next Mon Run', 'running', '2026-07-06 06:00:00', '2026-07-06 13:00:00', 10000.0,
+             datetime('now'))
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/running")
+
+    assert response.status_code == 200
+    # Week of 2026-06-29 sums the Monday + Thursday runs (5km + 3km = 8.00 km).
+    assert "2026-06-29 – 2026-07-05" in response.text
+    assert "8.00 km" in response.text
+    # The following week has only the 10km run, and appears first (most recent week first).
+    assert "2026-07-06 – 2026-07-12" in response.text
+    assert "10.00 km" in response.text
+    assert response.text.index("2026-07-06") < response.text.index("2026-06-29")
+
+
 def test_start_reports_clear_error_when_credentials_missing(tmp_path):
     # Real production incident: the mfa-web s6 service's `run` script never exported
     # GARMIN_USERNAME/GARMIN_PASSWORD (unlike sync-scheduler's), so Settings always saw empty
@@ -427,3 +487,33 @@ def test_format_distance_converts_meters_to_km():
 def test_format_distance_handles_missing_value():
     assert mfa_web_server._format_distance(None) == "—"
     assert mfa_web_server._format_distance(0) == "—"
+
+
+def test_weekly_distance_returns_empty_when_db_missing(tmp_path):
+    assert mfa_web_server._weekly_distance(str(tmp_path / "no_such.db")) == []
+
+
+def test_weekly_distance_skips_malformed_and_missing_data(tmp_path):
+    from app import db
+
+    db_path = str(tmp_path / "stridesync.db")
+    conn = db.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES
+            (1, 'Bad timestamp', 'running', 'not-a-timestamp', 'x', 5000.0, datetime('now')),
+            (2, 'No distance', 'running', '2026-06-29 06:00:00', 'x', NULL, datetime('now'))
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    weeks = mfa_web_server._weekly_distance(db_path)
+
+    # The malformed-timestamp row is skipped entirely; the missing-distance row still counts as
+    # a week with 0.0 km rather than crashing.
+    assert len(weeks) == 1
+    assert weeks[0]["distance_km"] == 0.0
