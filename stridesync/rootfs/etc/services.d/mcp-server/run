@@ -5,9 +5,11 @@
 
 MCP_PORT=$(bashio::config 'mcp_port')
 LOG_LEVEL=$(bashio::config 'log_level')
+MCP_AUTH_TOKEN=$(bashio::config 'mcp_auth_token')
 
 export MCP_PORT
 export LOG_LEVEL
+export MCP_AUTH_TOKEN
 export STRIDESYNC_DB_PATH="/data/stridesync.db"
 
 bashio::log.info "Starting StrideSync MCP server on port ${MCP_PORT}..."

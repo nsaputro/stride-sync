@@ -59,6 +59,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - **MFA login web UI's front page is now more of a dashboard**: below the total-activities/last-
   sync summary, it lists the most recent activities with their name, local start time, and
   distance (in km).
+- **Optional bearer-token auth for the MCP server** (milestone v0.6), so it can be safely exposed
+  beyond your LAN — e.g. through a Cloudflare Tunnel, to reach it from Claude on mobile. The MCP
+  server had no auth by default (fine for LAN-only access, not fine once a public hostname points
+  at it — it serves personal Garmin activity/HR/health data). New `mcp_auth_token` add-on option
+  (empty = disabled, matching current behavior — nothing breaks for existing installs); when set,
+  every request must include `Authorization: Bearer <token>` or gets rejected with `401`. See
+  DOCS.md's "Remote access" section for the full Cloudflare Tunnel setup.
 
 ### Fixed
 - **Add-on fails to start** (`ModuleNotFoundError: No module named 'app'`, both services): the

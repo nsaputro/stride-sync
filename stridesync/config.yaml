@@ -40,6 +40,7 @@ options:
   sync_interval_hours: 6
   mcp_port: 8765
   log_level: "info"
+  mcp_auth_token: ""
 
 schema:
   garmin_username: str
@@ -47,3 +48,7 @@ schema:
   sync_interval_hours: int(1,24)
   mcp_port: port
   log_level: list(debug|info|warning|error)
+  # Empty = no auth required (fine for LAN-only access). Set this before exposing mcp_port
+  # beyond your LAN (e.g. via a Cloudflare Tunnel) — see PROJECT_PLAN.md milestone v0.6 and
+  # DOCS.md. MCP clients must then send "Authorization: Bearer <this value>".
+  mcp_auth_token: password

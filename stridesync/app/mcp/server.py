@@ -18,19 +18,48 @@ v0.3 calls for purpose-built tools (recent activities, pace/cadence/HR trend, tr
 summary, last-sync status) rather than a generic SQL-query tool — exactly the "or an equivalent
 MCP tool/resource layer built directly on the SQLite schema" fallback the architecture section
 already anticipated.
+
+**Bearer-token auth (milestone v0.6)**: this server has no auth by default, which is fine for a
+LAN-only setup where the HA host's own network boundary is the protection. It stops being fine
+the moment this port is reached from outside the LAN (e.g. via a Cloudflare Tunnel public
+hostname, requested directly to let Claude on mobile reach it) — this endpoint serves personal
+Garmin health/activity data, and someone finding the URL shouldn't be able to just read it. If
+`mcp_auth_token` is set, every request must carry `Authorization: Bearer <token>` (checked by
+`SharedSecretVerifier` below, via `fastmcp`'s standard `TokenVerifier` mechanism) or get a 401 —
+confirmed against a real ASGI request/response cycle, not just unit-tested in isolation. Left
+optional (empty = disabled) rather than required, so existing LAN-only installs keep working
+without being forced to set one.
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import sqlite3
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
+from fastmcp.server.auth import AccessToken, TokenVerifier
 
 from app.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class SharedSecretVerifier(TokenVerifier):
+    """Single shared-secret bearer token check — this add-on has exactly one owner, so there's
+    no per-user scope/expiry complexity to model, just "is this the configured token." Constant-
+    time comparison (`hmac.compare_digest`) avoids a timing side-channel a plain `==` would have.
+    """
+
+    def __init__(self, token: str) -> None:
+        super().__init__()
+        self._token = token
+
+    async def verify_token(self, token: str) -> Optional[AccessToken]:
+        if not hmac.compare_digest(token, self._token):
+            return None
+        return AccessToken(token=token, client_id="stridesync-mcp-client", scopes=[])
 
 _MIN_LIMIT = 1
 _MAX_LIMIT = 200
@@ -210,7 +239,14 @@ def get_last_sync_status(conn: sqlite3.Connection) -> Dict[str, Any]:
 
 def create_server(settings: Settings) -> FastMCP:
     """Build the FastMCP server, wiring each tool to a fresh read-only connection per call."""
-    mcp: FastMCP = FastMCP("StrideSync")
+    auth = SharedSecretVerifier(settings.mcp_auth_token) if settings.mcp_auth_token else None
+    if auth is None:
+        logger.warning(
+            "mcp_auth_token is not set — the MCP server is unauthenticated. Fine for LAN-only "
+            "access; set mcp_auth_token before exposing this port beyond your LAN (e.g. via a "
+            "Cloudflare Tunnel), since it serves personal Garmin activity/health data."
+        )
+    mcp: FastMCP = FastMCP("StrideSync", auth=auth)
 
     @mcp.tool()
     def recent_activities(limit: int = 20) -> List[Dict[str, Any]]:

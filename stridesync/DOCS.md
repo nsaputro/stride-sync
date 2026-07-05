@@ -21,6 +21,7 @@ opening a dashboard.
 | `sync_interval_hours` | How often to poll Garmin Connect for new activities | `6` |
 | `mcp_port` | Port the MCP server listens on | `8765` |
 | `log_level` | Log verbosity (`debug`, `info`, `warning`, `error`) | `info` |
+| `mcp_auth_token` | Bearer token required to reach the MCP server. Leave empty for LAN-only access; **set this before exposing `mcp_port` beyond your LAN** (see below). | `""` (disabled) |
 
 ## Connecting an MCP client
 
@@ -32,6 +33,29 @@ http://homeassistant.local:8765/mcp
 
 For Claude Desktop, see the config snippet in
 [`PROJECT_PLAN.md`](https://github.com/nsaputro/stride-sync/blob/main/PROJECT_PLAN.md#2-mcp-connection).
+
+## Remote access (e.g. Claude on mobile, over a Cloudflare Tunnel)
+
+StrideSync's MCP server is reachable over the network by design (Streamable HTTP, not stdio) —
+so it works the same way whether the client is on your LAN or reaching it through a tunnel like
+`cloudflared`. Two things needed:
+
+1. **Set `mcp_auth_token`** to a long random string (e.g. `openssl rand -hex 32`) in the add-on's
+   configuration. The MCP server has no auth by default — fine when only your LAN can reach
+   `mcp_port`, not fine once a public hostname points at it. With this set, every request must
+   include `Authorization: Bearer <mcp_auth_token>` or gets rejected with `401`.
+2. **Point your Cloudflare Tunnel at the MCP port**, not the ingress port: add a public hostname
+   in your tunnel configuration routing to `http://homeassistant.local:8765` (or your HA host's
+   address) — `8765` is `mcp_port`, the same port `ports:` maps in `config.yaml`. Do **not** route
+   the tunnel at `8767` (the ingress port) — that serves the browser-only MFA login page, not the
+   MCP protocol.
+
+Then configure your MCP client (e.g. Claude's custom connector settings) with:
+- URL: `https://<your-tunnel-hostname>/mcp`
+- Auth: bearer token = the `mcp_auth_token` value you set above
+
+Custom-connector configuration is account-level in Claude, so once added it's available from any
+device signed into that account, including mobile.
 
 ## Known limitation: Garmin auth
 

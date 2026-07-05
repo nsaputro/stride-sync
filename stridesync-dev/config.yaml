@@ -2,7 +2,7 @@ name: "StrideSync (dev)"
 description: >-
   [DEV CHANNEL] Syncs Garmin Connect running data and exposes it to Claude via MCP for
   conversational analysis — cadence, pace, heart-rate trends, training load.
-version: "0.2.0b11"
+version: "0.2.0b12"
 slug: "stridesync_dev"
 init: false
 arch:
@@ -35,6 +35,7 @@ options:
   sync_interval_hours: 6
   mcp_port: 8765
   log_level: "info"
+  mcp_auth_token: ""
 
 schema:
   garmin_username: str
@@ -42,3 +43,4 @@ schema:
   sync_interval_hours: int(1,24)
   mcp_port: port
   log_level: list(debug|info|warning|error)
+  mcp_auth_token: password
