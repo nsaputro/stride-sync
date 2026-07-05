@@ -210,15 +210,25 @@ API. The MFA-marker no-retry-storm behavior described above, and the cached-sess
 ordering, were both carried over unchanged in spirit onto the new library (`Client.load()` +
 `Client.is_authenticated` in place of `garmy`'s `AuthClient.is_authenticated`/`refresh_tokens()`).
 
-This still couldn't be verified end-to-end against a live account from this sandboxed
-environment (no route to `garmin.com` here) — a real, non-mocked standalone run of
-`python3 -m app.sync.scheduler --once` proved the whole exception-wrapping chain works correctly
-(all 5 of `python-garminconnect`'s login strategies executed in order, then a clean
+This couldn't be verified end-to-end against a live account from this sandboxed environment (no
+route to `garmin.com` here) — a real, non-mocked standalone run of `python3 -m
+app.sync.scheduler --once` proved the whole exception-wrapping chain works correctly (all 5 of
+`python-garminconnect`'s login strategies executed in order, then a clean
 `GarminConnectConnectionError` → `GarminAuthError` → `sync_log`-recorded failure, with no
 unhandled crash), but the only failure it actually hit was this sandbox's own outbound network
-policy blocking `sso.garmin.com`, not a code defect. Whether `python-garminconnect` actually gets
-past Garmin's Cloudflare challenge where three fixes on top of `garmy` did not can only be
-confirmed by retesting login on a real HA install.
+policy blocking `sso.garmin.com`, not a code defect.
+
+**Confirmed working on a real HA install**: after fixing a separate packaging bug that had been
+blocking every real test of this (the `mfa-web` service's `run` script wasn't exporting Garmin
+credentials at all — see the changelog), login through the ingress web UI completed
+successfully. Logs showed exactly the cascading behavior the library is designed for: the
+`mobile+cffi` and `mobile+requests` strategies both returned `429` (IP rate-limited by Garmin,
+most likely from repeated logins during this debugging process), and the chain fell through to a
+later strategy, which succeeded — no code change needed, this is the fallback working as
+intended. Because a valid session is now cached, scheduled syncs won't re-attempt any login
+strategy (rate-limited or not) until that session actually needs a fresh login again. This closes
+out the migration: `python-garminconnect` does get past Garmin's Cloudflare challenge where three
+fixes on top of `garmy` did not.
 
 **Watch item, unconfirmed against `python-garminconnect`:** a separate, newer Garmin-side auth
 problem surfaced in the wider unofficial-client ecosystem starting ~June 2026 —

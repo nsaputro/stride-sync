@@ -66,6 +66,8 @@
   through to it at all (a packaging bug, unrelated to what you entered). Fixed, and the web UI
   now shows a clear message if the add-on's `garmin_username`/`garmin_password` options are
   genuinely unset.
+- Confirmed on a real install: login now succeeds, including for accounts that previously hit
+  Garmin's Cloudflare block.
 
 ## [0.1.0] - 2026-07-04
 

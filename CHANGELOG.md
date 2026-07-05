@@ -131,6 +131,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   missing-credentials check to `mfa_web/server.py`'s `start()` (matching `bootstrap_login.py`'s
   existing one) so a genuinely misconfigured install fails with a clear message instead of the
   library's generic one.
+- **Confirmed on a real HA install: the `python-garminconnect` migration works.** Login through
+  the ingress web UI completed successfully — `python-garminconnect` gets past Garmin's
+  Cloudflare challenge where three fixes on top of `garmy` (User-Agent, TLS impersonation, login
+  delay) did not. Logs showed the login chain's `mobile+cffi`/`mobile+requests` strategies
+  returning `429` (IP rate-limited by Garmin, likely from repeated logins during this debugging
+  process) and falling through to a later strategy that succeeded — expected behavior, no code
+  change needed.
 
 ## [0.1.0] - 2026-07-04
 
