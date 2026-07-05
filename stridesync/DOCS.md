@@ -76,16 +76,19 @@ the LAN setup above, with an important limitation to know about first:
 
 > **Known limitation**: Claude's custom-connector UI currently only supports OAuth or no
 > authentication — there's no field for a static bearer token, so it **cannot** send
-> StrideSync's `mcp_auth_token` header. Setting `mcp_auth_token` still blocks any *other* client
-> from connecting without it, but it does nothing to protect the tunnel hostname against Claude's
-> own official connector traffic, which arrives with no auth header at all. Real protection for
-> this path comes from restricting *who can reach the tunnel hostname in the first place*, not
-> from `mcp_auth_token`.
+> StrideSync's `mcp_auth_token` header. There's only one MCP server (and one `mcp_auth_token`
+> setting) regardless of whether a request arrives over your LAN or through the tunnel, so this
+> isn't a "set it anyway, it can't hurt" situation: if `mcp_auth_token` is set, the server
+> rejects every request that doesn't include it with `401` — including every request from
+> Claude's own connector, since it can never send one. **Setting `mcp_auth_token` and expecting
+> Claude's mobile connector to work are mutually exclusive.**
 
 Setup:
 
-1. **Set `mcp_auth_token`** anyway (e.g. `openssl rand -hex 32`) — defense-in-depth against any
-   other client, and free if Claude adds custom-header support to connectors later.
+1. **Leave `mcp_auth_token` empty** for this path to work at all. All protection here comes from
+   step 3 below (restricting who can reach the tunnel hostname), not from anything StrideSync
+   checks — there's no app-level auth once you disable it for Claude's connector's sake, so
+   treat the tunnel hostname itself as the thing that must stay locked down.
 2. **Point your Cloudflare Tunnel at the MCP port**, not the ingress port: add a public hostname
    in your tunnel config routing to `http://homeassistant.local:8765` (`8765` = `mcp_port`). Don't
    route the tunnel at `8767` (ingress) — that's the browser-only MFA login page, not the MCP
@@ -95,14 +98,19 @@ Setup:
    traffic to the tunnel hostname *except* from Anthropic's current ranges (at the time of
    writing, `160.79.104.0/21` for IPv4 and `2607:6bc0::/48` for IPv6 — double-check these against
    [Anthropic's published IP-address reference](https://platform.claude.com/docs/en/api/ip-addresses)
-   before relying on them, since ranges can change). This is real access control: a request from
-   outside those ranges never reaches StrideSync at all, regardless of any header.
+   before relying on them, since ranges can change). This is the only real access control on this
+   path: a request from outside those ranges never reaches StrideSync at all.
 4. In Claude, go to **Settings → Connectors → Add custom connector** and enter:
    - URL: `https://<your-tunnel-hostname>/mcp`
    - Leave Advanced settings (OAuth Client ID/Secret) blank — StrideSync doesn't implement OAuth.
 
 Custom-connector configuration is account-level in Claude, so once added it's available on any
 device signed into that account, including mobile.
+
+If you'd rather keep `mcp_auth_token` set (e.g. you also want it to gate the LAN/`mcp-proxy` path
+in the Claude Desktop setup above), you can't also get Claude's official mobile connector working
+against the same server — pick one. Leaving it empty and relying entirely on the WAF rule above is
+the only way to get the mobile connector functioning today.
 
 ## Example prompts
 
