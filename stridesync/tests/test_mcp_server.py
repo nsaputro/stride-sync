@@ -2,9 +2,11 @@ import asyncio
 import sqlite3
 
 import pytest
+from starlette.testclient import TestClient
 
 from app import db
 from app.mcp.server import (
+    SharedSecretVerifier,
     _clamp,
     _connect_readonly,
     create_server,
@@ -317,7 +319,46 @@ class TestQueries:
             conn.close()
 
 
+class TestSharedSecretVerifier:
+    def test_accepts_correct_token(self):
+        verifier = SharedSecretVerifier("s3cr3t")
+
+        result = asyncio.run(verifier.verify_token("s3cr3t"))
+
+        assert result is not None
+        assert result.client_id == "stridesync-mcp-client"
+
+    def test_rejects_wrong_token(self):
+        verifier = SharedSecretVerifier("s3cr3t")
+
+        assert asyncio.run(verifier.verify_token("wrong")) is None
+
+    def test_rejects_empty_token(self):
+        verifier = SharedSecretVerifier("s3cr3t")
+
+        assert asyncio.run(verifier.verify_token("")) is None
+
+
 class TestCreateServer:
+    def test_auth_disabled_by_default(self, tmp_path):
+        # mcp_auth_token defaults to "" -- fine for LAN-only setups, but must not silently stay
+        # unauthenticated if someone later exposes this port beyond the LAN without setting one.
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+
+        mcp = create_server(settings)
+
+        assert mcp.auth is None
+
+    def test_auth_enabled_when_token_configured(self, tmp_path):
+        settings = make_settings(tmp_path)
+        settings = Settings(**{**settings.__dict__, "mcp_auth_token": "s3cr3t"})
+        seed_db(settings.db_path)
+
+        mcp = create_server(settings)
+
+        assert isinstance(mcp.auth, SharedSecretVerifier)
+
     def test_registers_expected_tools(self, tmp_path):
         settings = make_settings(tmp_path)
         seed_db(settings.db_path)
@@ -346,3 +387,56 @@ class TestCreateServer:
         # FastMCP wraps tool results; unwrap to the structured content dict.
         payload = result.structured_content or result.data
         assert payload["status"] == "success"
+
+
+class TestHttpAuthEnforcement:
+    """Confirms bearer-token auth is actually enforced over a real ASGI request/response cycle
+    (not just that SharedSecretVerifier's own verify_token logic is correct in isolation) — this
+    is the actual boundary protecting personal Garmin data once this port is reachable beyond
+    the LAN (see PROJECT_PLAN.md milestone v0.6).
+    """
+
+    def _rpc_headers(self, token=None):
+        headers = {"Accept": "application/json, text/event-stream"}
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    def _mcp_app(self, tmp_path):
+        settings = make_settings(tmp_path)
+        settings = Settings(**{**settings.__dict__, "mcp_auth_token": "s3cr3t"})
+        seed_db(settings.db_path)
+        mcp = create_server(settings)
+        return mcp.http_app(path="/mcp")
+
+    def test_rejects_request_without_token(self, tmp_path):
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=self._rpc_headers(),
+            )
+
+        assert response.status_code == 401
+
+    def test_rejects_request_with_wrong_token(self, tmp_path):
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=self._rpc_headers("wrong-token"),
+            )
+
+        assert response.status_code == 401
+
+    def test_accepts_request_with_correct_token(self, tmp_path):
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=self._rpc_headers("s3cr3t"),
+            )
+
+        # Not 401: the request got past auth into actual MCP protocol handling (a 400 here is
+        # the MCP session-handshake requirement, unrelated to auth — see PR description/commit).
+        assert response.status_code != 401

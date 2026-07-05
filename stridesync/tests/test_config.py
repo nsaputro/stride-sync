@@ -87,3 +87,19 @@ def test_from_env_mfa_web_port_override(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.mfa_web_port == 9001
+
+
+def test_from_env_mcp_auth_token_defaults_to_disabled(monkeypatch):
+    monkeypatch.delenv("MCP_AUTH_TOKEN", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.mcp_auth_token == ""
+
+
+def test_from_env_mcp_auth_token_override(monkeypatch):
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "s3cr3t-token")
+
+    settings = Settings.from_env()
+
+    assert settings.mcp_auth_token == "s3cr3t-token"

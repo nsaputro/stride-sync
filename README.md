@@ -69,6 +69,7 @@ real HA installs reach through the add-on's ingress panel instead — see the MF
 | `sync_interval_hours` | How often to poll Garmin Connect for new activities | `6` |
 | `mcp_port` | Port the MCP server listens on | `8765` |
 | `log_level` | Log verbosity (`debug`, `info`, `warning`, `error`) | `info` |
+| `mcp_auth_token` | Bearer token required to reach the MCP server. Leave empty for LAN-only access; set before exposing `mcp_port` beyond your LAN (see `stridesync/DOCS.md`) | `""` (disabled) |
 
 ## Known limitation: Garmin auth
 

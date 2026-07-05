@@ -22,6 +22,10 @@
   average number per run.
 - The panel now works more like a dashboard: it lists your most recent activities (name, date,
   distance) below the sync summary, not just a total count.
+- **You can now safely reach the MCP server from outside your home network** (e.g. from Claude on
+  your phone, over a Cloudflare Tunnel). Set the new `mcp_auth_token` option to a random secret,
+  point your tunnel at the MCP port, and give Claude that token — see DOCS.md's "Remote access"
+  section. Leave it blank and nothing changes from today's LAN-only behavior.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both

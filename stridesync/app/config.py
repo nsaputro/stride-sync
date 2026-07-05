@@ -24,6 +24,7 @@ class Settings:
     db_path: str
     garmin_token_dir: str
     mfa_web_port: int
+    mcp_auth_token: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -37,6 +38,7 @@ class Settings:
             db_path=_str_env("STRIDESYNC_DB_PATH", "/data/stridesync.db"),
             garmin_token_dir=_str_env("GARMIN_TOKEN_DIR", "/data/.garmin_tokens"),
             mfa_web_port=_int_env("MFA_WEB_PORT", 8767),
+            mcp_auth_token=_str_env("MCP_AUTH_TOKEN", ""),
         )
 
 

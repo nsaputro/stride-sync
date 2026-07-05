@@ -277,6 +277,26 @@ add-on's internal stdio-based MCP server to HTTP for the network hop):
 Add this to Claude Desktop's `claude_desktop_config.json`, restart Claude Desktop, and StrideSync's
 tools/resources should appear in a new conversation.
 
+### Remote access beyond the LAN (e.g. Claude mobile via Cloudflare Tunnel)
+
+Requested directly: reach the MCP server from Claude on Android via an existing Cloudflare
+Tunnel (`cloudflared`) HA add-on install. Mechanically this needs only a tunnel public hostname
+routed at `http://homeassistant.local:8765` (the MCP port, not the `8767` ingress port — that
+serves the browser-only MFA login page).
+
+**This must not be done without also setting `mcp_auth_token`** (see milestone v0.6 below and
+DOCS.md's "Remote access" section) — the MCP server has no auth by default, which is a
+reasonable default for LAN-only reachability but becomes a real privacy exposure the moment a
+public hostname points at it, since it serves personal Garmin activity/HR/health data. Considered
+and rejected relying on Cloudflare Access alone (gating the tunnel hostname via Cloudflare's own
+Zero Trust login) as the *only* protection: it would need either an interactive login (which an
+API client like an MCP connector can't complete) or a Cloudflare Access Service Token, and it's
+unconfirmed whether Claude's connector configuration lets you attach the required
+`CF-Access-Client-Id`/`CF-Access-Client-Secret` headers to its requests. Enforcing auth inside
+StrideSync itself works regardless of what sits in front of it (Cloudflare Tunnel, a plain port
+forward, anything else), so that's the approach taken — Cloudflare Access can still be layered on
+top for defense in depth, but isn't relied on as the sole gate.
+
 ---
 
 ## 3. Milestones
@@ -418,10 +438,40 @@ gap analysis that led to this scope.
   new `fetch_*` methods for this milestone catch broadly and return `None`/`[]` rather than
   raising, unlike every other `fetch_*` method on the class — documented inline on each.
 
+### v0.6 — Optional MCP auth for remote/internet exposure 🔄
+
+Requested directly: reach the MCP server from Claude on Android through an existing Cloudflare
+Tunnel add-on install. The MCP server (§2) was always designed to be reachable remotely, but
+"remotely" meant "your LAN" until now — with zero auth, exposing it beyond the LAN would let
+anyone who finds the URL read personal Garmin activity/HR/health data. See §2's "Remote access
+beyond the LAN" subsection for the full reasoning on why this is enforced inside StrideSync
+itself rather than relied on Cloudflare Access alone.
+
+- ✅ New `mcp_auth_token` add-on option (`password` schema, optional, default `""` = disabled) —
+  existing LAN-only installs keep working unchanged; sync-scheduler/mfa-web are unaffected (only
+  the MCP server route needs gating).
+- ✅ `SharedSecretVerifier` (`app/mcp/server.py`), a minimal `fastmcp.server.auth.TokenVerifier`
+  subclass doing a constant-time (`hmac.compare_digest`) comparison against the configured token
+  — wired into `FastMCP(auth=...)` only when `mcp_auth_token` is set. `create_server()` logs a
+  clear warning when it isn't, so running unauthenticated is a visible choice, not a silent one.
+- ✅ Confirmed real enforcement over an actual ASGI request/response cycle (not just
+  `verify_token()` in isolation): no `Authorization` header → `401`, wrong token → `401`, correct
+  token → passes through to normal MCP protocol handling. Exercised directly against
+  `FastMCP.http_app()` via Starlette's `TestClient` in `tests/test_mcp_server.py`.
+- ✅ `DOCS.md` documents the Cloudflare Tunnel setup (route the tunnel at `mcp_port`/`8765`, not
+  the ingress port `8767`) and configuring an MCP client's bearer-token auth against the new
+  option.
+- ⬜ Not yet verified end-to-end against a real Cloudflare Tunnel + Claude mobile connector from
+  this sandboxed environment (no route to the internet or a real HA/cloudflared install here) —
+  in particular, whether Claude's custom-connector UI (web or Android) actually supports
+  attaching a bearer token / custom `Authorization` header to a remote MCP connection is
+  unconfirmed. Verify on a real HA instance with the tunnel configured per DOCS.md.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
-- ✅ `DOCS.md` complete: install steps, all five config options, MCP connection instructions
-  (`http://homeassistant.local:8765/mcp`), and the known-risk note about Garmin auth breakage
+- ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added
+  `mcp_auth_token`), MCP connection instructions (`http://homeassistant.local:8765/mcp`), and the
+  known-risk note about Garmin auth breakage
 - ✅ `README.md` complete: accurate status (v0.1–v0.4 implemented, nothing released yet), a
   standalone Quick Start (`docker build`/`docker run`, no HA instance required), install
   instructions, config table, and the known-risk note
