@@ -16,10 +16,54 @@ setup.
 
 ## Status
 
-`v0.1.0` is tagged and published to GHCR, but **fails to start** (`ModuleNotFoundError: No
-module named 'app'` — see `CHANGELOG.md`) — a fix is in progress. A **pre-release/dev channel**
-now exists (`stridesync-dev/`, see Installation below) precisely so a fix like this one can be
-verified on a real HA instance before being promoted to a stable release.
+`v0.2.0` is released and published to GHCR — install it via the Add-on Store (see Installation
+below). A **pre-release/dev channel** (`stridesync-dev/`) also exists for testing new features
+before they're promoted to a stable release; see `CHANGELOG.md` for the full version history.
+
+## Features
+
+- **Automatic syncing** — polls Garmin Connect on a configurable interval (default every 6h) and
+  writes activities, laps, HR-zone breakdowns, per-activity sample series, and training-load
+  data to a local SQLite database in the add-on's `/data` volume.
+- **MCP server** (Streamable HTTP, port `8765`) exposing 8 tools to any MCP client — recent
+  activities, per-lap splits, pace/cadence/HR trend over N days, aggregate training load,
+  training baseline (lactate threshold, race predictions), per-activity HR zones, per-activity
+  time-series samples, and last-sync status.
+- **Web UI** (Home Assistant sidebar panel, or standalone on port `8767`) with three tabs:
+  - **Dashboard** — login status, total activities synced, last-sync outcome, and your most
+    recent activities.
+  - **Running** — total distance per calendar week (Monday–Sunday), most recent week first.
+  - **Settings** — one-off backfill from any start date (regular syncs only fetch your most
+    recent activities), with a live progress bar for wide date ranges.
+- **One-time MFA/2FA login** via the web UI or a CLI bootstrap command — no re-entry needed on
+  every scheduled sync afterward.
+- **Optional bearer-token auth** (`mcp_auth_token`) for the MCP server, so it's safe to expose
+  beyond your LAN (e.g. through a Cloudflare Tunnel) without leaking personal health data.
+
+## Why run this as a Home Assistant add-on?
+
+StrideSync could be a standalone Docker container on any machine — running it as an HA add-on
+instead means it piggybacks on infrastructure most HA users already have set up for their smart
+home, rather than standing up a new always-on service from scratch:
+
+- **Already-on, already-monitored host.** Home Assistant runs 24/7 as your automation hub — no
+  separate VPS, NAS, or Raspberry Pi to provision, patch, and keep awake just to sync running
+  data.
+- **Remote access without new infrastructure.** If you already use the official **Home Assistant
+  Android/iOS app** with Nabu Casa remote access (or your own reverse proxy) to reach your HA
+  instance away from home, the StrideSync ingress panel (Dashboard/Running/Settings) rides along
+  for free — no separate mobile app, port, or login to set up.
+- **Reuses your existing tunnel for MCP.** Many HA users already run the **Cloudflare Tunnel**
+  add-on (or a similar reverse-proxy add-on) to reach their instance remotely. Pointing that same
+  tunnel at StrideSync's MCP port (with `mcp_auth_token` set) is how Claude on mobile reaches your
+  Garmin data — no new domain, certificate, or hosting to manage.
+- **Backed up for free.** Home Assistant's built-in **Settings → System → Backups** includes
+  every add-on's `/data` by default, so your synced Garmin history is covered by whatever backup
+  schedule you already have for the rest of your HA config — nothing extra to configure or
+  remember.
+- **One set of credentials and updates to maintain.** Garmin credentials and the MCP auth token
+  live in the same options UI as every other add-on, and updates arrive through the Add-on Store
+  like any other add-on — not a separate `docker pull` / systemd unit to babysit.
 
 ## Quick Start
 
@@ -49,7 +93,7 @@ Then point an MCP client at `http://localhost:8765/mcp` — see
 For an MFA/2FA account, open `http://localhost:8767/` for the one-time login UI (this is what
 real HA installs reach through the add-on's ingress panel instead — see the MFA section below).
 
-## Installation (once released)
+## Installation
 
 1. In Home Assistant, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 2. Add: `https://github.com/nsaputro/stride-sync`
