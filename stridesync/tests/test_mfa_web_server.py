@@ -113,6 +113,76 @@ def test_index_shows_last_sync_error(tmp_path):
     assert "Last sync error: Could not reach Garmin Connect" in response.text
 
 
+def test_index_shows_no_recent_activities_section_when_none_synced(tmp_path):
+    response = _client(tmp_path).get("/")
+
+    assert response.status_code == 200
+    assert "Recent activities" not in response.text
+
+
+def test_index_shows_recent_activities_with_distance_and_timestamp(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES (1, 'Morning Run', 'running', '2026-07-01 06:30:00', '2026-07-01 13:30:00',
+                  5000.0, datetime('now'))
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES (2, 'Evening Jog', 'running', '2026-06-30 18:00:00', '2026-06-30 01:00:00',
+                  3200.0, datetime('now'))
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/")
+
+    assert response.status_code == 200
+    assert "Recent activities" in response.text
+    assert "Morning Run" in response.text
+    assert "2026-07-01 06:30" in response.text
+    assert "5.00 km" in response.text
+    assert "Evening Jog" in response.text
+    assert "3.20 km" in response.text
+    # newest first
+    assert response.text.index("Morning Run") < response.text.index("Evening Jog")
+
+
+def test_index_recent_activities_falls_back_to_activity_type_when_name_missing(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES (1, NULL, 'running', '2026-07-01 06:30:00', '2026-07-01 13:30:00', NULL,
+                  datetime('now'))
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/")
+
+    assert response.status_code == 200
+    assert "running" in response.text
+    assert "—" in response.text  # missing distance shown as an em dash, not a crash
+
+
 def test_start_reports_clear_error_when_credentials_missing(tmp_path):
     # Real production incident: the mfa-web s6 service's `run` script never exported
     # GARMIN_USERNAME/GARMIN_PASSWORD (unlike sync-scheduler's), so Settings always saw empty
@@ -334,3 +404,26 @@ def test_format_timestamp_handles_missing_value():
 
 def test_format_timestamp_falls_back_to_raw_string_on_bad_input():
     assert mfa_web_server._format_timestamp("not-a-timestamp") == "not-a-timestamp"
+
+
+def test_format_activity_time_has_no_utc_label():
+    # Garmin's startTimeLocal is the activity's *local* time, not UTC -- unlike
+    # _format_timestamp, this must never claim it's UTC.
+    assert mfa_web_server._format_activity_time("2026-07-01 06:30:00") == "2026-07-01 06:30"
+
+
+def test_format_activity_time_handles_missing_value():
+    assert mfa_web_server._format_activity_time(None) == "unknown"
+
+
+def test_format_activity_time_falls_back_to_raw_string_on_bad_input():
+    assert mfa_web_server._format_activity_time("not-a-timestamp") == "not-a-timestamp"
+
+
+def test_format_distance_converts_meters_to_km():
+    assert mfa_web_server._format_distance(5000.0) == "5.00 km"
+
+
+def test_format_distance_handles_missing_value():
+    assert mfa_web_server._format_distance(None) == "—"
+    assert mfa_web_server._format_distance(0) == "—"

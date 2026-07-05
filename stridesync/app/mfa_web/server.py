@@ -23,7 +23,7 @@ import sqlite3
 import threading
 from datetime import datetime
 from html import escape
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from garminconnect import Garmin, GarminConnectAuthenticationError
 from starlette.applications import Starlette
@@ -74,6 +74,15 @@ _STYLE = """
   }
   p { line-height: 1.5; margin: 0.5rem 0; }
   p.stat { font-weight: 600; }
+  h2 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--muted); }
+  ul.activity-list { list-style: none; margin: 0; padding: 0; }
+  ul.activity-list li {
+    display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0;
+    border-top: 1px solid var(--border);
+  }
+  ul.activity-list li:first-child { border-top: none; }
+  .activity-name { font-weight: 600; }
+  .activity-meta { color: var(--muted); text-align: right; white-space: nowrap; }
   p.error {
     color: var(--error); background: var(--error-bg); padding: 0.6rem 0.75rem;
     border-radius: 0.5rem;
@@ -138,8 +147,8 @@ def _activity_count(count: int) -> str:
 
 
 def _format_timestamp(iso_str: Optional[str]) -> str:
-    """Format a stored timestamp for display — every timestamp this module reads is written by
-    `datetime.now(timezone.utc).isoformat()` (see scheduler.py), so it's always UTC; this just
+    """Format a sync_log/training_baseline timestamp for display — those are always written by
+    `datetime.now(timezone.utc).isoformat()` (see scheduler.py), so they're always UTC; this just
     drops the microseconds/offset noise raw isoformat() output has (e.g.
     "2026-07-05T07:06:51.539869+00:00") that isn't useful to a person glancing at the panel.
     """
@@ -150,6 +159,22 @@ def _format_timestamp(iso_str: Optional[str]) -> str:
     except ValueError:
         return iso_str
     return dt.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _format_activity_time(raw: Optional[str]) -> str:
+    """Format an activity's `start_time_local` for display.
+
+    Unlike `_format_timestamp`, this is deliberately NOT labeled "UTC" — Garmin's `startTimeLocal`
+    is the activity's local time at wherever it was recorded (not the server's timezone, and not
+    UTC), so a timezone label here would just be wrong.
+    """
+    if not raw:
+        return "unknown"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return raw
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 def _sync_summary(db_path: str) -> Dict[str, Any]:
@@ -202,6 +227,53 @@ def _sync_summary_html(settings: Settings) -> str:
     return html
 
 
+def _format_distance(distance_meters: Optional[float]) -> str:
+    if not distance_meters:
+        return "—"
+    return f"{distance_meters / 1000:.2f} km"
+
+
+def _recent_activities(db_path: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Best-effort last-`limit` synced activities for display — same "no DB yet" tolerance as
+    `_sync_summary` (see its docstring for why this doesn't share a connection helper with
+    `app/mcp/server.py`).
+    """
+    if not os.path.exists(db_path):
+        return []
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT activity_id, activity_name, activity_type, start_time_local, distance_meters
+            FROM activities
+            ORDER BY start_time_local DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
+def _recent_activities_html(settings: Settings) -> str:
+    activities = _recent_activities(settings.db_path)
+    if not activities:
+        return ""
+
+    items = "".join(
+        '<li><span class="activity-name">'
+        f'{escape(activity["activity_name"] or activity["activity_type"] or "Activity")}'
+        "</span>"
+        f'<span class="activity-meta">{escape(_format_activity_time(activity["start_time_local"]))}'
+        f" · {escape(_format_distance(activity['distance_meters']))}</span></li>"
+        for activity in activities
+    )
+    return f'<h2>Recent activities</h2><ul class="activity-list">{items}</ul>'
+
+
 def _status_body(settings: Settings) -> str:
     has_session = _has_cached_session(settings.garmin_token_dir)
     if has_session:
@@ -217,7 +289,7 @@ def _status_body(settings: Settings) -> str:
         )
         button_label = "Log in to Garmin Connect"
 
-    body = f"{message}{_sync_summary_html(settings)}"
+    body = f"{message}{_sync_summary_html(settings)}{_recent_activities_html(settings)}"
     # The primary action is whichever one you'd reach for day-to-day: once logged in, that's
     # syncing, not logging in again — so "Sync now" gets the prominent styling and comes first.
     login_button_class = "" if has_session else " class=\"primary\""

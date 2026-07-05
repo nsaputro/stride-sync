@@ -20,6 +20,8 @@
   each run. Ask Claude things like "what pace should I target for my marathon" or "was my long
   run today too hard" and it now has the data to answer properly instead of just a single
   average number per run.
+- The panel now works more like a dashboard: it lists your most recent activities (name, date,
+  distance) below the sync summary, not just a total count.
 
 ### Fixed
 - **The add-on failed to start in v0.1.0** (`ModuleNotFoundError: No module named 'app'`, both
