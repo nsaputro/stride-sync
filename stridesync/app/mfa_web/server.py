@@ -18,30 +18,25 @@ module-level slot guarded by a lock — not a per-visitor session store.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from html import escape
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from garmy import AuthClient
-from garmy.core.exceptions import AuthError
+from garminconnect import Garmin, GarminConnectAuthenticationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
 from app.config import Settings
-from app.sync import garmy_login_delay, garmy_tls_impersonation, garmy_ua_override, mfa_login
+from app.sync import mfa_login
 from app.sync.garmin_client import TRANSPORT_ERRORS, describe_transport_error
-
-garmy_ua_override.apply()
-garmy_tls_impersonation.apply()
-garmy_login_delay.apply()
 
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
-_pending_auth_client: Optional[AuthClient] = None
-_pending_mfa_state: Optional[Dict[str, Any]] = None
+_pending_garmin: Optional[Garmin] = None
 
 _STYLE = """
   body { font-family: sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
@@ -60,9 +55,22 @@ def _page(title: str, body: str) -> HTMLResponse:
     )
 
 
+def _has_cached_session(token_dir: Optional[str]) -> bool:
+    """Best-effort check for a previously saved session, without attempting a login.
+
+    `python-garminconnect` only knows whether a session is valid once `Garmin.login()` has
+    loaded it — there's no equivalent to check beforehand without also attempting a network
+    call, which a passive status page shouldn't do. Checking whether the token file exists at
+    all is a reasonable proxy for display purposes (matches `Client.dump()`'s own naming: a
+    directory tokenstore always resolves to `<token_dir>/garmin_tokens.json`).
+    """
+    if not token_dir:
+        return False
+    return os.path.exists(os.path.join(token_dir, "garmin_tokens.json"))
+
+
 def _status_body(settings: Settings) -> str:
-    auth_client = AuthClient(token_dir=settings.garmin_token_dir)
-    if auth_client.is_authenticated:
+    if _has_cached_session(settings.garmin_token_dir):
         message = (
             '<p class="ok">Already logged in to Garmin Connect — scheduled syncs are using '
             "this session.</p>"
@@ -88,15 +96,17 @@ async def index(request: Request) -> HTMLResponse:
 
 
 async def start(request: Request) -> HTMLResponse:
-    global _pending_auth_client, _pending_mfa_state
+    global _pending_garmin
     settings: Settings = request.app.state.settings
 
-    auth_client = AuthClient(token_dir=settings.garmin_token_dir)
+    garmin = Garmin(
+        email=settings.garmin_username,
+        password=settings.garmin_password,
+        return_on_mfa=True,
+    )
     try:
-        result = mfa_login.start_login(
-            auth_client, settings.garmin_username, settings.garmin_password
-        )
-    except AuthError as exc:
+        result = mfa_login.start_login(garmin, settings.garmin_token_dir)
+    except GarminConnectAuthenticationError as exc:
         return _page(
             "Login failed",
             f'<p class="error">Login failed: {escape(str(exc))}</p><p><a href=".">Back</a></p>',
@@ -118,8 +128,7 @@ async def start(request: Request) -> HTMLResponse:
 
     if isinstance(result, mfa_login.NeedsMfa):
         with _lock:
-            _pending_auth_client = auth_client
-            _pending_mfa_state = result.mfa_state
+            _pending_garmin = garmin
         return _page(
             "Enter MFA code",
             "<p>Garmin sent a multi-factor authentication code to your registered "
@@ -133,16 +142,15 @@ async def start(request: Request) -> HTMLResponse:
 
 
 async def verify(request: Request) -> HTMLResponse:
-    global _pending_auth_client, _pending_mfa_state
+    global _pending_garmin
 
     form = await request.form()
     code = str(form.get("code", "")).strip()
 
     with _lock:
-        auth_client = _pending_auth_client
-        mfa_state = _pending_mfa_state
+        garmin = _pending_garmin
 
-    if auth_client is None or mfa_state is None:
+    if garmin is None:
         return _page(
             "No login in progress",
             '<p class="error">No login is currently waiting for an MFA code — start over.</p>'
@@ -150,8 +158,8 @@ async def verify(request: Request) -> HTMLResponse:
         )
 
     try:
-        mfa_login.resume_login(auth_client, code, mfa_state)
-    except AuthError as exc:
+        mfa_login.resume_login(garmin, code)
+    except GarminConnectAuthenticationError as exc:
         return _page(
             "MFA verification failed",
             f'<p class="error">MFA verification failed: {escape(str(exc))}</p>'
@@ -173,8 +181,7 @@ async def verify(request: Request) -> HTMLResponse:
         )
 
     with _lock:
-        _pending_auth_client = None
-        _pending_mfa_state = None
+        _pending_garmin = None
 
     return _page(
         "Logged in",

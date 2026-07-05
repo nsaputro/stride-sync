@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import requests
-from garmy.core.exceptions import AuthError, LoginError
+from garminconnect import GarminConnectAuthenticationError
 
 from app.sync.bootstrap_login import main
 
@@ -19,100 +19,87 @@ def test_missing_credentials_fails_fast(monkeypatch, tmp_path):
     assert main() == 1
 
 
-def test_already_authenticated_is_a_noop(monkeypatch, tmp_path):
-    _settings_env(monkeypatch, tmp_path)
-
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = True
-        mock_cls.return_value = mock_auth
-
-        assert main() == 0
-
-    mock_auth.login.assert_not_called()
-
-
 def test_login_failure_returns_error(monkeypatch, tmp_path):
     _settings_env(monkeypatch, tmp_path)
 
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.side_effect = LoginError("bad credentials")
-        mock_cls.return_value = mock_auth
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.side_effect = GarminConnectAuthenticationError("bad credentials")
+        mock_cls.return_value = mock_garmin
 
         assert main() == 1
 
 
 def test_non_mfa_account_logs_in_directly(monkeypatch, tmp_path):
-    # Accounts without MFA get real tokens back immediately — no MFA prompt needed.
+    # Accounts without MFA get a valid session back immediately — no MFA prompt needed.
     _settings_env(monkeypatch, tmp_path)
 
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = (object(), object())
-        mock_cls.return_value = mock_auth
-
-        # is_authenticated is checked again after login() to confirm success.
-        type(mock_auth).is_authenticated = property(lambda self: True)
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = (None, None)
+        mock_garmin.client.is_authenticated = True
+        mock_cls.return_value = mock_garmin
 
         assert main() == 0
 
-    mock_auth.resume_login.assert_not_called()
+    mock_garmin.resume_login.assert_not_called()
 
 
 def test_mfa_account_prompts_and_resumes(monkeypatch, tmp_path):
     _settings_env(monkeypatch, tmp_path)
 
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls, patch(
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls, patch(
         "builtins.input", return_value="123456"
     ) as mock_input:
-        mock_auth = MagicMock()
-        mfa_state = {"csrf_token": "abc"}
-
-        call_count = {"n": 0}
-
-        def is_authenticated_side_effect(self):
-            call_count["n"] += 1
-            return call_count["n"] > 1  # False on first check, True after resume_login
-
-        mock_auth.login.return_value = ("needs_mfa", mfa_state)
-        mock_cls.return_value = mock_auth
-        type(mock_auth).is_authenticated = property(is_authenticated_side_effect)
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_garmin.client.is_authenticated = True
+        mock_cls.return_value = mock_garmin
 
         assert main() == 0
 
     mock_input.assert_called_once()
-    mock_auth.resume_login.assert_called_once_with("123456", mfa_state)
+    mock_garmin.resume_login.assert_called_once_with({}, "123456")
 
 
 def test_mfa_resume_failure_returns_error(monkeypatch, tmp_path):
     _settings_env(monkeypatch, tmp_path)
 
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls, patch(
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls, patch(
         "builtins.input", return_value="000000"
     ):
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        mock_auth.resume_login.side_effect = AuthError("MFA verification failed")
-        mock_cls.return_value = mock_auth
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_garmin.resume_login.side_effect = GarminConnectAuthenticationError(
+            "MFA verification failed"
+        )
+        mock_cls.return_value = mock_garmin
+
+        assert main() == 1
+
+
+def test_login_did_not_produce_a_valid_session_returns_error(monkeypatch, tmp_path):
+    # Defensive: login() returns cleanly, but the resulting session is somehow still invalid.
+    _settings_env(monkeypatch, tmp_path)
+
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = (None, None)
+        mock_garmin.client.is_authenticated = False
+        mock_cls.return_value = mock_garmin
 
         assert main() == 1
 
 
 def test_login_transport_error_returns_error(monkeypatch, tmp_path):
-    # A raw requests exception (e.g. a 401 from Garmin's SSO signin page, or a plain network
-    # failure) must not crash uncaught — this mirrors garmin_client.py's TRANSPORT_ERRORS
-    # handling rather than only catching garmy's AuthError.
+    # A raw requests/curl_cffi exception (e.g. a network failure) must not crash uncaught —
+    # mirrors garmin_client.py's TRANSPORT_ERRORS handling.
     _settings_env(monkeypatch, tmp_path)
 
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.side_effect = requests.exceptions.ConnectionError("connection reset")
-        mock_cls.return_value = mock_auth
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls:
+        mock_garmin = MagicMock()
+        mock_garmin.login.side_effect = requests.exceptions.ConnectionError("connection reset")
+        mock_cls.return_value = mock_garmin
 
         assert main() == 1
 
@@ -120,13 +107,12 @@ def test_login_transport_error_returns_error(monkeypatch, tmp_path):
 def test_mfa_resume_transport_error_returns_error(monkeypatch, tmp_path):
     _settings_env(monkeypatch, tmp_path)
 
-    with patch("app.sync.bootstrap_login.AuthClient") as mock_cls, patch(
+    with patch("app.sync.bootstrap_login.Garmin") as mock_cls, patch(
         "builtins.input", return_value="000000"
     ):
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated = False
-        mock_auth.login.return_value = ("needs_mfa", {"csrf_token": "abc"})
-        mock_auth.resume_login.side_effect = requests.exceptions.ConnectionError("reset")
-        mock_cls.return_value = mock_auth
+        mock_garmin = MagicMock()
+        mock_garmin.login.return_value = ("needs_mfa", None)
+        mock_garmin.resume_login.side_effect = requests.exceptions.ConnectionError("reset")
+        mock_cls.return_value = mock_garmin
 
         assert main() == 1

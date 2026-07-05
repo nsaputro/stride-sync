@@ -109,7 +109,7 @@ Every `run` script starts with `#!/usr/bin/with-contenv bashio` so it can read a
   pulling in the other.
 - Garmin auth/session code lives behind a single client interface (`app/sync/garmin_client.py`)
   so the unofficial-API breakage risk (see `PROJECT_PLAN.md`) is isolated to one module — sync
-  and MCP code should never call `garmy` (or its fallback) directly.
+  and MCP code should never call `garminconnect` directly.
 - Fail loud, not silent: a failed sync must produce a clear log line and an updated "last sync
   status" the MCP server can surface — never a silently stale database.
 

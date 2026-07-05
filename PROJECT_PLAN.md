@@ -24,7 +24,7 @@ them locally.
                           │   HA Add-on container (s6-overlay)        │
                           │                                           │
   Garmin Connect  ◄───────┤  sync-scheduler (s6 service)              │
-   (unofficial API)       │    - garmy / python-garminconnect          │
+   (unofficial API)       │    - python-garminconnect                  │
                           │    - runs every N hours (configurable)     │
                           │    - writes to SQLite in /data             │
                           │                                           │
@@ -37,12 +37,18 @@ them locally.
 
 ### Garmin Connect sync
 
-- **Primary library**: [`garmy`](https://pypi.org/project/garmy/) for Garmin Connect
-  authentication and activity sync.
-- **Fallback**: [`python-garminconnect`](https://github.com/cyberjunky/python-garminconnect) if
-  `garmy` cannot cover a needed endpoint or breaks in a way `garmy` doesn't recover from first.
-  Both libraries sit behind the single `app/sync/garmin_client.py` interface (see `CLAUDE.md`) so
-  swapping the underlying library is a one-file change, not a rewrite.
+- **Library**: [`python-garminconnect`](https://github.com/cyberjunky/python-garminconnect) for
+  Garmin Connect authentication and activity sync.
+- **Originally `garmy`, migrated after Garmin's March 2026 Cloudflare rollout.** Three
+  successive fixes on top of `garmy` (a corrected User-Agent, `curl_cffi` TLS-fingerprint
+  impersonation, then a human-like login delay) all failed to get past Garmin's Cloudflare bot
+  challenge on SSO login — see "Known risk: unofficial Garmin auth breakage" below for the full
+  investigation. `python-garminconnect` already implements a 5-strategy cascading login chain
+  (mobile app API / web widget / full portal, each tried with both `curl_cffi` impersonation and
+  plain `requests`) plus its own anti-bot timing delays, and is actively maintained against
+  Garmin's changes — so it replaced `garmy` entirely rather than layering a fourth fix on top.
+  The library sits behind the single `app/sync/garmin_client.py` interface (see `CLAUDE.md`) so a
+  future swap, if ever needed again, stays a one-file change, not a rewrite.
 - Auth credentials (`garmin_username` / `garmin_password`) come from add-on options, never
   hardcoded or logged.
 
@@ -192,23 +198,37 @@ in sequence, both needed:
    `_perform_initial_login` (the credential-submitting POST) to sleep first, matching the
    GET-then-wait-then-POST pattern rather than firing both back-to-back.
 
-Still not verified end-to-end against a live account from this environment (no route to
-`garmin.com` here) — awaiting confirmation from a real HA install. Three fix attempts in a row
-for the same underlying block (UA, TLS fingerprint, timing) — if this one *also* doesn't clear
-it, that would point toward an actual JavaScript challenge (the response body's `class="no-js"`
-is consistent with this), which no plain HTTP client — regardless of headers, TLS fingerprint, or
-timing — can solve without real browser automation (Playwright/Selenium), a much larger change.
+None of these three fix attempts on top of `garmy`, live-retested in sequence (UA, TLS
+fingerprint, timing), cleared the block — the same Cloudflare challenge came back every time.
+That is the point at which this project **migrated the underlying library from `garmy` to
+`python-garminconnect`** rather than attempting a fourth `garmy`-specific patch: the
+`garmy_ua_override.py` / `garmy_tls_impersonation.py` / `garmy_login_delay.py` modules (and their
+tests) were removed, `requirements.txt` now depends on `garminconnect` directly, and
+`app/sync/garmin_client.py`, `app/sync/mfa_login.py`, `app/sync/bootstrap_login.py`, and
+`app/mfa_web/server.py` were all rewritten against `python-garminconnect`'s `Garmin`/`Client`
+API. The MFA-marker no-retry-storm behavior described above, and the cached-session-first login
+ordering, were both carried over unchanged in spirit onto the new library (`Client.load()` +
+`Client.is_authenticated` in place of `garmy`'s `AuthClient.is_authenticated`/`refresh_tokens()`).
 
-**Watch item, unconfirmed against `garmy`:** a separate, newer Garmin-side auth problem
-surfaced in the wider unofficial-client ecosystem starting ~June 2026 —
+This still couldn't be verified end-to-end against a live account from this sandboxed
+environment (no route to `garmin.com` here) — a real, non-mocked standalone run of
+`python3 -m app.sync.scheduler --once` proved the whole exception-wrapping chain works correctly
+(all 5 of `python-garminconnect`'s login strategies executed in order, then a clean
+`GarminConnectConnectionError` → `GarminAuthError` → `sync_log`-recorded failure, with no
+unhandled crash), but the only failure it actually hit was this sandbox's own outbound network
+policy blocking `sso.garmin.com`, not a code defect. Whether `python-garminconnect` actually gets
+past Garmin's Cloudflare challenge where three fixes on top of `garmy` did not can only be
+confirmed by retesting login on a real HA install.
+
+**Watch item, unconfirmed against `python-garminconnect`:** a separate, newer Garmin-side auth
+problem surfaced in the wider unofficial-client ecosystem starting ~June 2026 —
 [python-garminconnect#369](https://github.com/cyberjunky/python-garminconnect/issues/369) and
 [garth#137](https://github.com/matin/garth/issues/137) both report login succeeding but a
 subsequent API call returning `401 Token is not active`, suggesting Garmin changed server-side
-bearer-token validation. `garmy` reimplements SSO itself (doesn't depend on `garth`), so it isn't
-automatically affected, but if Garmin's change is server-side it could hit `garmy` too. No
-confirmed reports against `garmy` specifically as of this writing, and this environment has no
-route to `garmin.com` to check directly — worth a quick look if sync starts failing with a 401
-after a successful-looking login (as opposed to the MFA case above, which fails *during* login).
+bearer-token validation. No confirmed reports against the current `python-garminconnect` release
+as of this writing, and this environment has no route to `garmin.com` to check directly — worth a
+quick look if sync starts failing with a 401 after a successful-looking login (as opposed to the
+MFA case above, which fails *during* login).
 
 ---
 
