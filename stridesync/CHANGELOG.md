@@ -23,6 +23,16 @@
   date. This is the most speculative addition in v0.12 — the underlying `get_training_plans`/
   `get_training_plan_by_id` response shape has no prior confirmation from a live account.
 
+### Fixed
+- **Sync crash when `get_max_metrics` returns a list instead of a dict** (milestone v0.12):
+  confirmed live on a real account — `GarminClient.fetch_vo2max`'s normalization step ran
+  *outside* its try/except, so the resulting `AttributeError` propagated all the way through
+  `run_sync_once` (which only catches `GarminAuthError`/`GarminAPIError`), crashing the entire
+  sync pass without even recording a `sync_log` failure row. Fixed by moving the normalize call
+  inside the try/except and hardening it against non-dict input; applied the same defensive fix
+  to `fetch_daily_wellness`'s merge step, since it has the identical unguarded-call shape and the
+  same live account demonstrated Garmin's API can return unexpected response shapes.
+
 ## [0.2.2] - 2026-07-05
 
 ### Added

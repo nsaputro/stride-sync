@@ -356,11 +356,11 @@ def _normalize_training_baseline(
 
 def _normalize_daily_wellness(
     cdate: str,
-    sleep: Dict[str, Any],
-    hrv: Dict[str, Any],
-    training_status: Dict[str, Any],
-    readiness: Dict[str, Any],
-    resting_hr: Dict[str, Any],
+    sleep: Any,
+    hrv: Any,
+    training_status: Any,
+    readiness: Any,
+    resting_hr: Any,
 ) -> DailyWellness:
     """Merge the five raw responses `GarminClient.fetch_daily_wellness` collects into one
     `DailyWellness` (see PROJECT_PLAN.md milestone v0.12).
@@ -370,8 +370,14 @@ def _normalize_daily_wellness(
     multi-candidate lookup means a wrong guess degrades a field to `None`, not a crash. Every
     argument defaults to `{}` upstream when that particular sub-fetch failed or isn't supported
     by this account/device — see `GarminClient.fetch_daily_wellness` for why each of the five is
-    wrapped independently rather than sharing one try/except.
+    wrapped independently rather than sharing one try/except. A live account has been observed
+    returning a list rather than a dict from at least one of these endpoints (see
+    `_normalize_vo2max`'s docstring for the same issue confirmed on `get_max_metrics`) — every
+    argument is coerced to `{}` here if it isn't already a dict, so an unexpected shape degrades
+    those fields to `None` rather than crashing `.get()`.
     """
+    sleep = sleep if isinstance(sleep, dict) else {}
+    hrv = hrv if isinstance(hrv, dict) else {}
     daily_sleep_dto = sleep.get("dailySleepDTO") or {}
     sleep_scores = daily_sleep_dto.get("sleepScores") or {}
     overall_sleep_score = (sleep_scores.get("overall") or {}).get("value")
@@ -405,12 +411,15 @@ def _normalize_daily_wellness(
     )
 
 
-def _normalize_vo2max(cdate: str, raw: Dict[str, Any]) -> Vo2MaxReading:
+def _normalize_vo2max(cdate: str, raw: Any) -> Vo2MaxReading:
     """Convert `Client.get_max_metrics(cdate)`'s raw response into a `Vo2MaxReading`.
 
     Best-effort field mapping, same caveat as `_normalize_training_baseline` — see
-    PROJECT_PLAN.md milestone v0.12.
+    PROJECT_PLAN.md milestone v0.12. Confirmed on a live account that `get_max_metrics` can
+    return a list rather than a dict (shape otherwise unconfirmed) — coerced to `{}` here so
+    every field degrades to `None` instead of crashing on `.get()`.
     """
+    raw = raw if isinstance(raw, dict) else {}
     generic = raw.get("generic") or {}
     cycling = raw.get("cycling") or {}
     return Vo2MaxReading(
@@ -783,7 +792,12 @@ class GarminClient:
         failing endpoint (e.g. a non-HRV-capable watch) must not discard data that successfully
         came back from the other four. Always returns a `DailyWellness` (never `None`) since
         `calendar_date` is already known by the caller — any individual field that failed to
-        fetch is simply `None`.
+        fetch is simply `None`. The final merge step is also wrapped: a live account has been
+        observed returning an unexpected shape from one of these endpoints (see
+        `_normalize_vo2max`'s docstring for the confirmed `get_max_metrics` case), so any
+        unforeseen normalization failure degrades to an all-`None` `DailyWellness` rather than
+        crashing the sync — this was a real bug (an unguarded merge call let one bad response
+        crash the whole `run_sync_once`, bypassing its `sync_log` failure recording entirely).
         """
         sleep = self._safe_wellness_call(
             "sleep data", cdate, lambda: self._garmin.get_sleep_data(cdate)
@@ -800,9 +814,34 @@ class GarminClient:
         resting_hr = self._safe_wellness_call(
             "resting HR", cdate, lambda: self._garmin.get_rhr_day(cdate)
         )
-        return _normalize_daily_wellness(
-            cdate, sleep or {}, hrv or {}, training_status or {}, readiness or {}, resting_hr or {}
-        )
+        try:
+            return _normalize_daily_wellness(
+                cdate,
+                sleep or {},
+                hrv or {},
+                training_status or {},
+                readiness or {},
+                resting_hr or {},
+            )
+        except Exception as exc:  # noqa: BLE001 - see docstring: must never crash the sync
+            logger.warning(
+                "Could not normalize wellness data for %s (non-fatal): %s", cdate, exc
+            )
+            return DailyWellness(
+                calendar_date=cdate,
+                sleep_score=None,
+                sleep_duration_seconds=None,
+                deep_sleep_seconds=None,
+                light_sleep_seconds=None,
+                rem_sleep_seconds=None,
+                awake_sleep_seconds=None,
+                hrv_status=None,
+                hrv_weekly_avg_ms=None,
+                hrv_last_night_avg_ms=None,
+                training_status_label=None,
+                training_readiness_score=None,
+                resting_hr=None,
+            )
 
     def _safe_wellness_call(self, label: str, cdate: str, fn: Callable[[], Any]) -> Any:
         """Run one of `fetch_daily_wellness`'s five sub-fetches, logging + swallowing any
@@ -821,13 +860,29 @@ class GarminClient:
         `fetch_training_baseline`: not every device estimates VO2 max, and there's only one
         underlying endpoint here (unlike `fetch_daily_wellness`'s five), so nothing to partially
         degrade within a single call.
+
+        Confirmed via a real crash on a live account: `get_max_metrics` can return a list rather
+        than a dict, and the normalization step used to run *outside* this try/except — the
+        resulting `AttributeError` propagated all the way through `run_sync_once`, which only
+        catches `GarminAuthError`/`GarminAPIError`, crashing the whole sync pass without even
+        writing a `sync_log` failure row. The normalize call is now inside this try/except too,
+        so any unexpected response shape degrades to `None` (no row written) like any other
+        fetch failure, instead of crashing the sync.
         """
         try:
             raw = self._garmin.get_max_metrics(cdate) or {}
+            if not isinstance(raw, dict):
+                logger.warning(
+                    "Unexpected VO2 max response shape for %s (expected dict, got %s) — "
+                    "treating as unavailable, non-fatal",
+                    cdate,
+                    type(raw).__name__,
+                )
+                return None
+            return _normalize_vo2max(cdate, raw)
         except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
             logger.warning("Could not fetch VO2 max for %s (non-fatal): %s", cdate, exc)
             return None
-        return _normalize_vo2max(cdate, raw)
 
     def fetch_planned_workouts(self, start_date: str, end_date: str) -> List[PlannedWorkout]:
         """Fetch scheduled workouts from every active Garmin Connect training plan, filtered to

@@ -233,6 +233,16 @@ class TestNormalizeVo2Max:
         assert reading.vo2_max_cycling is None
         assert reading.fitness_age is None
 
+    def test_list_response_does_not_crash(self):
+        # Regression test: a live account returned a list from get_max_metrics instead of a
+        # dict -- raw.get("generic") used to raise AttributeError uncaught, crashing the sync.
+        reading = _normalize_vo2max("2026-07-06", [{"generic": {"vo2MaxValue": 50.0}}])
+
+        assert reading.calendar_date == "2026-07-06"
+        assert reading.vo2_max_running is None
+        assert reading.vo2_max_cycling is None
+        assert reading.fitness_age is None
+
 
 class TestNormalizePlannedWorkouts:
     def test_normalizes_one_in_window_workout(self):
@@ -712,6 +722,22 @@ class TestGarminClientFetch:
         assert wellness.training_readiness_score is None
         assert wellness.resting_hr is None
 
+    def test_fetch_daily_wellness_handles_unexpected_list_shape_from_one_endpoint(self):
+        # Same class of bug as fetch_vo2max's list-response regression test -- a sub-fetch
+        # returning a list instead of a dict must not crash the final merge step.
+        client = make_client()
+        client._garmin.get_sleep_data.return_value = [{"dailySleepDTO": {}}]
+        client._garmin.get_hrv_data.return_value = {"hrvSummary": {"status": "BALANCED"}}
+        client._garmin.get_training_status.return_value = {}
+        client._garmin.get_morning_training_readiness.return_value = {}
+        client._garmin.get_rhr_day.return_value = {}
+
+        wellness = client.fetch_daily_wellness("2026-07-06")
+
+        assert wellness.calendar_date == "2026-07-06"
+        assert wellness.sleep_score is None
+        assert wellness.hrv_status == "BALANCED"
+
     def test_fetch_vo2max_returns_normalized_result(self):
         client = make_client()
         client._garmin.get_max_metrics.return_value = {
@@ -730,6 +756,16 @@ class TestGarminClientFetch:
         # must never fail the sync, matching fetch_training_baseline's contract.
         client = make_client()
         client._garmin.get_max_metrics.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_vo2max("2026-07-06") is None
+
+    def test_fetch_vo2max_returns_none_on_unexpected_list_response(self):
+        # Regression test for a real production crash: a live account's get_max_metrics
+        # returned a list instead of a dict, and the normalize call used to run outside this
+        # try/except -- the resulting AttributeError crashed the whole sync, bypassing
+        # run_sync_once's sync_log failure recording entirely.
+        client = make_client()
+        client._garmin.get_max_metrics.return_value = [{"generic": {"vo2MaxValue": 50.0}}]
 
         assert client.fetch_vo2max("2026-07-06") is None
 
