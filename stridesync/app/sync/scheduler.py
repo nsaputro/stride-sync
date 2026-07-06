@@ -28,6 +28,7 @@ from app.sync.garmin_client import (
     GarminLap,
     HrZoneTime,
     TrainingBaseline,
+    Vo2MaxReading,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,28 @@ def _upsert_daily_wellness(
     )
 
 
+def _upsert_vo2max(
+    conn: sqlite3.Connection, reading: Optional[Vo2MaxReading], synced_at: str
+) -> None:
+    """No-op if `reading` is `None` — see `GarminClient.fetch_vo2max`'s docstring: not every
+    device estimates VO2 max, and that's not treated as a sync failure."""
+    if reading is None:
+        return
+    conn.execute(
+        """
+        INSERT INTO vo2max_history (
+            calendar_date, synced_at, vo2_max_running, vo2_max_cycling, fitness_age
+        ) VALUES (:calendar_date, :synced_at, :vo2_max_running, :vo2_max_cycling, :fitness_age)
+        ON CONFLICT (calendar_date) DO UPDATE SET
+            synced_at = excluded.synced_at,
+            vo2_max_running = excluded.vo2_max_running,
+            vo2_max_cycling = excluded.vo2_max_cycling,
+            fitness_age = excluded.fitness_age
+        """,
+        {**reading.__dict__, "synced_at": synced_at},
+    )
+
+
 def _sync_activities(
     conn: sqlite3.Connection,
     client: GarminClient,
@@ -259,6 +282,7 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
         for offset in range(_WELLNESS_WINDOW_DAYS):
             cdate = (today - timedelta(days=offset)).isoformat()
             _upsert_daily_wellness(conn, client.fetch_daily_wellness(cdate), synced_at)
+            _upsert_vo2max(conn, client.fetch_vo2max(cdate), synced_at)
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
         conn.commit()
@@ -298,8 +322,8 @@ def run_backfill_sync(
     """One-off backfill: fetch every activity from `start_date` through today and write it the
     same way a regular sync does — a separate entry point from `run_sync_once` (see
     PROJECT_PLAN.md milestone v0.8) since it's date-based rather than count-based, and can cover
-    far more activities in one call. Does not refresh `training_baseline` or `daily_wellness`
-    either — those stay the regular scheduled sync's job.
+    far more activities in one call. Does not refresh `training_baseline`, `daily_wellness`, or
+    `vo2max_history` either — those stay the regular scheduled sync's job.
 
     Args:
         progress_callback: If given, called as `progress_callback(completed, total)` — once

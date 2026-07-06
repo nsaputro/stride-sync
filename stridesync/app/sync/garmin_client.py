@@ -220,6 +220,18 @@ class DailyWellness:
     resting_hr: Optional[int]
 
 
+@dataclass(frozen=True)
+class Vo2MaxReading:
+    """One calendar date's VO2 max estimate(s) — see PROJECT_PLAN.md milestone v0.12 and the
+    `vo2max_history` table. Additive to `training_baseline`, not a replacement.
+    """
+
+    calendar_date: str
+    vo2_max_running: Optional[float]
+    vo2_max_cycling: Optional[float]
+    fitness_age: Optional[int]
+
+
 def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
     """Convert average speed (m/s) to pace (seconds per km). None if speed is missing/zero."""
     if not speed_mps:
@@ -370,6 +382,22 @@ def _normalize_daily_wellness(
         training_status_label=training_status_label,
         training_readiness_score=_get(readiness, "score"),
         resting_hr=_get(resting_hr, "restingHeartRate", "restingHR"),
+    )
+
+
+def _normalize_vo2max(cdate: str, raw: Dict[str, Any]) -> Vo2MaxReading:
+    """Convert `Client.get_max_metrics(cdate)`'s raw response into a `Vo2MaxReading`.
+
+    Best-effort field mapping, same caveat as `_normalize_training_baseline` — see
+    PROJECT_PLAN.md milestone v0.12.
+    """
+    generic = raw.get("generic") or {}
+    cycling = raw.get("cycling") or {}
+    return Vo2MaxReading(
+        calendar_date=cdate,
+        vo2_max_running=_get(generic, "vo2MaxPreciseValue", "vo2MaxValue"),
+        vo2_max_cycling=_get(cycling, "vo2MaxPreciseValue", "vo2MaxValue"),
+        fitness_age=_get(raw, "fitnessAge"),
     )
 
 
@@ -725,6 +753,20 @@ class GarminClient:
         except Exception as exc:  # noqa: BLE001 - deliberately non-fatal, see fetch_daily_wellness
             logger.warning("Could not fetch %s for %s (non-fatal): %s", label, cdate, exc)
             return None
+
+    def fetch_vo2max(self, cdate: str) -> Optional[Vo2MaxReading]:
+        """Fetch VO2 max (running/cycling) + fitness age for one calendar date (see
+        PROJECT_PLAN.md milestone v0.12). Best-effort, same reasoning as
+        `fetch_training_baseline`: not every device estimates VO2 max, and there's only one
+        underlying endpoint here (unlike `fetch_daily_wellness`'s five), so nothing to partially
+        degrade within a single call.
+        """
+        try:
+            raw = self._garmin.get_max_metrics(cdate) or {}
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning("Could not fetch VO2 max for %s (non-fatal): %s", cdate, exc)
+            return None
+        return _normalize_vo2max(cdate, raw)
 
     def fetch_activity_hr_zones(self, activity_id: int) -> List[HrZoneTime]:
         """Fetch seconds-in-each-HR-zone for one activity (see PROJECT_PLAN.md milestone v0.5).

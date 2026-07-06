@@ -15,6 +15,7 @@ from app.sync.garmin_client import (
     GarminLap,
     HrZoneTime,
     TrainingBaseline,
+    Vo2MaxReading,
 )
 from app.sync.scheduler import (
     _install_shutdown_handler,
@@ -109,6 +110,15 @@ def make_daily_wellness(calendar_date="2026-07-06") -> DailyWellness:
     )
 
 
+def make_vo2max_reading(calendar_date="2026-07-06") -> Vo2MaxReading:
+    return Vo2MaxReading(
+        calendar_date=calendar_date,
+        vo2_max_running=52.5,
+        vo2_max_cycling=48.0,
+        fitness_age=28,
+    )
+
+
 def make_hr_zone(activity_id=1, zone_number=2) -> HrZoneTime:
     return HrZoneTime(
         activity_id=activity_id,
@@ -147,6 +157,7 @@ class FakeGarminClient:
         since_activities=None,
         since_error=None,
         wellness=None,
+        vo2max=None,
     ):
         self._activities = activities or []
         self._laps = laps or {}
@@ -158,6 +169,7 @@ class FakeGarminClient:
         self._since_activities = since_activities if since_activities is not None else activities or []
         self._since_error = since_error
         self._wellness = wellness or {}
+        self._vo2max = vo2max or {}
         self.login_called = False
         self.since_start_date = None
 
@@ -210,6 +222,11 @@ class FakeGarminClient:
                 resting_hr=None,
             ),
         )
+
+    def fetch_vo2max(self, cdate):
+        # Real GarminClient.fetch_vo2max returns None when unavailable (matches
+        # fetch_training_baseline's contract) -- mirror that for unconfigured dates.
+        return self._vo2max.get(cdate)
 
 
 def test_run_sync_once_writes_activities_and_laps(tmp_path):
@@ -337,6 +354,37 @@ def test_run_sync_once_upserts_daily_wellness_rather_than_duplicating(tmp_path):
         ).fetchall()
         assert len(rows) == 1
         assert rows[0]["sleep_score"] == 55
+    finally:
+        conn.close()
+
+
+def test_run_sync_once_writes_vo2max_history(tmp_path):
+    settings = make_settings(tmp_path)
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    yesterday_str = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+    # Only configure vo2max for one of the window's dates -- proves fetch_vo2max returning None
+    # for the other dates is a no-op, not an error or a row of nulls.
+    client = FakeGarminClient(
+        activities=[make_activity()], vo2max={today_str: make_vo2max_reading(today_str)}
+    )
+
+    run_sync_once(settings, client)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        rows = conn.execute("SELECT * FROM vo2max_history").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["calendar_date"] == today_str
+        assert rows[0]["vo2_max_running"] == 52.5
+        assert rows[0]["fitness_age"] == 28
+        assert (
+            conn.execute(
+                "SELECT * FROM vo2max_history WHERE calendar_date = ?", (yesterday_str,)
+            ).fetchone()
+            is None
+        )
     finally:
         conn.close()
 
@@ -502,6 +550,22 @@ def test_run_backfill_sync_does_not_touch_daily_wellness(tmp_path):
     conn = db.connect(settings.db_path)
     try:
         assert conn.execute("SELECT * FROM daily_wellness").fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_does_not_touch_vo2max_history(tmp_path):
+    # Same rationale as training_baseline/daily_wellness above.
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(since_activities=[make_activity()])
+
+    run_backfill_sync(settings, client, "2020-01-01")
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        assert conn.execute("SELECT * FROM vo2max_history").fetchone() is None
     finally:
         conn.close()
 

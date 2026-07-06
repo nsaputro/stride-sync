@@ -684,7 +684,7 @@ across three PRs for review size.
   does not touch this table, matching `training_baseline`'s existing precedent.
 - ✅ Two new MCP tools: `daily_wellness(days=14)` and `resting_hr_trend(days=30)` (oldest-first
   `(calendar_date, resting_hr)` pairs, mirroring `pace_cadence_hr_trend`'s shape).
-- ⬜ `vo2max_history` table + `GarminClient.fetch_vo2max(cdate)` (`get_max_metrics`), same
+- ✅ `vo2max_history` table + `GarminClient.fetch_vo2max(cdate)` (`get_max_metrics`), same
   rolling-window daily-fetch pattern — additive to (not a replacement for) the existing
   `training_baseline` table/tool. New `vo2max_trend(days=90)` MCP tool.
 - ⬜ `planned_workouts` table + `GarminClient.fetch_planned_workouts(start_date, end_date)`
