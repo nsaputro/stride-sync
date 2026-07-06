@@ -15,6 +15,13 @@
   VO2 max and fitness age, same rolling-window daily fetch as the wellness metrics — additive to
   the existing `training_baseline` table/tool, not a replacement. New MCP tool:
   `vo2max_trend(days=90)`.
+- **Training plans: planned vs. actual** (milestone v0.12, `planned_workouts` table,
+  `get_training_plans`/`get_training_plan_by_id`): scheduled workouts from an active Garmin
+  Connect training plan, if one is configured — refetched for a rolling ±14-day window on every
+  sync. Accounts with no active plan degrade to an empty table, not a sync failure. New MCP tool:
+  `planned_vs_actual(days=14)`, joining planned workouts against completed activities by calendar
+  date. This is the most speculative addition in v0.12 — the underlying `get_training_plans`/
+  `get_training_plan_by_id` response shape has no prior confirmation from a live account.
 
 ## [0.2.2] - 2026-07-05
 

@@ -13,7 +13,8 @@ def test_connect_creates_schema(tmp_path):
             ).fetchall()
         }
         assert {
-            "activities", "activity_metrics", "sync_log", "daily_wellness", "vo2max_history"
+            "activities", "activity_metrics", "sync_log", "daily_wellness", "vo2max_history",
+            "planned_workouts"
         } <= tables
     finally:
         conn.close()

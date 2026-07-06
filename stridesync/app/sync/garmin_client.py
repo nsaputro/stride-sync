@@ -232,6 +232,26 @@ class Vo2MaxReading:
     fitness_age: Optional[int]
 
 
+@dataclass(frozen=True)
+class PlannedWorkout:
+    """One scheduled workout from a Garmin Connect training plan — see PROJECT_PLAN.md milestone
+    v0.12 and the `planned_workouts` table. The least-confirmed dataclass in this module:
+    `get_training_plans()`/`get_training_plan_by_id()`'s per-workout response shape has zero
+    prior confirmation anywhere in this codebase, unlike every other field mapping added this
+    milestone (see `_normalize_planned_workouts`).
+    """
+
+    plan_id: str
+    workout_date: str
+    workout_name: Optional[str]
+    workout_type: Optional[str]
+    planned_distance_meters: Optional[float]
+    planned_duration_seconds: Optional[float]
+    planned_target_pace_sec_per_km: Optional[float]
+    planned_target_hr_low: Optional[int]
+    planned_target_hr_high: Optional[int]
+
+
 def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
     """Convert average speed (m/s) to pace (seconds per km). None if speed is missing/zero."""
     if not speed_mps:
@@ -399,6 +419,47 @@ def _normalize_vo2max(cdate: str, raw: Dict[str, Any]) -> Vo2MaxReading:
         vo2_max_cycling=_get(cycling, "vo2MaxPreciseValue", "vo2MaxValue"),
         fitness_age=_get(raw, "fitnessAge"),
     )
+
+
+def _normalize_planned_workouts(
+    plan_id: str, detail: Dict[str, Any], start_date: str, end_date: str
+) -> List[PlannedWorkout]:
+    """Convert one `Client.get_training_plan_by_id(plan_id)` response into `PlannedWorkout`s,
+    filtered to `[start_date, end_date]` (inclusive, `YYYY-MM-DD` strings).
+
+    Field names below are the least-confirmed guess in this module — see `PlannedWorkout`'s
+    docstring. A workout entry missing its date, or falling outside the requested window, is
+    silently dropped rather than raising.
+    """
+    raw_workouts = _get(detail, "workouts", "scheduledWorkouts", "days") or []
+    if not isinstance(raw_workouts, list):
+        return []
+
+    result: List[PlannedWorkout] = []
+    for entry in raw_workouts:
+        if not isinstance(entry, dict):
+            continue
+        workout_date = _get(entry, "date", "workoutDate", "calendarDate")
+        if not workout_date or not (start_date <= workout_date <= end_date):
+            continue
+
+        target = _get(entry, "targetHeartRateZone", "targetHr") or {}
+        speed = _get(entry, "plannedAverageSpeed", "targetSpeed")
+
+        result.append(
+            PlannedWorkout(
+                plan_id=plan_id,
+                workout_date=workout_date,
+                workout_name=_get(entry, "workoutName", "name"),
+                workout_type=_get(entry, "workoutType", "stepType"),
+                planned_distance_meters=_get(entry, "plannedDistanceInMeters", "distance"),
+                planned_duration_seconds=_get(entry, "plannedDurationInSeconds", "duration"),
+                planned_target_pace_sec_per_km=_pace_sec_per_km(speed),
+                planned_target_hr_low=_get(target, "zoneLow", "hrLow"),
+                planned_target_hr_high=_get(target, "zoneHigh", "hrHigh"),
+            )
+        )
+    return result
 
 
 def _normalize_hr_zones(activity_id: int, raw: Any) -> List[HrZoneTime]:
@@ -767,6 +828,49 @@ class GarminClient:
             logger.warning("Could not fetch VO2 max for %s (non-fatal): %s", cdate, exc)
             return None
         return _normalize_vo2max(cdate, raw)
+
+    def fetch_planned_workouts(self, start_date: str, end_date: str) -> List[PlannedWorkout]:
+        """Fetch scheduled workouts from every active Garmin Connect training plan, filtered to
+        `[start_date, end_date]` (see PROJECT_PLAN.md milestone v0.12).
+
+        The most speculative fetch method in this module — `get_training_plans()`/
+        `get_training_plan_by_id()`'s response shape has zero prior confirmation anywhere in
+        this codebase (see `PlannedWorkout`'s docstring). Most accounts have no active plan at
+        all, which degrades to an empty list, not a failure. A failure fetching one plan's detail
+        is isolated to that plan — it must not discard workouts from sibling plans, so each
+        `get_training_plan_by_id` call is wrapped individually inside the loop below rather than
+        wrapping the whole loop in one try/except. `get_adaptive_training_plan_by_id` is
+        deliberately not wired in yet — which plan type needs it vs. this phased endpoint is
+        unconfirmed; a follow-up once a live account clarifies this.
+        """
+        try:
+            plans = self._garmin.get_training_plans()
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning("Could not fetch training plans (non-fatal): %s", exc)
+            return []
+
+        plan_list = _get(plans, "trainingPlans", "plans") if isinstance(plans, dict) else plans
+        if not isinstance(plan_list, list):
+            return []
+
+        workouts: List[PlannedWorkout] = []
+        for plan in plan_list:
+            if not isinstance(plan, dict):
+                continue
+            plan_id = _get(plan, "planId", "id")
+            if plan_id is None:
+                continue
+            try:
+                detail = self._garmin.get_training_plan_by_id(plan_id) or {}
+            except Exception as exc:  # noqa: BLE001 - isolate one plan's failure from siblings
+                logger.warning(
+                    "Could not fetch training plan %s (non-fatal): %s", plan_id, exc
+                )
+                continue
+            workouts.extend(
+                _normalize_planned_workouts(str(plan_id), detail, start_date, end_date)
+            )
+        return workouts
 
     def fetch_activity_hr_zones(self, activity_id: int) -> List[HrZoneTime]:
         """Fetch seconds-in-each-HR-zone for one activity (see PROJECT_PLAN.md milestone v0.5).
