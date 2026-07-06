@@ -107,3 +107,28 @@ CREATE TABLE IF NOT EXISTS activity_samples (
     PRIMARY KEY (activity_id, sample_index),
     FOREIGN KEY (activity_id) REFERENCES activities (activity_id)
 );
+
+-- daily_wellness: one row per calendar date — sleep, HRV, Garmin's own training-status label,
+-- training-readiness score, and resting HR — see PROJECT_PLAN.md milestone v0.12. Unlike
+-- `activities` (keyed by Garmin's own activity_id, appended per sync), this is fetched and
+-- upserted for a small rolling window of recent dates on every sync (Garmin sometimes finalizes
+-- sleep/HRV data a day late), overwriting whatever was stored for that date before. Nullable
+-- throughout — not every endpoint/device/account reports every field, and each of the five
+-- source endpoints failing independently degrades only its own column(s) to NULL rather than the
+-- whole day's row.
+CREATE TABLE IF NOT EXISTS daily_wellness (
+    calendar_date            TEXT PRIMARY KEY,
+    synced_at                TEXT NOT NULL,
+    sleep_score              INTEGER,
+    sleep_duration_seconds   REAL,
+    deep_sleep_seconds       REAL,
+    light_sleep_seconds      REAL,
+    rem_sleep_seconds        REAL,
+    awake_sleep_seconds      REAL,
+    hrv_status               TEXT,
+    hrv_weekly_avg_ms        REAL,
+    hrv_last_night_avg_ms    REAL,
+    training_status_label    TEXT,
+    training_readiness_score INTEGER,
+    resting_hr               INTEGER
+);

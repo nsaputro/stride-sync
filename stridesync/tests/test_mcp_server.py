@@ -13,8 +13,10 @@ from app.mcp.server import (
     get_activity_hr_zones,
     get_activity_laps,
     get_activity_samples,
+    get_daily_wellness,
     get_last_sync_status,
     get_pace_cadence_hr_trend,
+    get_resting_hr_trend,
     get_training_baseline,
     get_training_load_summary,
     list_recent_activities,
@@ -108,6 +110,32 @@ def seed_db(db_path: str) -> None:
             ) VALUES (1, ?, ?, ?, 2.78, 359.7, 170.0, 12.5, 37.0, -122.0, 18.5)
             """,
             [(i, float(i * 10), 150 + i) for i in range(5)],
+        )
+        conn.execute(
+            """
+            INSERT INTO daily_wellness (
+                calendar_date, synced_at, sleep_score, sleep_duration_seconds, deep_sleep_seconds,
+                light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
+                hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
+                training_readiness_score, resting_hr
+            ) VALUES (
+                date('now', '-1 days'), datetime('now'), 82, 27000.0, 5400.0, 14400.0, 6300.0,
+                900.0, 'BALANCED', 55.0, 53.0, 'PRODUCTIVE', 78, 48
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO daily_wellness (
+                calendar_date, synced_at, sleep_score, sleep_duration_seconds, deep_sleep_seconds,
+                light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
+                hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
+                training_readiness_score, resting_hr
+            ) VALUES (
+                date('now', '-100 days'), datetime('now'), 70, 24000.0, 4000.0, 13000.0, 5000.0,
+                1200.0, 'LOW', 40.0, 38.0, 'RECOVERY', 60, 52
+            )
+            """
         )
         conn.commit()
     finally:
@@ -267,6 +295,44 @@ class TestQueries:
         finally:
             conn.close()
 
+    def test_daily_wellness_excludes_dates_outside_window(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            wellness = get_daily_wellness(conn, days=14)
+            # the -100 days row is outside a 14-day window
+            dates = [row["calendar_date"] for row in wellness]
+            assert len(dates) == 1
+            assert wellness[0]["sleep_score"] == 82
+            assert wellness[0]["resting_hr"] == 48
+        finally:
+            conn.close()
+
+    def test_daily_wellness_wide_window_includes_all_oldest_first(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            wellness = get_daily_wellness(conn, days=365)
+            assert len(wellness) == 2
+            # oldest first
+            assert wellness[0]["resting_hr"] == 52
+            assert wellness[1]["resting_hr"] == 48
+        finally:
+            conn.close()
+
+    def test_resting_hr_trend_excludes_dates_outside_window(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            trend = get_resting_hr_trend(conn, days=30)
+            assert len(trend) == 1
+            assert trend[0]["resting_hr"] == 48
+        finally:
+            conn.close()
+
     def test_get_activity_hr_zones(self, tmp_path):
         settings = make_settings(tmp_path)
         seed_db(settings.db_path)
@@ -378,6 +444,8 @@ class TestCreateServer:
             "activity_hr_zones",
             "activity_samples",
             "last_sync_status",
+            "daily_wellness",
+            "resting_hr_trend",
         }
 
     def test_tool_reads_from_configured_db(self, tmp_path):

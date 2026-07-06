@@ -662,6 +662,53 @@ record it.
   `db.connect()`, and confirms both the new column appears and pre-existing data survives
   untouched.
 
+### v0.12 — Recovery, readiness & training-plan signals 🔄
+
+The existing MCP tools describe **what happened** in a run, but nothing captured
+**recovery/readiness** — sleep, HRV, and Garmin's own training-readiness score are the earliest
+signals of overreaching, ahead of it showing up as declining pace or rising HR at the same
+effort in `pace_cadence_hr_trend`. Also adds persisted history for VO2 max and resting HR (both
+previously only a point-in-time snapshot) and a planned-vs-actual workout comparison. Split
+across three PRs for review size.
+
+- ✅ `daily_wellness` table + `GarminClient.fetch_daily_wellness(cdate)`: sleep
+  (`get_sleep_data`), HRV (`get_hrv_data`), training status (`get_training_status`), training
+  readiness (`get_morning_training_readiness`), resting HR (`get_rhr_day`) — five
+  independently-wrapped best-effort sub-fetches (not one shared try/except like
+  `training_baseline`), since HRV/sleep/readiness support varies independently by device/account;
+  one endpoint failing degrades only its own column(s) to `NULL`, not the whole day's row.
+- ✅ Sync step fetches + upserts one `daily_wellness` row per calendar date for a rolling window
+  (today back 3 days, `_WELLNESS_WINDOW_DAYS = 4`) on every `run_sync_once` call, ahead of the
+  per-activity loop (same placement as `training_baseline`) — re-fetching/overwriting the same
+  date on every sync catches Garmin finalizing sleep/HRV data a day late. `run_backfill_sync`
+  does not touch this table, matching `training_baseline`'s existing precedent.
+- ✅ Two new MCP tools: `daily_wellness(days=14)` and `resting_hr_trend(days=30)` (oldest-first
+  `(calendar_date, resting_hr)` pairs, mirroring `pace_cadence_hr_trend`'s shape).
+- ⬜ `vo2max_history` table + `GarminClient.fetch_vo2max(cdate)` (`get_max_metrics`), same
+  rolling-window daily-fetch pattern — additive to (not a replacement for) the existing
+  `training_baseline` table/tool. New `vo2max_trend(days=90)` MCP tool.
+- ⬜ `planned_workouts` table + `GarminClient.fetch_planned_workouts(start_date, end_date)`
+  (`get_training_plans` + `get_training_plan_by_id` per plan) — delete-then-bulk-insert scoped to
+  a rolling ±14-day window on every sync, since Garmin's training-plan response has no confirmed
+  stable per-workout id to key an UPSERT on. Degrades to an empty list, not a sync failure, for
+  the many accounts with no active plan. New `planned_vs_actual(days=14)` MCP tool (planned
+  workout LEFT JOINed against `activities` by calendar date).
+- ⬜ Field mappings for all six new/reused endpoints are **best-effort, not yet verified against
+  a live account** — same caveat as v0.1/v0.5/v0.11's still-open items. `get_rhr_day` and
+  `get_sleep_data` both touch `self.display_name` internally, so the account already hitting
+  v0.10's known display-name gap may see `resting_hr`/sleep fields come back `NULL` specifically
+  *because of that gap*, independent of whether the guessed JSON keys are right — check both
+  possibilities before assuming a wrong field-name guess. The training-plan shape
+  (`get_training_plans`/`get_training_plan_by_id`) is the least certain of the six — verify with
+  an account that has an actual active plan configured before trusting `planned_vs_actual` beyond
+  "does this degrade to an empty list gracefully." `get_adaptive_training_plan_by_id` is
+  deliberately not wired in yet — which plan type needs it vs. the phased endpoint is unconfirmed;
+  a follow-up once a live account clarifies this.
+- ✅ Brand-new tables only (`daily_wellness`, `vo2max_history`, `planned_workouts`) — confirmed
+  none of the three need `_add_column_if_missing`/`ALTER TABLE` migration code, unlike v0.11's
+  `temperature_celsius` (which added a column to an already-shipped table). `CREATE TABLE IF NOT
+  EXISTS` in `schema.sql` is sufficient for every existing install.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added

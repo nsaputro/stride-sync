@@ -14,6 +14,7 @@ from app.sync.garmin_client import (
     GarminAuthError,
     GarminClient,
     _normalize_activity,
+    _normalize_daily_wellness,
     _normalize_hr_zones,
     _normalize_lap,
     _normalize_samples,
@@ -144,6 +145,67 @@ class TestNormalizeTrainingBaseline:
 
         assert baseline.lactate_threshold_hr is None
         assert baseline.race_prediction_marathon_seconds is None
+
+
+class TestNormalizeDailyWellness:
+    def test_merges_all_five_sources(self):
+        sleep = {
+            "dailySleepDTO": {
+                "sleepTimeSeconds": 27000.0,
+                "deepSleepSeconds": 5400.0,
+                "lightSleepSeconds": 14400.0,
+                "remSleepSeconds": 6300.0,
+                "awakeSleepSeconds": 900.0,
+                "sleepScores": {"overall": {"value": 82}},
+            }
+        }
+        hrv = {
+            "hrvSummary": {
+                "status": "BALANCED",
+                "weeklyAvg": 55.0,
+                "lastNightAvg": 53.0,
+            }
+        }
+        training_status = {"latestTrainingStatus": "PRODUCTIVE"}
+        readiness = {"score": 78}
+        resting_hr = {"restingHeartRate": 48}
+
+        wellness = _normalize_daily_wellness(
+            "2026-07-06", sleep, hrv, training_status, readiness, resting_hr
+        )
+
+        assert wellness.calendar_date == "2026-07-06"
+        assert wellness.sleep_score == 82
+        assert wellness.sleep_duration_seconds == 27000.0
+        assert wellness.deep_sleep_seconds == 5400.0
+        assert wellness.light_sleep_seconds == 14400.0
+        assert wellness.rem_sleep_seconds == 6300.0
+        assert wellness.awake_sleep_seconds == 900.0
+        assert wellness.hrv_status == "BALANCED"
+        assert wellness.hrv_weekly_avg_ms == 55.0
+        assert wellness.hrv_last_night_avg_ms == 53.0
+        assert wellness.training_status_label == "PRODUCTIVE"
+        assert wellness.training_readiness_score == 78
+        assert wellness.resting_hr == 48
+
+    def test_unwraps_nested_training_status_dict(self):
+        training_status = {
+            "latestTrainingStatus": {"trainingStatusFeedbackPhrase": "OVERREACHING"}
+        }
+
+        wellness = _normalize_daily_wellness("2026-07-06", {}, {}, training_status, {}, {})
+
+        assert wellness.training_status_label == "OVERREACHING"
+
+    def test_missing_data_does_not_crash(self):
+        wellness = _normalize_daily_wellness("2026-07-06", {}, {}, {}, {}, {})
+
+        assert wellness.calendar_date == "2026-07-06"
+        assert wellness.sleep_score is None
+        assert wellness.hrv_status is None
+        assert wellness.training_status_label is None
+        assert wellness.training_readiness_score is None
+        assert wellness.resting_hr is None
 
 
 class TestNormalizeHrZones:
@@ -515,6 +577,68 @@ class TestGarminClientFetch:
         client._garmin.get_lactate_threshold.side_effect = GarminConnectConnectionError("boom")
 
         assert client.fetch_training_baseline() is None
+
+    def test_fetch_daily_wellness_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_sleep_data.return_value = {
+            "dailySleepDTO": {"sleepScores": {"overall": {"value": 82}}}
+        }
+        client._garmin.get_hrv_data.return_value = {"hrvSummary": {"status": "BALANCED"}}
+        client._garmin.get_training_status.return_value = {"latestTrainingStatus": "PRODUCTIVE"}
+        client._garmin.get_morning_training_readiness.return_value = {"score": 78}
+        client._garmin.get_rhr_day.return_value = {"restingHeartRate": 48}
+
+        wellness = client.fetch_daily_wellness("2026-07-06")
+
+        assert wellness.calendar_date == "2026-07-06"
+        assert wellness.sleep_score == 82
+        assert wellness.hrv_status == "BALANCED"
+        assert wellness.training_status_label == "PRODUCTIVE"
+        assert wellness.training_readiness_score == 78
+        assert wellness.resting_hr == 48
+        client._garmin.get_sleep_data.assert_called_once_with("2026-07-06")
+        client._garmin.get_rhr_day.assert_called_once_with("2026-07-06")
+
+    def test_fetch_daily_wellness_isolates_one_failing_endpoint(self):
+        # The key behavior this milestone deliberately differs from fetch_training_baseline for:
+        # one endpoint failing (HRV, here) must not discard data from the other four.
+        client = make_client()
+        client._garmin.get_sleep_data.return_value = {
+            "dailySleepDTO": {"sleepScores": {"overall": {"value": 82}}}
+        }
+        client._garmin.get_hrv_data.side_effect = GarminConnectConnectionError("no HRV sensor")
+        client._garmin.get_training_status.return_value = {"latestTrainingStatus": "PRODUCTIVE"}
+        client._garmin.get_morning_training_readiness.return_value = {"score": 78}
+        client._garmin.get_rhr_day.return_value = {"restingHeartRate": 48}
+
+        wellness = client.fetch_daily_wellness("2026-07-06")
+
+        assert wellness.hrv_status is None
+        assert wellness.hrv_weekly_avg_ms is None
+        assert wellness.hrv_last_night_avg_ms is None
+        assert wellness.sleep_score == 82
+        assert wellness.training_status_label == "PRODUCTIVE"
+        assert wellness.training_readiness_score == 78
+        assert wellness.resting_hr == 48
+
+    def test_fetch_daily_wellness_returns_all_none_fields_when_everything_fails(self):
+        client = make_client()
+        client._garmin.get_sleep_data.side_effect = GarminConnectConnectionError("boom")
+        client._garmin.get_hrv_data.side_effect = GarminConnectConnectionError("boom")
+        client._garmin.get_training_status.side_effect = GarminConnectConnectionError("boom")
+        client._garmin.get_morning_training_readiness.side_effect = GarminConnectConnectionError(
+            "boom"
+        )
+        client._garmin.get_rhr_day.side_effect = GarminConnectConnectionError("boom")
+
+        wellness = client.fetch_daily_wellness("2026-07-06")
+
+        assert wellness.calendar_date == "2026-07-06"
+        assert wellness.sleep_score is None
+        assert wellness.hrv_status is None
+        assert wellness.training_status_label is None
+        assert wellness.training_readiness_score is None
+        assert wellness.resting_hr is None
 
     def test_fetch_activity_hr_zones_returns_normalized_result(self):
         client = make_client()
