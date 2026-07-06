@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Daily wellness sync** (milestone v0.12): new `daily_wellness` table — sleep (score, duration,
+  deep/light/REM/awake seconds), HRV (status, weekly/last-night averages), Garmin's own
+  training-status label and training-readiness score, and resting HR. One row per calendar date,
+  refetched for a rolling 4-day window (today + previous 3 days) on every sync to catch Garmin
+  finalizing sleep/HRV data a day late. The five underlying endpoints are wrapped individually
+  rather than as one group, since HRV/sleep/readiness support varies independently across
+  devices — one endpoint failing no longer discards data that successfully came back from the
+  other four. New MCP tools: `daily_wellness(days=14)`, `resting_hr_trend(days=30)`.
+
 ## [0.2.2] - 2026-07-05
 
 ### Added

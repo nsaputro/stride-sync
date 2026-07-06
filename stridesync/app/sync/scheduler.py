@@ -12,7 +12,7 @@ import logging
 import signal
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import FrameType
 from typing import Callable, Optional, Sequence
 
@@ -20,6 +20,7 @@ from app import db
 from app.config import Settings
 from app.sync.garmin_client import (
     ActivitySample,
+    DailyWellness,
     GarminActivity,
     GarminAPIError,
     GarminAuthError,
@@ -161,6 +162,49 @@ def _upsert_training_baseline(
     )
 
 
+# Today + previous 3 days — Garmin sometimes finalizes sleep/HRV data a day late, so re-fetching
+# a small rolling window on every sync (not just today) catches that without tracking state.
+_WELLNESS_WINDOW_DAYS = 4
+
+
+def _upsert_daily_wellness(
+    conn: sqlite3.Connection, wellness: DailyWellness, synced_at: str
+) -> None:
+    """One row per calendar date — always called with a real `DailyWellness` (see
+    `GarminClient.fetch_daily_wellness`'s docstring: unlike `fetch_training_baseline`, it never
+    returns `None`, so there is no no-op case here to guard against)."""
+    conn.execute(
+        """
+        INSERT INTO daily_wellness (
+            calendar_date, synced_at, sleep_score, sleep_duration_seconds, deep_sleep_seconds,
+            light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
+            hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
+            training_readiness_score, resting_hr
+        ) VALUES (
+            :calendar_date, :synced_at, :sleep_score, :sleep_duration_seconds,
+            :deep_sleep_seconds, :light_sleep_seconds, :rem_sleep_seconds, :awake_sleep_seconds,
+            :hrv_status, :hrv_weekly_avg_ms, :hrv_last_night_avg_ms, :training_status_label,
+            :training_readiness_score, :resting_hr
+        )
+        ON CONFLICT (calendar_date) DO UPDATE SET
+            synced_at = excluded.synced_at,
+            sleep_score = excluded.sleep_score,
+            sleep_duration_seconds = excluded.sleep_duration_seconds,
+            deep_sleep_seconds = excluded.deep_sleep_seconds,
+            light_sleep_seconds = excluded.light_sleep_seconds,
+            rem_sleep_seconds = excluded.rem_sleep_seconds,
+            awake_sleep_seconds = excluded.awake_sleep_seconds,
+            hrv_status = excluded.hrv_status,
+            hrv_weekly_avg_ms = excluded.hrv_weekly_avg_ms,
+            hrv_last_night_avg_ms = excluded.hrv_last_night_avg_ms,
+            training_status_label = excluded.training_status_label,
+            training_readiness_score = excluded.training_readiness_score,
+            resting_hr = excluded.resting_hr
+        """,
+        {**wellness.__dict__, "synced_at": synced_at},
+    )
+
+
 def _sync_activities(
     conn: sqlite3.Connection,
     client: GarminClient,
@@ -211,6 +255,10 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
 
         synced_at = datetime.now(timezone.utc).isoformat()
         _upsert_training_baseline(conn, client.fetch_training_baseline(), synced_at)
+        today = datetime.now(timezone.utc).date()
+        for offset in range(_WELLNESS_WINDOW_DAYS):
+            cdate = (today - timedelta(days=offset)).isoformat()
+            _upsert_daily_wellness(conn, client.fetch_daily_wellness(cdate), synced_at)
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
         conn.commit()
@@ -250,8 +298,8 @@ def run_backfill_sync(
     """One-off backfill: fetch every activity from `start_date` through today and write it the
     same way a regular sync does — a separate entry point from `run_sync_once` (see
     PROJECT_PLAN.md milestone v0.8) since it's date-based rather than count-based, and can cover
-    far more activities in one call. Does not refresh `training_baseline` — that stays the
-    regular scheduled sync's job.
+    far more activities in one call. Does not refresh `training_baseline` or `daily_wellness`
+    either — those stay the regular scheduled sync's job.
 
     Args:
         progress_callback: If given, called as `progress_callback(completed, total)` — once

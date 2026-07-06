@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import curl_cffi.requests.exceptions as curl_exceptions
 import requests
@@ -197,6 +197,29 @@ class ActivitySample:
     temperature_celsius: Optional[float]
 
 
+@dataclass(frozen=True)
+class DailyWellness:
+    """One calendar date's recovery/readiness signals — see PROJECT_PLAN.md milestone v0.12 and
+    the `daily_wellness` table. Always has `calendar_date` populated; every other field is
+    `None` if its underlying Garmin endpoint failed or isn't supported by this account/device
+    (see `GarminClient.fetch_daily_wellness`).
+    """
+
+    calendar_date: str
+    sleep_score: Optional[int]
+    sleep_duration_seconds: Optional[float]
+    deep_sleep_seconds: Optional[float]
+    light_sleep_seconds: Optional[float]
+    rem_sleep_seconds: Optional[float]
+    awake_sleep_seconds: Optional[float]
+    hrv_status: Optional[str]
+    hrv_weekly_avg_ms: Optional[float]
+    hrv_last_night_avg_ms: Optional[float]
+    training_status_label: Optional[str]
+    training_readiness_score: Optional[int]
+    resting_hr: Optional[int]
+
+
 def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
     """Convert average speed (m/s) to pace (seconds per km). None if speed is missing/zero."""
     if not speed_mps:
@@ -296,6 +319,57 @@ def _normalize_training_baseline(
             predictions, "raceTimeHalfMarathon", "raceTimeHalf"
         ),
         race_prediction_marathon_seconds=_get(predictions, "raceTimeMarathon"),
+    )
+
+
+def _normalize_daily_wellness(
+    cdate: str,
+    sleep: Dict[str, Any],
+    hrv: Dict[str, Any],
+    training_status: Dict[str, Any],
+    readiness: Dict[str, Any],
+    resting_hr: Dict[str, Any],
+) -> DailyWellness:
+    """Merge the five raw responses `GarminClient.fetch_daily_wellness` collects into one
+    `DailyWellness` (see PROJECT_PLAN.md milestone v0.12).
+
+    Field names below are inferred from the wider Garmin Connect tooling ecosystem for each of
+    five independently-fetched endpoints — not yet confirmed against a live account. `_get()`'s
+    multi-candidate lookup means a wrong guess degrades a field to `None`, not a crash. Every
+    argument defaults to `{}` upstream when that particular sub-fetch failed or isn't supported
+    by this account/device — see `GarminClient.fetch_daily_wellness` for why each of the five is
+    wrapped independently rather than sharing one try/except.
+    """
+    daily_sleep_dto = sleep.get("dailySleepDTO") or {}
+    sleep_scores = daily_sleep_dto.get("sleepScores") or {}
+    overall_sleep_score = (sleep_scores.get("overall") or {}).get("value")
+
+    # get_hrv_data's own top-level shape is unconfirmed — some ecosystem tooling nests HRV
+    # summary fields under "hrvSummary", others return them at the top level directly.
+    hrv_summary = hrv.get("hrvSummary") or hrv
+
+    training_status_label = _get(
+        training_status, "latestTrainingStatus", "trainingStatusFeedbackPhrase", "trainingStatus"
+    )
+    if isinstance(training_status_label, dict):
+        training_status_label = _get(training_status_label, "trainingStatusFeedbackPhrase")
+    if not isinstance(training_status_label, str):
+        training_status_label = None
+
+    return DailyWellness(
+        calendar_date=cdate,
+        sleep_score=overall_sleep_score,
+        sleep_duration_seconds=_get(daily_sleep_dto, "sleepTimeSeconds"),
+        deep_sleep_seconds=_get(daily_sleep_dto, "deepSleepSeconds"),
+        light_sleep_seconds=_get(daily_sleep_dto, "lightSleepSeconds"),
+        rem_sleep_seconds=_get(daily_sleep_dto, "remSleepSeconds"),
+        awake_sleep_seconds=_get(daily_sleep_dto, "awakeSleepSeconds"),
+        hrv_status=_get(hrv_summary, "status", "hrvStatus"),
+        hrv_weekly_avg_ms=_get(hrv_summary, "weeklyAvg", "lastNight7DayAvg"),
+        hrv_last_night_avg_ms=_get(hrv_summary, "lastNightAvg"),
+        training_status_label=training_status_label,
+        training_readiness_score=_get(readiness, "score"),
+        resting_hr=_get(resting_hr, "restingHeartRate", "restingHR"),
     )
 
 
@@ -609,6 +683,48 @@ class GarminClient:
             logger.warning("Could not fetch training baseline (non-fatal): %s", exc)
             return None
         return _normalize_training_baseline(threshold, predictions)
+
+    def fetch_daily_wellness(self, cdate: str) -> DailyWellness:
+        """Fetch sleep, HRV, training status, training readiness, and resting HR for one
+        calendar date (see PROJECT_PLAN.md milestone v0.12).
+
+        Unlike `fetch_training_baseline`, each of the five underlying calls is wrapped
+        *individually* rather than sharing one try/except: HRV, sleep-score, and
+        training-readiness support vary independently across Garmin device models, so one
+        failing endpoint (e.g. a non-HRV-capable watch) must not discard data that successfully
+        came back from the other four. Always returns a `DailyWellness` (never `None`) since
+        `calendar_date` is already known by the caller — any individual field that failed to
+        fetch is simply `None`.
+        """
+        sleep = self._safe_wellness_call(
+            "sleep data", cdate, lambda: self._garmin.get_sleep_data(cdate)
+        )
+        hrv = self._safe_wellness_call(
+            "HRV data", cdate, lambda: self._garmin.get_hrv_data(cdate)
+        )
+        training_status = self._safe_wellness_call(
+            "training status", cdate, lambda: self._garmin.get_training_status(cdate)
+        )
+        readiness = self._safe_wellness_call(
+            "training readiness", cdate, lambda: self._garmin.get_morning_training_readiness(cdate)
+        )
+        resting_hr = self._safe_wellness_call(
+            "resting HR", cdate, lambda: self._garmin.get_rhr_day(cdate)
+        )
+        return _normalize_daily_wellness(
+            cdate, sleep or {}, hrv or {}, training_status or {}, readiness or {}, resting_hr or {}
+        )
+
+    def _safe_wellness_call(self, label: str, cdate: str, fn: Callable[[], Any]) -> Any:
+        """Run one of `fetch_daily_wellness`'s five sub-fetches, logging + swallowing any
+        failure so the other four aren't affected. Shared instead of duplicating the same
+        try/except five times.
+        """
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - deliberately non-fatal, see fetch_daily_wellness
+            logger.warning("Could not fetch %s for %s (non-fatal): %s", label, cdate, exc)
+            return None
 
     def fetch_activity_hr_zones(self, activity_id: int) -> List[HrZoneTime]:
         """Fetch seconds-in-each-HR-zone for one activity (see PROJECT_PLAN.md milestone v0.5).

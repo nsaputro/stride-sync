@@ -1,12 +1,14 @@
 import signal
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app.config import Settings
 from app.sync.garmin_client import (
     ActivitySample,
+    DailyWellness,
     GarminActivity,
     GarminAPIError,
     GarminAuthError,
@@ -89,6 +91,24 @@ def make_training_baseline() -> TrainingBaseline:
     )
 
 
+def make_daily_wellness(calendar_date="2026-07-06") -> DailyWellness:
+    return DailyWellness(
+        calendar_date=calendar_date,
+        sleep_score=82,
+        sleep_duration_seconds=27000.0,
+        deep_sleep_seconds=5400.0,
+        light_sleep_seconds=14400.0,
+        rem_sleep_seconds=6300.0,
+        awake_sleep_seconds=900.0,
+        hrv_status="BALANCED",
+        hrv_weekly_avg_ms=55.0,
+        hrv_last_night_avg_ms=53.0,
+        training_status_label="PRODUCTIVE",
+        training_readiness_score=78,
+        resting_hr=48,
+    )
+
+
 def make_hr_zone(activity_id=1, zone_number=2) -> HrZoneTime:
     return HrZoneTime(
         activity_id=activity_id,
@@ -126,6 +146,7 @@ class FakeGarminClient:
         samples=None,
         since_activities=None,
         since_error=None,
+        wellness=None,
     ):
         self._activities = activities or []
         self._laps = laps or {}
@@ -136,6 +157,7 @@ class FakeGarminClient:
         self._samples = samples or {}
         self._since_activities = since_activities if since_activities is not None else activities or []
         self._since_error = since_error
+        self._wellness = wellness or {}
         self.login_called = False
         self.since_start_date = None
 
@@ -166,6 +188,28 @@ class FakeGarminClient:
 
     def fetch_activity_samples(self, activity_id):
         return self._samples.get(activity_id, [])
+
+    def fetch_daily_wellness(self, cdate):
+        # Real GarminClient.fetch_daily_wellness never returns None (calendar_date is always
+        # known) -- mirror that contract for unconfigured dates instead of returning None.
+        return self._wellness.get(
+            cdate,
+            DailyWellness(
+                calendar_date=cdate,
+                sleep_score=None,
+                sleep_duration_seconds=None,
+                deep_sleep_seconds=None,
+                light_sleep_seconds=None,
+                rem_sleep_seconds=None,
+                awake_sleep_seconds=None,
+                hrv_status=None,
+                hrv_weekly_avg_ms=None,
+                hrv_last_night_avg_ms=None,
+                training_status_label=None,
+                training_readiness_score=None,
+                resting_hr=None,
+            ),
+        )
 
 
 def test_run_sync_once_writes_activities_and_laps(tmp_path):
@@ -233,6 +277,66 @@ def test_run_sync_once_skips_training_baseline_when_unavailable(tmp_path):
     try:
         row = conn.execute("SELECT * FROM training_baseline WHERE id = 1").fetchone()
         assert row is None
+    finally:
+        conn.close()
+
+
+def test_run_sync_once_writes_daily_wellness(tmp_path):
+    settings = make_settings(tmp_path)
+    today = datetime.now(timezone.utc).date()
+    today_str = today.isoformat()
+    yesterday_str = (today - timedelta(days=1)).isoformat()
+    client = FakeGarminClient(
+        activities=[make_activity()],
+        wellness={
+            today_str: make_daily_wellness(today_str),
+            yesterday_str: make_daily_wellness(yesterday_str),
+        },
+    )
+
+    run_sync_once(settings, client)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        today_row = conn.execute(
+            "SELECT * FROM daily_wellness WHERE calendar_date = ?", (today_str,)
+        ).fetchone()
+        yesterday_row = conn.execute(
+            "SELECT * FROM daily_wellness WHERE calendar_date = ?", (yesterday_str,)
+        ).fetchone()
+        assert today_row["sleep_score"] == 82
+        assert today_row["resting_hr"] == 48
+        assert yesterday_row["hrv_status"] == "BALANCED"
+    finally:
+        conn.close()
+
+
+def test_run_sync_once_upserts_daily_wellness_rather_than_duplicating(tmp_path):
+    settings = make_settings(tmp_path)
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    first_run_wellness = make_daily_wellness(today_str)
+    client1 = FakeGarminClient(
+        activities=[make_activity()], wellness={today_str: first_run_wellness}
+    )
+    run_sync_once(settings, client1)
+
+    updated_wellness = DailyWellness(**{**first_run_wellness.__dict__, "sleep_score": 55})
+    client2 = FakeGarminClient(
+        activities=[make_activity()], wellness={today_str: updated_wellness}
+    )
+    run_sync_once(settings, client2)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM daily_wellness WHERE calendar_date = ?", (today_str,)
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["sleep_score"] == 55
     finally:
         conn.close()
 
@@ -382,6 +486,22 @@ def test_run_backfill_sync_does_not_touch_training_baseline(tmp_path):
     conn = db.connect(settings.db_path)
     try:
         assert conn.execute("SELECT * FROM training_baseline").fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_run_backfill_sync_does_not_touch_daily_wellness(tmp_path):
+    # Same rationale as training_baseline above -- daily_wellness stays run_sync_once's job.
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(since_activities=[make_activity()])
+
+    run_backfill_sync(settings, client, "2020-01-01")
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        assert conn.execute("SELECT * FROM daily_wellness").fetchone() is None
     finally:
         conn.close()
 

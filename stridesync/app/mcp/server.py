@@ -179,6 +179,47 @@ def get_training_baseline(conn: sqlite3.Connection) -> Dict[str, Any]:
     return dict(row)
 
 
+def get_daily_wellness(conn: sqlite3.Connection, days: int = 14) -> List[Dict[str, Any]]:
+    """Sleep/HRV/training-status/readiness/resting-HR for the last N calendar dates, oldest
+    first — see PROJECT_PLAN.md milestone v0.12. These are the earliest signals of
+    overreaching, ahead of it ever showing up as declining pace or rising HR at the same effort
+    in `pace_cadence_hr_trend`. Any field can be `None` for a given date — see
+    `GarminClient.fetch_daily_wellness`'s docstring for why (not every endpoint/device/account
+    reports every field).
+    """
+    days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
+    rows = conn.execute(
+        """
+        SELECT calendar_date, sleep_score, sleep_duration_seconds, deep_sleep_seconds,
+               light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
+               hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
+               training_readiness_score, resting_hr
+        FROM daily_wellness
+        WHERE calendar_date >= date('now', '-' || ? || ' days')
+        ORDER BY calendar_date ASC
+        """,
+        (days,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_resting_hr_trend(conn: sqlite3.Connection, days: int = 30) -> List[Dict[str, Any]]:
+    """Resting HR for the last N days, oldest first, as (calendar_date, resting_hr) pairs — a
+    rising resting HR over days/weeks is a classic early fatigue/illness signal.
+    """
+    days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
+    rows = conn.execute(
+        """
+        SELECT calendar_date, resting_hr
+        FROM daily_wellness
+        WHERE calendar_date >= date('now', '-' || ? || ' days')
+        ORDER BY calendar_date ASC
+        """,
+        (days,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_activity_hr_zones(conn: sqlite3.Connection, activity_id: int) -> List[Dict[str, Any]]:
     """Seconds spent in each heart-rate zone for one activity — the actual effort distribution
     of a run (e.g. 80% Zone 2, 20% Zone 4), not just its single average HR number."""
@@ -313,6 +354,37 @@ def create_server(settings: Settings) -> FastMCP:
         conn = _connect_readonly(settings.db_path)
         try:
             return get_training_baseline(conn)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def daily_wellness(days: int = 14) -> List[Dict[str, Any]]:
+        """Get sleep, HRV, Garmin's own training-status label and training-readiness score, and
+        resting HR for each of the last N calendar dates, oldest first. These are the earliest
+        signals of overreaching — check this before assuming declining pace or rising HR is
+        purely a fitness issue.
+
+        Args:
+            days: Number of days to look back (1-365, default 14).
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_daily_wellness(conn, days)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def resting_hr_trend(days: int = 30) -> List[Dict[str, Any]]:
+        """Get resting heart rate for each of the last N days, oldest first. A rising resting HR
+        over days/weeks is a classic early fatigue/illness signal, often visible before it shows
+        up in pace or effort during activities.
+
+        Args:
+            days: Number of days to look back (1-365, default 30).
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_resting_hr_trend(conn, days)
         finally:
             conn.close()
 
