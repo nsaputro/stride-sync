@@ -220,6 +220,24 @@ def get_resting_hr_trend(conn: sqlite3.Connection, days: int = 30) -> List[Dict[
     return [dict(row) for row in rows]
 
 
+def get_vo2max_trend(conn: sqlite3.Connection, days: int = 90) -> List[Dict[str, Any]]:
+    """VO2 max (running/cycling) and fitness age over the last N days, oldest first —
+    additive to `training_baseline`, not a replacement. Default window is longer than other
+    trend tools (90 vs. 30 days) since VO2 max moves slowly.
+    """
+    days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
+    rows = conn.execute(
+        """
+        SELECT calendar_date, vo2_max_running, vo2_max_cycling, fitness_age
+        FROM vo2max_history
+        WHERE calendar_date >= date('now', '-' || ? || ' days')
+        ORDER BY calendar_date ASC
+        """,
+        (days,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_activity_hr_zones(conn: sqlite3.Connection, activity_id: int) -> List[Dict[str, Any]]:
     """Seconds spent in each heart-rate zone for one activity — the actual effort distribution
     of a run (e.g. 80% Zone 2, 20% Zone 4), not just its single average HR number."""
@@ -385,6 +403,21 @@ def create_server(settings: Settings) -> FastMCP:
         conn = _connect_readonly(settings.db_path)
         try:
             return get_resting_hr_trend(conn, days)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def vo2max_trend(days: int = 90) -> List[Dict[str, Any]]:
+        """Get VO2 max (running/cycling) and fitness age for each of the last N days, oldest
+        first — additive to `training_baseline`'s current-value snapshot, showing whether
+        fitness is actually improving through a training block rather than just today's number.
+
+        Args:
+            days: Number of days to look back (1-365, default 90 — VO2 max moves slowly).
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_vo2max_trend(conn, days)
         finally:
             conn.close()
 

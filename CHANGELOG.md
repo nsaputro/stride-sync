@@ -17,6 +17,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   rather than as one group, since HRV/sleep/readiness support varies independently across
   devices — one endpoint failing no longer discards data that successfully came back from the
   other four. New MCP tools: `daily_wellness(days=14)`, `resting_hr_trend(days=30)`.
+- **VO2 max trend** (milestone v0.12, `vo2max_history` table, `get_max_metrics`): running/cycling
+  VO2 max and fitness age, same rolling-window daily fetch as the wellness metrics — additive to
+  the existing `training_baseline` table/tool, not a replacement. New MCP tool:
+  `vo2max_trend(days=90)`.
 
 ## [0.2.2] - 2026-07-05
 

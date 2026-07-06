@@ -12,7 +12,9 @@ def test_connect_creates_schema(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert {"activities", "activity_metrics", "sync_log", "daily_wellness"} <= tables
+        assert {
+            "activities", "activity_metrics", "sync_log", "daily_wellness", "vo2max_history"
+        } <= tables
     finally:
         conn.close()
 

@@ -19,6 +19,7 @@ from app.mcp.server import (
     get_resting_hr_trend,
     get_training_baseline,
     get_training_load_summary,
+    get_vo2max_trend,
     list_recent_activities,
 )
 from app.config import Settings
@@ -135,6 +136,20 @@ def seed_db(db_path: str) -> None:
                 date('now', '-100 days'), datetime('now'), 70, 24000.0, 4000.0, 13000.0, 5000.0,
                 1200.0, 'LOW', 40.0, 38.0, 'RECOVERY', 60, 52
             )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO vo2max_history (
+                calendar_date, synced_at, vo2_max_running, vo2_max_cycling, fitness_age
+            ) VALUES (date('now', '-1 days'), datetime('now'), 52.5, 48.0, 28)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO vo2max_history (
+                calendar_date, synced_at, vo2_max_running, vo2_max_cycling, fitness_age
+            ) VALUES (date('now', '-100 days'), datetime('now'), 48.0, 44.0, 32)
             """
         )
         conn.commit()
@@ -333,6 +348,31 @@ class TestQueries:
         finally:
             conn.close()
 
+    def test_vo2max_trend_excludes_dates_outside_window(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            trend = get_vo2max_trend(conn, days=30)
+            assert len(trend) == 1
+            assert trend[0]["vo2_max_running"] == 52.5
+            assert trend[0]["fitness_age"] == 28
+        finally:
+            conn.close()
+
+    def test_vo2max_trend_wide_window_includes_all_oldest_first(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            trend = get_vo2max_trend(conn, days=365)
+            assert len(trend) == 2
+            # oldest first
+            assert trend[0]["fitness_age"] == 32
+            assert trend[1]["fitness_age"] == 28
+        finally:
+            conn.close()
+
     def test_get_activity_hr_zones(self, tmp_path):
         settings = make_settings(tmp_path)
         seed_db(settings.db_path)
@@ -446,6 +486,7 @@ class TestCreateServer:
             "last_sync_status",
             "daily_wellness",
             "resting_hr_trend",
+            "vo2max_trend",
         }
 
     def test_tool_reads_from_configured_db(self, tmp_path):

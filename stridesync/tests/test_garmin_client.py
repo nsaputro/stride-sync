@@ -19,6 +19,7 @@ from app.sync.garmin_client import (
     _normalize_lap,
     _normalize_samples,
     _normalize_training_baseline,
+    _normalize_vo2max,
     _pace_sec_per_km,
     describe_transport_error,
 )
@@ -206,6 +207,30 @@ class TestNormalizeDailyWellness:
         assert wellness.training_status_label is None
         assert wellness.training_readiness_score is None
         assert wellness.resting_hr is None
+
+
+class TestNormalizeVo2Max:
+    def test_merges_running_and_cycling(self):
+        raw = {
+            "generic": {"vo2MaxPreciseValue": 52.5},
+            "cycling": {"vo2MaxPreciseValue": 48.0},
+            "fitnessAge": 28,
+        }
+
+        reading = _normalize_vo2max("2026-07-06", raw)
+
+        assert reading.calendar_date == "2026-07-06"
+        assert reading.vo2_max_running == 52.5
+        assert reading.vo2_max_cycling == 48.0
+        assert reading.fitness_age == 28
+
+    def test_missing_data_does_not_crash(self):
+        reading = _normalize_vo2max("2026-07-06", {})
+
+        assert reading.calendar_date == "2026-07-06"
+        assert reading.vo2_max_running is None
+        assert reading.vo2_max_cycling is None
+        assert reading.fitness_age is None
 
 
 class TestNormalizeHrZones:
@@ -639,6 +664,27 @@ class TestGarminClientFetch:
         assert wellness.training_status_label is None
         assert wellness.training_readiness_score is None
         assert wellness.resting_hr is None
+
+    def test_fetch_vo2max_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_max_metrics.return_value = {
+            "generic": {"vo2MaxPreciseValue": 52.5},
+            "fitnessAge": 28,
+        }
+
+        reading = client.fetch_vo2max("2026-07-06")
+
+        assert reading.vo2_max_running == 52.5
+        assert reading.fitness_age == 28
+        client._garmin.get_max_metrics.assert_called_once_with("2026-07-06")
+
+    def test_fetch_vo2max_returns_none_on_failure(self):
+        # Not every device estimates VO2 max -- see GarminClient.fetch_vo2max's docstring: this
+        # must never fail the sync, matching fetch_training_baseline's contract.
+        client = make_client()
+        client._garmin.get_max_metrics.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_vo2max("2026-07-06") is None
 
     def test_fetch_activity_hr_zones_returns_normalized_result(self):
         client = make_client()

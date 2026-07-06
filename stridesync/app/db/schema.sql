@@ -132,3 +132,15 @@ CREATE TABLE IF NOT EXISTS daily_wellness (
     training_readiness_score INTEGER,
     resting_hr               INTEGER
 );
+
+-- vo2max_history: one row per calendar date, Garmin's own VO2 max estimate (running/cycling) and
+-- fitness age — see PROJECT_PLAN.md milestone v0.12. Additive to `training_baseline` (lactate
+-- threshold/race predictions), not a replacement: fetched daily (same rolling-window pattern as
+-- daily_wellness) rather than "current state only," so a trend over time is possible.
+CREATE TABLE IF NOT EXISTS vo2max_history (
+    calendar_date   TEXT PRIMARY KEY,
+    synced_at       TEXT NOT NULL,
+    vo2_max_running REAL,
+    vo2_max_cycling REAL,
+    fitness_age     INTEGER
+);
