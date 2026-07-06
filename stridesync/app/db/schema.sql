@@ -144,3 +144,24 @@ CREATE TABLE IF NOT EXISTS vo2max_history (
     vo2_max_cycling REAL,
     fitness_age     INTEGER
 );
+
+-- planned_workouts: scheduled workouts from a Garmin Connect training plan, if the account has
+-- one configured — see PROJECT_PLAN.md milestone v0.12. Zero-to-many rows per sync window (not
+-- one row per date), fully replaced for the fetched date window on every sync rather than
+-- upserted per-row, since Garmin's training-plan response has no confirmed stable per-workout id
+-- to key an UPSERT on. Most accounts have no active plan at all, which is not a sync failure —
+-- this table simply stays/becomes empty.
+CREATE TABLE IF NOT EXISTS planned_workouts (
+    id                             INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id                        TEXT NOT NULL,
+    workout_date                   TEXT NOT NULL,
+    workout_name                   TEXT,
+    workout_type                   TEXT,
+    planned_distance_meters        REAL,
+    planned_duration_seconds       REAL,
+    planned_target_pace_sec_per_km REAL,
+    planned_target_hr_low          INTEGER,
+    planned_target_hr_high         INTEGER,
+    synced_at                      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_planned_workouts_workout_date ON planned_workouts (workout_date);

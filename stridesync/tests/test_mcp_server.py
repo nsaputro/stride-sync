@@ -16,6 +16,7 @@ from app.mcp.server import (
     get_daily_wellness,
     get_last_sync_status,
     get_pace_cadence_hr_trend,
+    get_planned_vs_actual,
     get_resting_hr_trend,
     get_training_baseline,
     get_training_load_summary,
@@ -150,6 +151,42 @@ def seed_db(db_path: str) -> None:
             INSERT INTO vo2max_history (
                 calendar_date, synced_at, vo2_max_running, vo2_max_cycling, fitness_age
             ) VALUES (date('now', '-100 days'), datetime('now'), 48.0, 44.0, 32)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO planned_workouts (
+                plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+                planned_duration_seconds, planned_target_pace_sec_per_km,
+                planned_target_hr_low, planned_target_hr_high, synced_at
+            ) VALUES (
+                'plan-1', date('now', '-1 days'), 'Tempo Run', 'tempo', 8000.0, 2400.0, 300.0,
+                150, 165, datetime('now')
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO planned_workouts (
+                plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+                planned_duration_seconds, planned_target_pace_sec_per_km,
+                planned_target_hr_low, planned_target_hr_high, synced_at
+            ) VALUES (
+                'plan-1', date('now', '-2 days'), 'Easy Run', 'easy', 5000.0, 1800.0, 360.0,
+                130, 145, datetime('now')
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO planned_workouts (
+                plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+                planned_duration_seconds, planned_target_pace_sec_per_km,
+                planned_target_hr_low, planned_target_hr_high, synced_at
+            ) VALUES (
+                'plan-1', date('now', '-100 days'), 'Old Plan Run', 'tempo', 8000.0, 2400.0,
+                300.0, 150, 165, datetime('now')
+            )
             """
         )
         conn.commit()
@@ -373,6 +410,52 @@ class TestQueries:
         finally:
             conn.close()
 
+    def test_planned_vs_actual_joins_matching_activity(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            rows = get_planned_vs_actual(conn, days=14)
+            # -100 days row is outside the window; -1 and -2 day rows remain, oldest first
+            assert len(rows) == 2
+            matched = next(r for r in rows if r["workout_name"] == "Tempo Run")
+            assert matched["activity_id"] == 1
+            assert matched["actual_distance_meters"] == 5000
+        finally:
+            conn.close()
+
+    def test_planned_vs_actual_null_actuals_when_no_matching_activity(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            rows = get_planned_vs_actual(conn, days=14)
+            unmatched = next(r for r in rows if r["workout_name"] == "Easy Run")
+            assert unmatched["activity_id"] is None
+            assert unmatched["actual_distance_meters"] is None
+        finally:
+            conn.close()
+
+    def test_planned_vs_actual_excludes_workouts_outside_window(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            rows = get_planned_vs_actual(conn, days=14)
+            names = {r["workout_name"] for r in rows}
+            assert "Old Plan Run" not in names
+        finally:
+            conn.close()
+
+    def test_planned_vs_actual_empty_table_returns_empty_list(self, tmp_path):
+        settings = make_settings(tmp_path)
+        db.connect(settings.db_path).close()  # schema only, no planned_workouts rows
+        conn = db.connect(settings.db_path)
+        try:
+            assert get_planned_vs_actual(conn) == []
+        finally:
+            conn.close()
+
     def test_get_activity_hr_zones(self, tmp_path):
         settings = make_settings(tmp_path)
         seed_db(settings.db_path)
@@ -487,6 +570,7 @@ class TestCreateServer:
             "daily_wellness",
             "resting_hr_trend",
             "vo2max_trend",
+            "planned_vs_actual",
         }
 
     def test_tool_reads_from_configured_db(self, tmp_path):

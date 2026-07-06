@@ -687,7 +687,7 @@ across three PRs for review size.
 - ✅ `vo2max_history` table + `GarminClient.fetch_vo2max(cdate)` (`get_max_metrics`), same
   rolling-window daily-fetch pattern — additive to (not a replacement for) the existing
   `training_baseline` table/tool. New `vo2max_trend(days=90)` MCP tool.
-- ⬜ `planned_workouts` table + `GarminClient.fetch_planned_workouts(start_date, end_date)`
+- ✅ `planned_workouts` table + `GarminClient.fetch_planned_workouts(start_date, end_date)`
   (`get_training_plans` + `get_training_plan_by_id` per plan) — delete-then-bulk-insert scoped to
   a rolling ±14-day window on every sync, since Garmin's training-plan response has no confirmed
   stable per-workout id to key an UPSERT on. Degrades to an empty list, not a sync failure, for

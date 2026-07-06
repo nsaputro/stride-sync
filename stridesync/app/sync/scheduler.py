@@ -27,6 +27,7 @@ from app.sync.garmin_client import (
     GarminClient,
     GarminLap,
     HrZoneTime,
+    PlannedWorkout,
     TrainingBaseline,
     Vo2MaxReading,
 )
@@ -228,6 +229,46 @@ def _upsert_vo2max(
     )
 
 
+# Rolling ±14-day window for planned_workouts — lookback so a just-missed workout is still
+# visible for comparison, lookahead so an upcoming plan is visible before it's due. Matches
+# planned_vs_actual's default `days=14`.
+_PLANNED_WORKOUT_LOOKBACK_DAYS = 14
+_PLANNED_WORKOUT_LOOKAHEAD_DAYS = 14
+
+
+def _replace_planned_workouts(
+    conn: sqlite3.Connection,
+    start_date: str,
+    end_date: str,
+    workouts: Sequence[PlannedWorkout],
+    synced_at: str,
+) -> None:
+    """Delete-then-bulk-insert, scoped to `[start_date, end_date]` — not an UPSERT, since
+    Garmin's training-plan response has no confirmed stable per-workout id to key one on (see
+    `PlannedWorkout`'s docstring). Scoping the DELETE to the window (rather than the whole table)
+    means a workout outside this sync's fetch range that came from a wider historical backfill
+    isn't wiped out by a regular sync's narrower window.
+    """
+    conn.execute(
+        "DELETE FROM planned_workouts WHERE workout_date >= ? AND workout_date <= ?",
+        (start_date, end_date),
+    )
+    conn.executemany(
+        """
+        INSERT INTO planned_workouts (
+            plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, planned_target_pace_sec_per_km, planned_target_hr_low,
+            planned_target_hr_high, synced_at
+        ) VALUES (
+            :plan_id, :workout_date, :workout_name, :workout_type, :planned_distance_meters,
+            :planned_duration_seconds, :planned_target_pace_sec_per_km, :planned_target_hr_low,
+            :planned_target_hr_high, :synced_at
+        )
+        """,
+        [{**workout.__dict__, "synced_at": synced_at} for workout in workouts],
+    )
+
+
 def _sync_activities(
     conn: sqlite3.Connection,
     client: GarminClient,
@@ -283,6 +324,15 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
             cdate = (today - timedelta(days=offset)).isoformat()
             _upsert_daily_wellness(conn, client.fetch_daily_wellness(cdate), synced_at)
             _upsert_vo2max(conn, client.fetch_vo2max(cdate), synced_at)
+        plan_start = (today - timedelta(days=_PLANNED_WORKOUT_LOOKBACK_DAYS)).isoformat()
+        plan_end = (today + timedelta(days=_PLANNED_WORKOUT_LOOKAHEAD_DAYS)).isoformat()
+        _replace_planned_workouts(
+            conn,
+            plan_start,
+            plan_end,
+            client.fetch_planned_workouts(plan_start, plan_end),
+            synced_at,
+        )
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
         conn.commit()
@@ -322,8 +372,8 @@ def run_backfill_sync(
     """One-off backfill: fetch every activity from `start_date` through today and write it the
     same way a regular sync does — a separate entry point from `run_sync_once` (see
     PROJECT_PLAN.md milestone v0.8) since it's date-based rather than count-based, and can cover
-    far more activities in one call. Does not refresh `training_baseline`, `daily_wellness`, or
-    `vo2max_history` either — those stay the regular scheduled sync's job.
+    far more activities in one call. Does not refresh `training_baseline`, `daily_wellness`,
+    `vo2max_history`, or `planned_workouts` either — those stay the regular scheduled sync's job.
 
     Args:
         progress_callback: If given, called as `progress_callback(completed, total)` — once

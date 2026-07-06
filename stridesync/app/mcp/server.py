@@ -238,6 +238,36 @@ def get_vo2max_trend(conn: sqlite3.Connection, days: int = 90) -> List[Dict[str,
     return [dict(row) for row in rows]
 
 
+def get_planned_vs_actual(conn: sqlite3.Connection, days: int = 14) -> List[Dict[str, Any]]:
+    """Planned workouts from an active Garmin Connect training plan, LEFT JOINed against
+    completed activities by calendar date — see PROJECT_PLAN.md milestone v0.12.
+
+    Only returns dates with a planned workout; an account with no active plan gets `[]`, not an
+    error. A day with multiple completed activities yields one row per match (rare, not
+    deduplicated). `actual_*` fields are `None` when nothing was logged for that planned date.
+    """
+    days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
+    rows = conn.execute(
+        """
+        SELECT
+            pw.workout_date, pw.workout_name, pw.workout_type, pw.planned_distance_meters,
+            pw.planned_duration_seconds, pw.planned_target_pace_sec_per_km,
+            pw.planned_target_hr_low, pw.planned_target_hr_high,
+            a.activity_id, a.activity_name, a.activity_type,
+            a.distance_meters AS actual_distance_meters,
+            a.duration_seconds AS actual_duration_seconds,
+            a.average_pace_sec_per_km AS actual_average_pace_sec_per_km,
+            a.average_hr AS actual_average_hr
+        FROM planned_workouts pw
+        LEFT JOIN activities a ON date(a.start_time_local) = pw.workout_date
+        WHERE pw.workout_date >= date('now', '-' || ? || ' days')
+        ORDER BY pw.workout_date ASC
+        """,
+        (days,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_activity_hr_zones(conn: sqlite3.Connection, activity_id: int) -> List[Dict[str, Any]]:
     """Seconds spent in each heart-rate zone for one activity — the actual effort distribution
     of a run (e.g. 80% Zone 2, 20% Zone 4), not just its single average HR number."""
@@ -418,6 +448,23 @@ def create_server(settings: Settings) -> FastMCP:
         conn = _connect_readonly(settings.db_path)
         try:
             return get_vo2max_trend(conn, days)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def planned_vs_actual(days: int = 14) -> List[Dict[str, Any]]:
+        """Get planned workouts from an active Garmin Connect training plan compared against
+        what was actually logged, for each of the last N days. Returns [] if this account has no
+        active training plan configured — that's expected, not an error. This is the most
+        speculative of StrideSync's tools: Garmin's training-plan field mappings are unverified
+        against a live account, unlike everything else in this server.
+
+        Args:
+            days: Number of days to look back (1-365, default 14).
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_planned_vs_actual(conn, days)
         finally:
             conn.close()
 

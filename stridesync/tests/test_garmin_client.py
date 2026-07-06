@@ -17,6 +17,7 @@ from app.sync.garmin_client import (
     _normalize_daily_wellness,
     _normalize_hr_zones,
     _normalize_lap,
+    _normalize_planned_workouts,
     _normalize_samples,
     _normalize_training_baseline,
     _normalize_vo2max,
@@ -231,6 +232,52 @@ class TestNormalizeVo2Max:
         assert reading.vo2_max_running is None
         assert reading.vo2_max_cycling is None
         assert reading.fitness_age is None
+
+
+class TestNormalizePlannedWorkouts:
+    def test_normalizes_one_in_window_workout(self):
+        detail = {
+            "workouts": [
+                {
+                    "date": "2026-07-06",
+                    "workoutName": "Tempo Run",
+                    "workoutType": "tempo",
+                    "plannedDistanceInMeters": 8000.0,
+                    "plannedDurationInSeconds": 2400.0,
+                    "plannedAverageSpeed": 3.33,
+                    "targetHeartRateZone": {"zoneLow": 150, "zoneHigh": 165},
+                }
+            ]
+        }
+
+        workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
+
+        assert len(workouts) == 1
+        w = workouts[0]
+        assert w.plan_id == "plan-1"
+        assert w.workout_date == "2026-07-06"
+        assert w.workout_name == "Tempo Run"
+        assert w.workout_type == "tempo"
+        assert w.planned_distance_meters == 8000.0
+        assert w.planned_duration_seconds == 2400.0
+        assert w.planned_target_pace_sec_per_km == pytest.approx(1000.0 / 3.33)
+        assert w.planned_target_hr_low == 150
+        assert w.planned_target_hr_high == 165
+
+    def test_filters_out_workout_outside_window(self):
+        detail = {"workouts": [{"date": "2026-08-01", "workoutName": "Long Run"}]}
+
+        workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
+
+        assert workouts == []
+
+    def test_missing_workouts_key_returns_empty(self):
+        assert _normalize_planned_workouts("plan-1", {}, "2026-07-01", "2026-07-10") == []
+
+    def test_entry_missing_date_is_skipped(self):
+        detail = {"workouts": [{"workoutName": "No Date Run"}]}
+
+        assert _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10") == []
 
 
 class TestNormalizeHrZones:
@@ -685,6 +732,52 @@ class TestGarminClientFetch:
         client._garmin.get_max_metrics.side_effect = GarminConnectConnectionError("boom")
 
         assert client.fetch_vo2max("2026-07-06") is None
+
+    def test_fetch_planned_workouts_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = [{"planId": "plan-1"}]
+        client._garmin.get_training_plan_by_id.return_value = {
+            "workouts": [{"date": "2026-07-06", "workoutName": "Tempo Run"}]
+        }
+
+        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+
+        assert len(workouts) == 1
+        assert workouts[0].plan_id == "plan-1"
+        assert workouts[0].workout_name == "Tempo Run"
+        client._garmin.get_training_plan_by_id.assert_called_once_with("plan-1")
+
+    def test_fetch_planned_workouts_returns_empty_when_no_plans(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = []
+
+        assert client.fetch_planned_workouts("2026-07-01", "2026-07-10") == []
+
+    def test_fetch_planned_workouts_returns_empty_when_plan_list_fetch_fails(self):
+        client = make_client()
+        client._garmin.get_training_plans.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_planned_workouts("2026-07-01", "2026-07-10") == []
+
+    def test_fetch_planned_workouts_isolates_one_failing_plan_from_siblings(self):
+        # A failure fetching one plan's detail must not discard workouts from sibling plans.
+        client = make_client()
+        client._garmin.get_training_plans.return_value = [
+            {"planId": "plan-1"},
+            {"planId": "plan-2"},
+        ]
+
+        def get_plan_by_id(plan_id):
+            if plan_id == "plan-1":
+                return {"workouts": [{"date": "2026-07-06", "workoutName": "Plan 1 Run"}]}
+            raise GarminConnectConnectionError("boom")
+
+        client._garmin.get_training_plan_by_id.side_effect = get_plan_by_id
+
+        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+
+        assert len(workouts) == 1
+        assert workouts[0].plan_id == "plan-1"
 
     def test_fetch_activity_hr_zones_returns_normalized_result(self):
         client = make_client()
