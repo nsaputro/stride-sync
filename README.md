@@ -14,12 +14,6 @@ setup.
 
 ---
 
-## Status
-
-`v0.2.0` is released and published to GHCR — install it via the Add-on Store (see Installation
-below). A **pre-release/dev channel** (`stridesync-dev/`) also exists for testing new features
-before they're promoted to a stable release; see `CHANGELOG.md` for the full version history.
-
 ## Features
 
 - **Automatic syncing** — polls Garmin Connect on a configurable interval (default every 6h) and
