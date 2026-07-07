@@ -714,69 +714,121 @@ def test_run_backfill_sync_reports_progress(tmp_path):
     assert calls == [(0, 2), (1, 2), (2, 2)]
 
 
-def test_run_backfill_sync_does_not_touch_training_baseline(tmp_path):
-    # Backfill is about historical activities, not the athlete's current physiological
-    # baseline -- that stays the regular scheduled sync's job (run_sync_once).
+def test_run_backfill_sync_writes_training_baseline(tmp_path):
+    # As of milestone v0.14, backfill refreshes training_baseline/daily_wellness/vo2max_history/
+    # planned_workouts too -- same as run_sync_once, just anchored to the given start_date
+    # instead of "since last successful sync".
     settings = make_settings(tmp_path)
-    client = FakeGarminClient(since_activities=[make_activity()])
+    baseline = make_training_baseline()
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    client = FakeGarminClient(since_activities=[make_activity()], baseline=baseline)
 
-    run_backfill_sync(settings, client, "2020-01-01")
+    run_backfill_sync(settings, client, today_str)
 
     from app import db
 
     conn = db.connect(settings.db_path)
     try:
-        assert conn.execute("SELECT * FROM training_baseline").fetchone() is None
+        row = conn.execute("SELECT * FROM training_baseline WHERE id = 1").fetchone()
+        assert row["lactate_threshold_hr"] == 165
     finally:
         conn.close()
 
 
-def test_run_backfill_sync_does_not_touch_daily_wellness(tmp_path):
-    # Same rationale as training_baseline above -- daily_wellness stays run_sync_once's job.
+def test_run_backfill_sync_writes_daily_wellness_for_the_whole_date_range(tmp_path):
+    # Unlike run_sync_once's fixed _WELLNESS_WINDOW_DAYS rolling window, backfill covers every
+    # date from start_date through today -- that's the entire point of a historical backfill.
     settings = make_settings(tmp_path)
-    client = FakeGarminClient(since_activities=[make_activity()])
+    today = datetime.now(timezone.utc).date()
+    start_date = (today - timedelta(days=2)).isoformat()
+    today_str = today.isoformat()
+    client = FakeGarminClient(
+        since_activities=[make_activity()], wellness={today_str: make_daily_wellness(today_str)}
+    )
 
-    run_backfill_sync(settings, client, "2020-01-01")
+    run_backfill_sync(settings, client, start_date)
 
     from app import db
 
     conn = db.connect(settings.db_path)
     try:
-        assert conn.execute("SELECT * FROM daily_wellness").fetchone() is None
+        rows = conn.execute(
+            "SELECT calendar_date FROM daily_wellness ORDER BY calendar_date"
+        ).fetchall()
+        assert [r["calendar_date"] for r in rows] == [
+            start_date,
+            (today - timedelta(days=1)).isoformat(),
+            today_str,
+        ]
     finally:
         conn.close()
 
 
-def test_run_backfill_sync_does_not_touch_vo2max_history(tmp_path):
-    # Same rationale as training_baseline/daily_wellness above.
+def test_run_backfill_sync_writes_vo2max_history_only_for_dates_with_data(tmp_path):
+    # fetch_vo2max returning None for a date is a no-op, not a row of nulls -- same contract as
+    # run_sync_once.
     settings = make_settings(tmp_path)
-    client = FakeGarminClient(since_activities=[make_activity()])
+    today = datetime.now(timezone.utc).date()
+    start_date = (today - timedelta(days=2)).isoformat()
+    today_str = today.isoformat()
+    client = FakeGarminClient(
+        since_activities=[make_activity()], vo2max={today_str: make_vo2max_reading(today_str)}
+    )
 
-    run_backfill_sync(settings, client, "2020-01-01")
+    run_backfill_sync(settings, client, start_date)
 
     from app import db
 
     conn = db.connect(settings.db_path)
     try:
-        assert conn.execute("SELECT * FROM vo2max_history").fetchone() is None
+        rows = conn.execute("SELECT calendar_date FROM vo2max_history").fetchall()
+        assert [r["calendar_date"] for r in rows] == [today_str]
     finally:
         conn.close()
 
 
-def test_run_backfill_sync_does_not_touch_planned_workouts(tmp_path):
-    # Same rationale as training_baseline/daily_wellness/vo2max_history above.
+def test_run_backfill_sync_writes_planned_workouts(tmp_path):
+    # planned_workouts isn't a historical concept (it's a forward-looking training plan), so it
+    # uses the same fixed window-from-today as run_sync_once regardless of start_date.
     settings = make_settings(tmp_path)
-    client = FakeGarminClient(since_activities=[make_activity()])
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    client = FakeGarminClient(
+        since_activities=[make_activity()],
+        planned_workouts=[make_planned_workout(workout_date=today_str)],
+    )
 
-    run_backfill_sync(settings, client, "2020-01-01")
+    run_backfill_sync(settings, client, today_str)
 
     from app import db
 
     conn = db.connect(settings.db_path)
     try:
-        assert conn.execute("SELECT * FROM planned_workouts").fetchone() is None
+        row = conn.execute(
+            "SELECT * FROM planned_workouts WHERE workout_date = ?", (today_str,)
+        ).fetchone()
+        assert row["workout_name"] == "Tempo Run"
     finally:
         conn.close()
+
+
+def test_run_backfill_sync_logs_record_counts_on_success(tmp_path, caplog):
+    settings = make_settings(tmp_path)
+    today = datetime.now(timezone.utc).date()
+    start_date = (today - timedelta(days=1)).isoformat()
+    today_str = today.isoformat()
+    client = FakeGarminClient(
+        since_activities=[make_activity()],
+        vo2max={today_str: make_vo2max_reading(today_str)},
+        planned_workouts=[make_planned_workout(workout_date=today_str)],
+    )
+
+    with caplog.at_level(logging.INFO):
+        run_backfill_sync(settings, client, start_date)
+
+    assert "1 activities" in caplog.text
+    assert "2 wellness records" in caplog.text
+    assert "1 vo2max records" in caplog.text
+    assert "1 planned workouts" in caplog.text
 
 
 def test_run_backfill_sync_logs_failure_on_auth_error(tmp_path):

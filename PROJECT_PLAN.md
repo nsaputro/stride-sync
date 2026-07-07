@@ -735,6 +735,42 @@ the database, rather than being visible from the add-on log alone.
   confirming what actually synced is a log line away instead of requiring a direct SQL query.
   This is a log-only change; `sync_log`'s schema is untouched.
 
+### v0.14 — Backfill parity with regular sync + a real infinite-backfill-loop bug fix 🔄
+
+`run_backfill_sync` only ever wrote activities — `training_baseline`/`daily_wellness`/
+`vo2max_history`/`planned_workouts` stayed the regular scheduled sync's job, so backfilling
+historical data from before a Garmin account had wellness/VO2-max tracking enabled had no way to
+also pull in that history. Separately, a live user reported the Settings tab's backfill button
+looping forever — the add-on log showed the exact same `POST /backfill` → "succeeded: N
+activities" repeating every second until the container was restarted.
+
+- ✅ `run_backfill_sync` now also refreshes `training_baseline` (unconditional, same as
+  `run_sync_once`) and fetches `daily_wellness`/`vo2max_history` for **every date from
+  `start_date` through today** (not `run_sync_once`'s fixed `_WELLNESS_WINDOW_DAYS`-day rolling
+  window) — covering the whole historical range is the entire point of a backfill. Confirmed via
+  a real timing check that a 6-year day-by-day loop (`2020-01-01` → today, ~2380 iterations) adds
+  only ~30ms — no need to worry about this being slow in practice, only the per-activity Garmin
+  API calls are.
+- ✅ `planned_workouts` is also refreshed on backfill, but — unlike wellness/vo2max — using the
+  same fixed `[-_PLANNED_WORKOUT_LOOKBACK_DAYS, +_PLANNED_WORKOUT_LOOKAHEAD_DAYS]`-from-today
+  window `run_sync_once` uses, regardless of `start_date`: a training plan is a forward-looking
+  concept, not historical data a backfill would otherwise miss.
+- ✅ `run_backfill_sync` logs per-record-type counts on success/failure too, matching v0.13's
+  `run_sync_once` change.
+- ✅ **Root-caused and fixed the reported infinite-backfill-loop bug**: `app/mfa_web/server.py`'s
+  backfill POST handler rendered the progress page directly (200 OK) instead of redirecting.
+  `_BACKFILL_POLL_SCRIPT`'s `location.reload()` — called once the poller sees the backfill
+  finish — reloads *whatever request produced the current page*, and in most browsers that means
+  **re-submitting the original POST** when the current page was itself a direct POST response.
+  Every time the poller noticed completion, `location.reload()` silently re-POSTed the same form,
+  restarting the backfill, forever — exactly matching the reported log pattern. Fixed with the
+  standard Post/Redirect/Get pattern: the POST handler now always issues a `303` redirect to the
+  `GET /backfill` route instead of rendering the page itself, so the browser's last request for
+  that URL is a GET, which `location.reload()` can safely re-issue. Verified with a live
+  ASGI-level test client simulating repeated `location.reload()`-style reloads after the fix,
+  confirming `run_backfill_sync` is invoked exactly once no matter how many times the page
+  "reloads" afterward.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added

@@ -430,16 +430,30 @@ def run_backfill_sync(
     PROJECT_PLAN.md milestone v0.8) since it takes an explicit caller-given start date that can
     reach arbitrarily far into the past, rather than `run_sync_once`'s implicit "since the last
     successful sync" range (see milestone v0.13), and so can cover far more activities in one
-    call. Does not refresh `training_baseline`, `daily_wellness`, `vo2max_history`, or
-    `planned_workouts` either — those stay the regular scheduled sync's job.
+    call.
+
+    Also refreshes `training_baseline`, `daily_wellness`, `vo2max_history`, and
+    `planned_workouts` — same as `run_sync_once`, just anchored to `start_date` instead of "since
+    the last successful sync" (see milestone v0.14): `daily_wellness`/`vo2max_history` are
+    fetched for every date from `start_date` through today (not `run_sync_once`'s fixed
+    `_WELLNESS_WINDOW_DAYS`-day rolling window), since backfilling a wide historical range is the
+    entire point of this entry point. `planned_workouts` isn't itself a historical concept (it's
+    a forward-looking training plan), so it still uses the same fixed
+    `[-_PLANNED_WORKOUT_LOOKBACK_DAYS, +_PLANNED_WORKOUT_LOOKAHEAD_DAYS]`-from-today window as
+    `run_sync_once`, regardless of `start_date`. A wide date range means many extra Garmin API
+    calls beyond the activities themselves (5 wellness/vo2max calls per day in range) — expect a
+    multi-year backfill to take noticeably longer than before this milestone.
 
     Args:
         progress_callback: If given, called as `progress_callback(completed, total)` — once
             immediately after the activity list is fetched (`completed=0`, so a caller showing a
             progress bar knows the total right away rather than waiting for the first activity
-            to finish), then once per completed activity. A large date range can cover hundreds
-            of activities and take a long time; this is how `app/mfa_web/server.py`'s Settings
-            tab reports live progress instead of the caller just staring at a blank page.
+            to finish), then once per completed activity. Note this only reflects the activities
+            phase — the wellness/vo2max/planned_workouts phase (which runs first) has no progress
+            callback of its own, so a caller's progress bar may sit at "0 / N" for a while before
+            advancing on a wide date range. A large date range can cover hundreds of activities
+            and take a long time; this is how `app/mfa_web/server.py`'s Settings tab reports live
+            progress instead of the caller just staring at a blank page.
 
     Returns:
         Number of activities backfilled.
@@ -454,6 +468,9 @@ def run_backfill_sync(
     started_at = datetime.now(timezone.utc).isoformat()
     conn = db.connect(settings.db_path)
     activities_synced = 0
+    wellness_synced = 0
+    vo2max_synced = 0
+    planned_workouts_synced = 0
 
     try:
         client.login()
@@ -462,6 +479,29 @@ def run_backfill_sync(
             progress_callback(0, len(activities))
 
         synced_at = datetime.now(timezone.utc).isoformat()
+        _upsert_training_baseline(conn, client.fetch_training_baseline(), synced_at)
+
+        # start_date is already confirmed valid YYYY-MM-DD by fetch_activities_since above --
+        # stripped the same way its own internal validation tolerates surrounding whitespace.
+        start = datetime.strptime(start_date.strip(), "%Y-%m-%d").date()
+        today = datetime.now(timezone.utc).date()
+        cdate = start
+        while cdate <= today:
+            cdate_str = cdate.isoformat()
+            _upsert_daily_wellness(conn, client.fetch_daily_wellness(cdate_str), synced_at)
+            wellness_synced += 1
+            vo2max_reading = client.fetch_vo2max(cdate_str)
+            _upsert_vo2max(conn, vo2max_reading, synced_at)
+            if vo2max_reading is not None:
+                vo2max_synced += 1
+            cdate += timedelta(days=1)
+
+        plan_start = (today - timedelta(days=_PLANNED_WORKOUT_LOOKBACK_DAYS)).isoformat()
+        plan_end = (today + timedelta(days=_PLANNED_WORKOUT_LOOKAHEAD_DAYS)).isoformat()
+        planned_workouts = client.fetch_planned_workouts(plan_start, plan_end)
+        _replace_planned_workouts(conn, plan_start, plan_end, planned_workouts, synced_at)
+        planned_workouts_synced = len(planned_workouts)
+
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
             if progress_callback:
@@ -481,7 +521,16 @@ def run_backfill_sync(
             ),
         )
         conn.commit()
-        logger.error("StrideSync backfill since %s failed: %s", start_date, exc)
+        logger.error(
+            "StrideSync backfill since %s failed: %s (partial progress before failure: "
+            "%d activities, %d wellness records, %d vo2max records, %d planned workouts)",
+            start_date,
+            exc,
+            activities_synced,
+            wellness_synced,
+            vo2max_synced,
+            planned_workouts_synced,
+        )
         raise
     else:
         conn.execute(
@@ -493,7 +542,13 @@ def run_backfill_sync(
         )
         conn.commit()
         logger.info(
-            "StrideSync backfill since %s succeeded: %d activities", start_date, activities_synced
+            "StrideSync backfill since %s succeeded: %d activities, %d wellness records, "
+            "%d vo2max records, %d planned workouts",
+            start_date,
+            activities_synced,
+            wellness_synced,
+            vo2max_synced,
+            planned_workouts_synced,
         )
     finally:
         conn.close()

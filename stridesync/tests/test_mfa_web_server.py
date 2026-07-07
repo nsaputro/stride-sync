@@ -596,6 +596,42 @@ def test_backfill_get_redirects_to_settings_when_nothing_has_run(tmp_path):
     assert response.headers["location"] == "settings"
 
 
+def test_backfill_post_redirects_instead_of_rendering_directly(tmp_path):
+    # Regression test for a real bug: _BACKFILL_POLL_SCRIPT calls location.reload() once the
+    # backfill finishes, and reloading a page that was the direct result of a POST re-submits
+    # that POST in most browsers -- without this redirect, that silently restarted the backfill
+    # every time the poller noticed completion, looping forever until the server was restarted
+    # (confirmed live: repeated "POST /backfill" log lines, each followed by another full
+    # run_backfill_sync run). The POST must always redirect (Post/Redirect/Get) so the browser's
+    # last request for this URL is a GET, which location.reload() can safely re-issue.
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync", return_value=1
+    ), patch("app.mfa_web.server.threading.Thread", ImmediateThread):
+        response = _client(tmp_path).post(
+            "/backfill", data={"start_date": "2020-01-01"}, follow_redirects=False
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "backfill"
+
+
+def test_backfill_post_redirects_even_when_already_running(tmp_path):
+    mfa_web_server._backfill_state.update(
+        {"running": True, "start_date": "2019-01-01", "total": 10, "completed": 3, "done": False}
+    )
+
+    with patch("app.mfa_web.server.GarminClient"), patch(
+        "app.mfa_web.server.run_backfill_sync"
+    ) as mock_run, patch("app.mfa_web.server.threading.Thread", ImmediateThread):
+        response = _client(tmp_path).post(
+            "/backfill", data={"start_date": "2020-01-01"}, follow_redirects=False
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "backfill"
+    mock_run.assert_not_called()
+
+
 def test_backfill_route_reports_activity_count(tmp_path):
     with patch("app.mfa_web.server.GarminClient"), patch(
         "app.mfa_web.server.run_backfill_sync", return_value=42

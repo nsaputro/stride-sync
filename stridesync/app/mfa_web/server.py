@@ -386,8 +386,8 @@ def _settings_body() -> str:
 
     form_html = (
         "<h2>Backfill activities</h2>"
-        "<p>Regular syncs only fetch your most recent activities. Use this to pull in older "
-        "history from a specific date onward.</p>"
+        "<p>Regular syncs only fetch activities since the last successful sync. Use this to "
+        "pull in older history from a specific date onward.</p>"
         '<p class="error">A wide date range can take a while and make many Garmin API calls '
         "(each activity needs several) — you'll see a progress bar once it starts, and can "
         "safely navigate away and back; it keeps running either way.</p>"
@@ -520,12 +520,22 @@ def _backfill_progress_body() -> str:
 
 async def backfill(request: Request) -> HTMLResponse:
     """GET shows the current backfill's progress (or redirects to Settings if none has run yet
-    this process); POST starts a new one. Reusing `scheduler.run_backfill_sync` on a background
-    thread — see that function's docstring for why it's a separate entry point from the regular
-    `run_sync_once`/"Sync now" flow: both fetch activities by date range now, but backfill takes
-    an explicit caller-given start date that can reach arbitrarily far into the past, while
-    `run_sync_once` always starts from the last successful sync (or a fixed 7-day lookback on
-    the very first sync) and so can cover far more activities in one call when going back years.
+    this process); POST starts a new one and redirects to this same GET route (Post/Redirect/Get)
+    rather than rendering the progress page directly. Reusing `scheduler.run_backfill_sync` on a
+    background thread — see that function's docstring for why it's a separate entry point from
+    the regular `run_sync_once`/"Sync now" flow: both fetch activities by date range now, but
+    backfill takes an explicit caller-given start date that can reach arbitrarily far into the
+    past, while `run_sync_once` always starts from the last successful sync (or a fixed 7-day
+    lookback on the very first sync) and so can cover far more activities in one call when going
+    back years.
+
+    The PRG redirect is required, not just conventional REST hygiene: `_BACKFILL_POLL_SCRIPT`
+    calls `location.reload()` once the backfill finishes, and reloading a page that was the
+    result of a POST re-submits that same POST in most browsers — without the redirect, that
+    silently restarted the backfill every time the poller noticed completion, looping forever
+    until the server was restarted (confirmed live: repeated `POST /backfill` log lines, each
+    followed by another full `run_backfill_sync` run). Redirecting after the POST means the
+    browser's last request for this URL is a GET, so `location.reload()` safely re-GETs instead.
     """
     settings: Settings = request.app.state.settings
 
@@ -561,16 +571,12 @@ async def backfill(request: Request) -> HTMLResponse:
                 }
             )
 
-    # _backfill_progress_body() below acquires _backfill_lock itself (it's not reentrant), so it
-    # must only ever be called after the `with` block above has already exited.
-    if already_running:
-        return _page("Backfill in progress", _backfill_progress_body(), active_tab="settings")
+    if not already_running:
+        threading.Thread(
+            target=_run_backfill_in_background, args=(settings, start_date), daemon=True
+        ).start()
 
-    threading.Thread(
-        target=_run_backfill_in_background, args=(settings, start_date), daemon=True
-    ).start()
-
-    return _page("Backfill", _backfill_progress_body(), active_tab="settings")
+    return RedirectResponse(url="backfill", status_code=303)
 
 
 async def backfill_status(request: Request) -> JSONResponse:
