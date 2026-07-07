@@ -58,6 +58,16 @@
   restarting the backfill forever until the container was restarted. Fixed with the standard
   Post/Redirect/Get pattern: the POST handler now redirects to the `GET /backfill` route instead
   of rendering the page itself.
+- **`planned_workouts` silently syncing zero rows for accounts with a real active training
+  plan** (milestone v0.15): confirmed live — a real training plan (screenshotted from the Garmin
+  Connect app) produced "0 planned workouts" on every sync. Root cause: `get_training_plans()`'s
+  actual top-level key is `trainingPlanList`, not the `trainingPlans`/`plans` originally guessed
+  — confirmed directly from `python-garminconnect`'s own bundled `demo.py`, not another guess —
+  so the plan list was never found. Also resolved the previously-open question of which plan type
+  needs `get_adaptive_training_plan_by_id`: a plan's `trainingPlanCategory` field equal to
+  `"FBT_ADAPTIVE"` routes there; everything else uses the phased `get_training_plan_by_id`. The
+  training-plan detail response's own shape is still unconfirmed — a follow-up fix is pending
+  live-account output.
 
 ## [0.2.2] - 2026-07-05
 
