@@ -597,7 +597,7 @@ training-pace recommendations.
   race predictions, `pace_cadence_hr_trend`, `training_load_summary`), not generic examples
   disconnected from what StrideSync can actually answer.
 - ✅ **Example Claude Skill added** (follow-up, user-provided): `docs/skills/running-coach/`
-  — a `SKILL.md` turning the raw MCP tools above into a structured marathon-coaching workflow
+  — a `SKILL.md` turning the raw MCP tools above into a structured running-coaching workflow
   (race-target tracking against Claude's memory, training-progression checks combining load/
   long-run/weekly-mileage trends with `daily_wellness` recovery signals, target-pace/HR lookups,
   and lap-level analysis that correctly separates structured-workout work-rep pace from recovery

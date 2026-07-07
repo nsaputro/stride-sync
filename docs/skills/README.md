@@ -9,7 +9,7 @@ every time you ask about a run.
 
 ## Available skills
 
-- **[`running-coach/`](running-coach/SKILL.md)** — a marathon running coach that pulls your
+- **[`running-coach/`](running-coach/SKILL.md)** — a running coach that pulls your
   actual Garmin data (via StrideSync) and compares it against your race plan and targets: sync
   health, training baseline, recent activities, pace/cadence/HR trends, training load, and
   recovery/readiness signals (sleep, HRV, training readiness). Handles training-progression

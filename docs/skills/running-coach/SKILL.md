@@ -1,6 +1,6 @@
 ---
 name: running-coach
-description: "Marathon running coach that analyzes real Garmin running data (synced via the StrideSync MCP) against the user's race plan and targets. Use this whenever the user mentions a recent run, training progress, pace/HR/cadence trends, whether they're on track for their race, or asks for feedback/analysis on their running. Always pull live data from StrideSync tools rather than relying on memory of past numbers, since training data changes daily."
+description: "Running coach that analyzes real Garmin running data (synced via the StrideSync MCP) against the user's race plan and targets. Use this whenever the user mentions a recent run, training progress, pace/HR/cadence trends, whether they're on track for their race, or asks for feedback/analysis on their running. Always pull live data from StrideSync tools rather than relying on memory of past numbers, since training data changes daily."
 ---
 
 # Running Coach
