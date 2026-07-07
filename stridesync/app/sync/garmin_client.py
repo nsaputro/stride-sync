@@ -235,11 +235,12 @@ class Vo2MaxReading:
 
 @dataclass(frozen=True)
 class PlannedWorkout:
-    """One scheduled workout from a Garmin Connect training plan — see PROJECT_PLAN.md milestone
-    v0.12 and the `planned_workouts` table. The least-confirmed dataclass in this module:
-    `get_training_plans()`/`get_training_plan_by_id()`'s per-workout response shape has zero
-    prior confirmation anywhere in this codebase, unlike every other field mapping added this
-    milestone (see `_normalize_planned_workouts`).
+    """One scheduled workout from a Garmin Connect training plan — see PROJECT_PLAN.md milestones
+    v0.12/v0.18 and the `planned_workouts` table. `workout_date`/`workout_name`/`workout_type`/
+    `planned_duration_seconds` are confirmed against a live `FBT_ADAPTIVE` plan's real response
+    (see `_normalize_planned_workouts`'s docstring). `planned_distance_meters` and the target
+    pace/HR fields remain unconfirmed — the real response has no structured field for them at
+    all (target info is free text like `"2x18:00@162bpm"`), so they're always `None` for now.
     """
 
     plan_id: str
@@ -434,14 +435,29 @@ def _normalize_vo2max(cdate: str, raw: Any) -> Vo2MaxReading:
 def _normalize_planned_workouts(
     plan_id: str, detail: Dict[str, Any], start_date: str, end_date: str
 ) -> List[PlannedWorkout]:
-    """Convert one `Client.get_training_plan_by_id(plan_id)` response into `PlannedWorkout`s,
-    filtered to `[start_date, end_date]` (inclusive, `YYYY-MM-DD` strings).
+    """Convert one `Client.get_training_plan_by_id`/`get_adaptive_training_plan_by_id` response
+    into `PlannedWorkout`s, filtered to `[start_date, end_date]` (inclusive, `YYYY-MM-DD`
+    strings).
 
-    Field names below are the least-confirmed guess in this module — see `PlannedWorkout`'s
-    docstring. A workout entry missing its date, or falling outside the requested window, is
-    silently dropped rather than raising.
+    Field names below are confirmed against a live `FBT_ADAPTIVE` plan's real response (see
+    PROJECT_PLAN.md milestone v0.18) — the scheduled-day list is `taskList`, each entry's date is
+    `calendarDate` (already `YYYY-MM-DD`), and the actual workout name/type/duration live nested
+    one level deeper under `taskWorkout`, not on the day entry itself. `estimatedDurationInSecs`
+    was verified byte-for-byte against a live account: `3120` and `3000` matched that account's
+    Garmin Connect app showing "52:00" and "50:00" for the same two workouts. A day entry whose
+    `taskWorkout.restDay` is `true` has no real workout (`workoutName`/`sportType` are `null`) and
+    is skipped rather than stored as an empty row. The old `workouts`/`scheduledWorkouts`/`days`
+    and top-level-field guesses are kept as lower-priority `_get()` fallbacks in case a
+    non-adaptive (phased) plan's shape differs.
+
+    No structured pace or heart-rate-zone target field was found anywhere in the real response —
+    Garmin represents that as free text in `taskWorkout.workoutDescription` instead (e.g.
+    `"2x18:00@162bpm"`, `"137bpm"`, `"7x1:00@Very Hard"`), which varies in format enough that
+    parsing it isn't attempted here; `planned_target_pace_sec_per_km`/
+    `planned_target_hr_low`/`planned_target_hr_high` are therefore always `None` for now — a
+    possible follow-up once more real examples confirm a reliable pattern.
     """
-    raw_workouts = _get(detail, "workouts", "scheduledWorkouts", "days") or []
+    raw_workouts = _get(detail, "taskList", "workouts", "scheduledWorkouts", "days") or []
     if not isinstance(raw_workouts, list):
         return []
 
@@ -449,24 +465,35 @@ def _normalize_planned_workouts(
     for entry in raw_workouts:
         if not isinstance(entry, dict):
             continue
-        workout_date = _get(entry, "date", "workoutDate", "calendarDate")
+        workout_date = _get(entry, "calendarDate", "date", "workoutDate")
         if not workout_date or not (start_date <= workout_date <= end_date):
             continue
 
-        target = _get(entry, "targetHeartRateZone", "targetHr") or {}
-        speed = _get(entry, "plannedAverageSpeed", "targetSpeed")
+        task_workout = entry.get("taskWorkout")
+        task_workout = task_workout if isinstance(task_workout, dict) else {}
+        if task_workout.get("restDay"):
+            continue
 
         result.append(
             PlannedWorkout(
                 plan_id=plan_id,
                 workout_date=workout_date,
-                workout_name=_get(entry, "workoutName", "name"),
-                workout_type=_get(entry, "workoutType", "stepType"),
-                planned_distance_meters=_get(entry, "plannedDistanceInMeters", "distance"),
-                planned_duration_seconds=_get(entry, "plannedDurationInSeconds", "duration"),
-                planned_target_pace_sec_per_km=_pace_sec_per_km(speed),
-                planned_target_hr_low=_get(target, "zoneLow", "hrLow"),
-                planned_target_hr_high=_get(target, "zoneHigh", "hrHigh"),
+                workout_name=_get(task_workout, "workoutName", "name"),
+                workout_type=_get(
+                    task_workout, "trainingEffectLabel", "workoutType", "stepType"
+                ),
+                planned_distance_meters=_get(
+                    task_workout, "plannedDistanceInMeters", "distance"
+                ),
+                planned_duration_seconds=_get(
+                    task_workout,
+                    "estimatedDurationInSecs",
+                    "plannedDurationInSeconds",
+                    "duration",
+                ),
+                planned_target_pace_sec_per_km=None,
+                planned_target_hr_low=None,
+                planned_target_hr_high=None,
             )
         )
     return result
@@ -917,8 +944,10 @@ class GarminClient:
         `"FBT_ADAPTIVE"` to `get_adaptive_training_plan_by_id`, everything else to the phased
         `get_training_plan_by_id` used here (this resolves what was previously an open unconfirmed
         follow-up; also confirmed correct live — the same account's plan is `FBT_ADAPTIVE`). The
-        detail response's own shape (workout dates/names/targets, handled by
-        `_normalize_planned_workouts`) is still unconfirmed — see that function's docstring.
+        detail response's own shape (workout dates/names/durations, handled by
+        `_normalize_planned_workouts`) is now confirmed too — see that function's docstring; the
+        target pace/HR fields remain `None` since the real response has no structured field for
+        them.
 
         Most accounts have no active plan at all, which degrades to an empty list, not a failure.
         A failure fetching one plan's detail is isolated to that plan — it must not discard

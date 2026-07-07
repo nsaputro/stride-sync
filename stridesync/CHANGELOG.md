@@ -83,6 +83,18 @@
   for this account. Also raised the Diagnostics panel's output cap from 8000 to 60000 characters
   — a real `scheduled_workouts` check response was truncated before reaching the dates that
   mattered.
+- **`planned_workouts` workout names/types/durations confirmed and fixed end-to-end** (milestone
+  v0.18): with `plan_id` extraction fixed, the reporting user's next sync reached the real
+  `get_adaptive_training_plan_by_id` response and pasted it back complete. The scheduled-day list
+  key is `taskList`, not `workouts`/`scheduledWorkouts`/`days`; workout name/type/duration live
+  nested under `taskWorkout.{workoutName, trainingEffectLabel, estimatedDurationInSecs}`, not on
+  the day entry itself — verified byte-for-byte against that account's own Garmin Connect app
+  (`3660`/`3120`/`5100`/`3000` seconds matched `"1:01:00"`/`"52:00"`/`"1:25:00"`/`"50:00"` for
+  the same workouts). Rest days (`taskWorkout.restDay: true`) are now correctly excluded rather
+  than stored as empty placeholder rows. No structured pace/HR target field exists in the real
+  response (Garmin uses free text like `"2x18:00@162bpm"` instead), so
+  `planned_target_pace_sec_per_km`/`planned_target_hr_low`/`planned_target_hr_high` remain `None`
+  for now.
 
 ## [0.2.2] - 2026-07-05
 
