@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Example Claude Skill: `docs/skills/running-coach/`** (milestone Stage 9 follow-up): a
+  `SKILL.md` that turns StrideSync's raw MCP tools into a structured marathon-coaching
+  workflow — race-target tracking, training-progression checks (weekly load, long-run/mileage
+  trends, recovery/readiness cross-referencing), target-pace/HR lookups, and lap-level analysis
+  that separates structured-workout work-rep pace from recovery-jog pace instead of a misleading
+  whole-session average. `docs/skills/README.md` explains what a Skill is and how to install
+  one. Purely additive documentation — no application code changed, entirely optional to use.
+
 ## [0.3.2] - 2026-07-07
 
 ### Fixed

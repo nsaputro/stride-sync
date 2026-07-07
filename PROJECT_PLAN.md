@@ -596,6 +596,15 @@ training-pace recommendations.
   the actual MCP tools this add-on exposes (`training_baseline`'s lactate-threshold pace/HR and
   race predictions, `pace_cadence_hr_trend`, `training_load_summary`), not generic examples
   disconnected from what StrideSync can actually answer.
+- ✅ **Example Claude Skill added** (follow-up, user-provided): `docs/skills/running-coach/`
+  — a `SKILL.md` turning the raw MCP tools above into a structured marathon-coaching workflow
+  (race-target tracking against Claude's memory, training-progression checks combining load/
+  long-run/weekly-mileage trends with `daily_wellness` recovery signals, target-pace/HR lookups,
+  and lap-level analysis that correctly separates structured-workout work-rep pace from recovery
+  jogs instead of using a misleading whole-session average). `docs/skills/README.md` explains
+  what a Skill is and how to install one; both `README.md` and `DOCS.md`'s "Example prompts"
+  section link to it. Purely additive documentation — no application code changed, entirely
+  optional to use.
 
 ### Stage 10 — Fix: "Log in again" silently resumed the cached session instead of re-authenticating 🔄
 

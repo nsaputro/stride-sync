@@ -110,6 +110,14 @@ real HA installs reach through the add-on's ingress panel instead — see the MF
 | `log_level` | Log verbosity (`debug`, `info`, `warning`, `error`) | `info` |
 | `mcp_auth_token` | Bearer token required to reach the MCP server. Leave empty for LAN-only access; set before exposing `mcp_port` beyond your LAN (see `stridesync/DOCS.md`) | `""` (disabled) |
 
+## Example Claude Skill
+
+StrideSync's MCP tools work fine with ad-hoc prompts, but [`docs/skills/running-coach/`](docs/skills/running-coach/SKILL.md)
+is an example [Claude Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-skills) that
+turns them into a structured coaching workflow — race target tracking, training-progression
+checks, recovery/readiness cross-referencing, and lap-level analysis of structured workouts. See
+`docs/skills/README.md` for how to install it. Optional, not required to use StrideSync.
+
 ## Known limitation: Garmin auth
 
 StrideSync depends on unofficial, reverse-engineered Garmin Connect libraries. Garmin can change
