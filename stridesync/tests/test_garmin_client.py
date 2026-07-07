@@ -1166,6 +1166,60 @@ class TestGarminClientFetch:
         assert result == {"raw": "calendar-data"}
         client._garmin.get_scheduled_workouts.assert_called_once()
 
+    def test_fetch_diagnostic_sleep_data_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_sleep_data.return_value = {"dailySleepDTO": {"sleepTimeSeconds": 100}}
+
+        result = client.fetch_diagnostic("sleep_data")
+
+        assert result == {"dailySleepDTO": {"sleepTimeSeconds": 100}}
+        client._garmin.get_sleep_data.assert_called_once()
+
+    def test_fetch_diagnostic_hrv_data_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_hrv_data.return_value = {"hrvSummary": {"status": "BALANCED"}}
+
+        result = client.fetch_diagnostic("hrv_data")
+
+        assert result == {"hrvSummary": {"status": "BALANCED"}}
+        client._garmin.get_hrv_data.assert_called_once()
+
+    def test_fetch_diagnostic_training_status_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_training_status.return_value = {"latestTrainingStatus": "PRODUCTIVE"}
+
+        result = client.fetch_diagnostic("training_status")
+
+        assert result == {"latestTrainingStatus": "PRODUCTIVE"}
+        client._garmin.get_training_status.assert_called_once()
+
+    def test_fetch_diagnostic_training_readiness_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_morning_training_readiness.return_value = {"score": 72}
+
+        result = client.fetch_diagnostic("training_readiness")
+
+        assert result == {"score": 72}
+        client._garmin.get_morning_training_readiness.assert_called_once()
+
+    def test_fetch_diagnostic_resting_hr_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_rhr_day.return_value = {"restingHeartRate": 48}
+
+        result = client.fetch_diagnostic("resting_hr")
+
+        assert result == {"restingHeartRate": 48}
+        client._garmin.get_rhr_day.assert_called_once()
+
+    def test_fetch_diagnostic_vo2max_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_max_metrics.return_value = {"generic": {"vo2MaxValue": 51.2}}
+
+        result = client.fetch_diagnostic("vo2max")
+
+        assert result == {"generic": {"vo2MaxValue": 51.2}}
+        client._garmin.get_max_metrics.assert_called_once()
+
     def test_fetch_diagnostic_unknown_check_raises_value_error(self):
         client = make_client()
 
