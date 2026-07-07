@@ -825,7 +825,11 @@ async def sync(request: Request) -> HTMLResponse:
 
 # Raw diagnostic output is a debugging aid, not something meant to be browsed as a full page --
 # capped well short of anything that would make the ingress panel unusable on a slow connection.
-_DIAGNOSTIC_OUTPUT_LIMIT = 8000
+# 8000 turned out too small in practice: a live `scheduled_workouts` check for one calendar
+# month (get_scheduled_workouts) truncated before reaching the dates that actually mattered for
+# troubleshooting. The <pre> box already scrolls internally (see .diagnostic-output CSS) and the
+# copy button handles large text fine, so raised generously rather than re-guessing a smaller cap.
+_DIAGNOSTIC_OUTPUT_LIMIT = 60000
 
 
 async def diagnostics(request: Request) -> HTMLResponse:

@@ -802,12 +802,35 @@ class TestGarminClientFetch:
         assert len(workouts) == 1
         assert workouts[0].plan_id == "plan-1"
 
-    def test_fetch_planned_workouts_routes_adaptive_plans_to_the_adaptive_endpoint(self):
-        # demo.py routes trainingPlanCategory == "FBT_ADAPTIVE" to
-        # get_adaptive_training_plan_by_id instead of the phased get_training_plan_by_id.
+    def test_fetch_planned_workouts_extracts_trainingplanid_key(self):
+        # Confirmed live against a real account with an active plan (via the Diagnostics panel):
+        # a plan entry's own id field is "trainingPlanId" (an integer), not "planId"/"id" as
+        # originally guessed -- this was the actual remaining cause of "0 planned workouts" even
+        # after the trainingPlanList fix, since plan_id extraction failed and every plan was
+        # silently skipped.
         client = make_client()
         client._garmin.get_training_plans.return_value = {
-            "trainingPlanList": [{"planId": "plan-1", "trainingPlanCategory": "FBT_ADAPTIVE"}]
+            "trainingPlanList": [{"trainingPlanId": 43075722, "trainingPlanCategory": "FBT_BASIC"}]
+        }
+        client._garmin.get_training_plan_by_id.return_value = {
+            "workouts": [{"date": "2026-07-06", "workoutName": "Tempo Run"}]
+        }
+
+        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+
+        assert len(workouts) == 1
+        assert workouts[0].plan_id == "43075722"
+        client._garmin.get_training_plan_by_id.assert_called_once_with(43075722)
+
+    def test_fetch_planned_workouts_routes_adaptive_plans_to_the_adaptive_endpoint(self):
+        # demo.py routes trainingPlanCategory == "FBT_ADAPTIVE" to
+        # get_adaptive_training_plan_by_id instead of the phased get_training_plan_by_id --
+        # confirmed live: the same real account's active plan is FBT_ADAPTIVE.
+        client = make_client()
+        client._garmin.get_training_plans.return_value = {
+            "trainingPlanList": [
+                {"trainingPlanId": 43075722, "trainingPlanCategory": "FBT_ADAPTIVE"}
+            ]
         }
         client._garmin.get_adaptive_training_plan_by_id.return_value = {
             "workouts": [{"date": "2026-07-06", "workoutName": "Adaptive Run"}]
@@ -817,7 +840,7 @@ class TestGarminClientFetch:
 
         assert len(workouts) == 1
         assert workouts[0].workout_name == "Adaptive Run"
-        client._garmin.get_adaptive_training_plan_by_id.assert_called_once_with("plan-1")
+        client._garmin.get_adaptive_training_plan_by_id.assert_called_once_with(43075722)
         client._garmin.get_training_plan_by_id.assert_not_called()
 
     def test_fetch_planned_workouts_routes_non_adaptive_plans_to_the_phased_endpoint(self):
@@ -945,6 +968,18 @@ class TestGarminClientFetch:
         result = client.fetch_diagnostic("training_plan_detail")
 
         assert "No training plans found" in result["note"]
+
+    def test_fetch_diagnostic_training_plan_detail_extracts_trainingplanid_key(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = {
+            "trainingPlanList": [{"trainingPlanId": 43075722, "trainingPlanCategory": "FBT_BASIC"}]
+        }
+        client._garmin.get_training_plan_by_id.return_value = {"workouts": ["raw"]}
+
+        result = client.fetch_diagnostic("training_plan_detail")
+
+        assert result == {"workouts": ["raw"]}
+        client._garmin.get_training_plan_by_id.assert_called_once_with(43075722)
 
     def test_fetch_diagnostic_scheduled_workouts_returns_raw_response(self):
         client = make_client()

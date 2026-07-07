@@ -815,12 +815,25 @@ def test_diagnostics_route_rejects_unknown_check(tmp_path):
 def test_diagnostics_route_truncates_long_output(tmp_path):
     with patch("app.mfa_web.server.GarminClient") as mock_client_cls:
         mock_client = mock_client_cls.return_value
-        mock_client.fetch_diagnostic.return_value = {"data": "x" * 20000}
+        mock_client.fetch_diagnostic.return_value = {"data": "x" * 100000}
 
         response = _client(tmp_path).post("/diagnostics", data={"check": "training_plans"})
 
     assert response.status_code == 200
     assert "Output truncated" in response.text
+
+
+def test_diagnostics_route_does_not_truncate_a_full_calendar_months_worth_of_output(tmp_path):
+    # Regression test: a real get_scheduled_workouts response for one month was truncated by
+    # the original 8000-char cap before reaching the dates that mattered for troubleshooting.
+    with patch("app.mfa_web.server.GarminClient") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        mock_client.fetch_diagnostic.return_value = {"data": "x" * 30000}
+
+        response = _client(tmp_path).post("/diagnostics", data={"check": "scheduled_workouts"})
+
+    assert response.status_code == 200
+    assert "Output truncated" not in response.text
 
 
 def test_format_timestamp_drops_microseconds_and_offset():
