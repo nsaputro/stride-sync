@@ -87,7 +87,7 @@ them locally.
   to the sync scheduler's database.
 - **Read-only**: exposes tools/resources for querying activities, trends, and summaries. No
   write-back to Garmin is planned initially (see Milestones — a future write-back milestone would
-  need explicit user confirmation flows and is out of scope for v1.0).
+  need explicit user confirmation flows and is out of scope for Stage 19).
 
 ### HA add-on configuration (`config.yaml` `options:` / `schema:`)
 
@@ -151,7 +151,7 @@ rather than just reporting it more clearly:
 A **web-based MFA entry flow** through HA ingress — flagged by the same user who hit this, since
 terminal access isn't something every HA user has set up — is now implemented too:
 `app/mfa_web/server.py`, a small Starlette app reached at the add-on's ingress panel
-(`ingress: true`/`ingress_port` in `config.yaml`, revisiting the v0.4 milestone's original "no
+(`ingress: true`/`ingress_port` in `config.yaml`, revisiting the Stage 4 milestone's original "no
 ingress" decision). It shares `app/sync/mfa_login.py`'s login/resume logic with the CLI bootstrap
 above, so both entry points implement the flow exactly once. Login state (the pending
 `("needs_mfa", state)` tuple) lives in a single in-process slot — correct because there is
@@ -285,15 +285,15 @@ Tunnel (`cloudflared`) HA add-on install. Mechanically this needs only a tunnel 
 routed at `http://homeassistant.local:8765` (the MCP port, not the `8767` ingress port — that
 serves the browser-only MFA login page).
 
-**Confirmed (milestone v0.9): Claude's "Add custom connector" UI cannot send `mcp_auth_token` at
-all.** v0.6 below shipped `mcp_auth_token` on the assumption that it was merely unconfirmed
+**Confirmed (milestone Stage 9): Claude's "Add custom connector" UI cannot send `mcp_auth_token` at
+all.** Stage 6 below shipped `mcp_auth_token` on the assumption that it was merely unconfirmed
 whether Claude's connector UI could attach a custom `Authorization` header; verified since then
 that it definitively cannot — the UI only offers OAuth (Client ID/Secret) or no auth, with no
 field for a static bearer token (tracked upstream as a known gap, e.g.
 `anthropics/claude-ai-mcp` issues #112 and #411). There is only one MCP server (and one
 `mcp_auth_token` setting) regardless of whether a request arrives over the LAN or through the
 tunnel, and `SharedSecretVerifier` rejects any request without a valid token when it's set (see
-v0.6 below) — so this isn't "set it anyway, it can only help": if `mcp_auth_token` is set,
+Stage 6 below) — so this isn't "set it anyway, it can only help": if `mcp_auth_token` is set,
 **every** request from Claude's own connector gets `401`'d too, since it can never send one.
 Setting `mcp_auth_token` and getting Claude's official mobile connector to work are mutually
 exclusive on the same server. `DOCS.md` documents leaving `mcp_auth_token` empty for this path
@@ -317,7 +317,7 @@ the connecting client sending anything at all.
 
 ## 3. Milestones
 
-### v0.1 — Manual sync, verify schema 🔄
+### Stage 1 — Manual sync, verify schema 🔄
 
 - ✅ `app/sync/garmin_client.py`: authenticate against Garmin Connect via `garmy`, wrapped so
   callers only ever see `GarminAuthError`/`GarminAPIError` (never a raw `garmy` or `requests`
@@ -342,9 +342,9 @@ the connecting client sending anything at all.
 - ✅ Release pipeline (`.github/workflows/release.yml`): tags `stridesync/NEXT_VERSION`, builds
   and pushes multi-arch (`amd64`/`aarch64`) images to GHCR, creates a GitHub release, and opens
   the `chore/post-release` PR — see `CLAUDE.md`'s CI / Release section. Not yet run for a real
-  release (that's v1.0's last checkbox).
+  release (that's Stage 19's last checkbox).
 
-### v0.2 — Scheduled sync service 🔄
+### Stage 2 — Scheduled sync service 🔄
 
 - ✅ `rootfs/etc/services.d/sync-scheduler/run` — s6 service wrapping the scheduler loop
   (`app/sync/scheduler.py`'s `run_forever`), now exporting `garmin_username`/`garmin_password`/
@@ -373,7 +373,7 @@ the connecting client sending anything at all.
   keeps running rather than crashing the service — both as a unit test
   (`test_auth_failure_does_not_crash_the_loop`) and live via the CLI
 
-### v0.3 — MCP server over HTTP 🔄
+### Stage 3 — MCP server over HTTP 🔄
 
 - ✅ `app/mcp/server.py` — built directly on `fastmcp`, wired to the sync scheduler's SQLite DB
   over a read-only connection (see Architecture §1 for why `garmy-mcp`'s bundled server wasn't
@@ -392,12 +392,12 @@ the connecting client sending anything at all.
   last-sync status (`last_sync_status`) — plus `activity_laps` for per-lap detail within one
   activity
 
-### v0.4 — HA Supervisor add-on packaging 🔄
+### Stage 4 — HA Supervisor add-on packaging 🔄
 
 - ✅ `stridesync/config.yaml` finalized: `options` + `schema` for all five settings in §1
 - ✅ `stridesync/build.yaml` multi-arch (`aarch64`, `amd64`) pinned to a specific
   `ghcr.io/hassio-addons/base` tag (`18.0.1`) — implicitly verified: CI's Docker build test job
-  has been building against this exact tag since v0.1 and passing on every PR
+  has been building against this exact tag since Stage 1 and passing on every PR
 - ✅ `icon.png` (128×128) and `logo.png` (250×100) — a simple generated runner-glyph placeholder
   (flat teal background, white pictogram, "StrideSync" wordmark on the logo), replacing the 1×1
   scaffolding PNGs. Not professional artwork — reasonable to swap for real branding later, but no
@@ -412,14 +412,14 @@ the connecting client sending anything at all.
   `https://github.com/nsaputro/stride-sync` under **Settings → Add-ons → Add-on Store → ⋮ →
   Repositories** on a real HA instance to confirm HA recognizes it as a valid add-on source.
 - ⬜ Full install-from-repository flow — **not done**. Needs a real HA instance and (until a
-  release is tagged, see v1.0) a locally built image, since `stridesync/config.yaml`'s `image:`
+  release is tagged, see Stage 19) a locally built image, since `stridesync/config.yaml`'s `image:`
   field points at a GHCR path with no pushed images yet. This is the main remaining gap before
   the add-on can genuinely be called "released" — see the Getting Started section for the
   standalone `docker build`/`docker run` steps that substitute for it pre-release.
 
-### v0.5 — Training baseline & effort granularity for marathon pacing 🔄
+### Stage 5 — Training baseline & effort granularity for marathon pacing 🔄
 
-Average pace/HR per activity (v0.1–v0.3) answers "was this run fast or slow," but not "was this
+Average pace/HR per activity (Stage 1–Stage 3) answers "was this run fast or slow," but not "was this
 the *right* effort for a marathon-training plan" — that needs a physiological reference point
 (what's this athlete's threshold?) and, ideally, effort *distribution* within a run, not just its
 average. Requested directly by the account owner after reviewing the synced data for exactly
@@ -443,7 +443,7 @@ gap analysis that led to this scope.
   conversation rather than this codebase baking in training-science formulas itself (matches the
   existing philosophy: purpose-built data access, not opinionated analysis logic server-side).
 - ⬜ Field mappings for all three endpoints are **best-effort, not yet verified against a live
-  account** — same caveat as v0.1's still-open item for the activity-list endpoint. None of
+  account** — same caveat as Stage 1's still-open item for the activity-list endpoint. None of
   these three endpoints are normalized by `python-garminconnect` itself (all return raw
   `connectapi()` JSON), so the exact key names are inferred from the wider Garmin Connect tooling
   ecosystem. Verify against a real account and adjust field lookups if anything comes back
@@ -454,7 +454,7 @@ gap analysis that led to this scope.
   new `fetch_*` methods for this milestone catch broadly and return `None`/`[]` rather than
   raising, unlike every other `fetch_*` method on the class — documented inline on each.
 
-### v0.6 — Optional MCP auth for remote/internet exposure 🔄
+### Stage 6 — Optional MCP auth for remote/internet exposure 🔄
 
 Requested directly: reach the MCP server from Claude on Android through an existing Cloudflare
 Tunnel add-on install. The MCP server (§2) was always designed to be reachable remotely, but
@@ -479,12 +479,12 @@ itself rather than relied on Cloudflare Access alone.
   option.
 - ✅ Whether Claude's custom-connector UI (web/Desktop/Android) supports attaching a bearer token
   / custom `Authorization` header to a remote MCP connection — the open question this milestone
-  originally left unconfirmed — was resolved (in the negative) during milestone v0.9's
-  documentation work: it does not, and only supports OAuth or no auth. See v0.9's "Remote access
+  originally left unconfirmed — was resolved (in the negative) during milestone Stage 9's
+  documentation work: it does not, and only supports OAuth or no auth. See Stage 9's "Remote access
   beyond the LAN" note in §2 for the real mitigation (a Cloudflare WAF IP allowlist) since
   `mcp_auth_token` alone can't gate Claude's own connector traffic.
 
-### v0.7 — "Running" tab: weekly mileage on the web UI 🔄
+### Stage 7 — "Running" tab: weekly mileage on the web UI 🔄
 
 Requested directly, as a first step toward the web UI showing more than login/sync status.
 
@@ -498,7 +498,7 @@ Requested directly, as a first step toward the web UI showing more than login/sy
   a malformed `start_time_local` on one row is skipped rather than failing the whole page; a
   missing `distance_meters` counts as 0 toward that week's total rather than crashing.
 
-### v0.8 — Settings tab: one-off backfill from a start date 🔄
+### Stage 8 — Settings tab: one-off backfill from a start date 🔄
 
 Requested directly, after clarifying that regular syncs are count-based (top N most recent
 activities, see `GarminClient.fetch_recent_activities`) rather than date-based — there was no way
@@ -561,7 +561,7 @@ to pull in older history beyond whatever `limit` happens to cover.
   result/error (plus the form, so a new one can still be started) once done, otherwise the plain
   form as before.
 
-### v0.9 — Claude connection docs: Desktop direct + mobile via Cloudflare Tunnel, example prompts 🔄
+### Stage 9 — Claude connection docs: Desktop direct + mobile via Cloudflare Tunnel, example prompts 🔄
 
 Requested directly: documentation for connecting Claude Desktop (direct LAN) and Claude mobile
 (via an existing Cloudflare Tunnel install), plus example prompts for run analysis and
@@ -576,7 +576,7 @@ training-pace recommendations.
 - ✅ **Discovered and documented a real client-side limitation** while researching the mobile
   setup: Claude's "Add custom connector" UI only supports OAuth or no authentication — there is no
   field for a static bearer token, so it cannot send StrideSync's `mcp_auth_token` header at all.
-  This resolves v0.6's previously-open question in the negative (see that milestone's updated
+  This resolves Stage 6's previously-open question in the negative (see that milestone's updated
   bullet) and means `mcp_auth_token` alone does not protect a Cloudflare-Tunnel-exposed endpoint
   against Claude's own connector traffic.
 - ✅ Verified Anthropic publishes a fixed outbound IP range for MCP-connector fetches
@@ -597,9 +597,9 @@ training-pace recommendations.
   race predictions, `pace_cadence_hr_trend`, `training_load_summary`), not generic examples
   disconnected from what StrideSync can actually answer.
 
-### v0.10 — Fix: "Log in again" silently resumed the cached session instead of re-authenticating 🔄
+### Stage 10 — Fix: "Log in again" silently resumed the cached session instead of re-authenticating 🔄
 
-Found live while walking through the v0.9 Cloudflare Tunnel setup end-to-end: once the tunnel
+Found live while walking through the Stage 9 Cloudflare Tunnel setup end-to-end: once the tunnel
 was working, a display-name profile issue led to trying "Log in again" on an MFA-enabled
 account, which never showed the MFA prompt at all — clicking it appeared to do nothing.
 
@@ -634,13 +634,13 @@ account, which never showed the MFA prompt at all — clicking it appeared to do
   present with an explicit `null`, so this looks like a Garmin-side data issue (or the account
   editing a different profile field than the one this specific endpoint reads), not something
   fixable from StrideSync's side. Left as a known, non-fatal, already-gracefully-handled
-  limitation (milestone v0.5) rather than a bug to chase further here.
+  limitation (milestone Stage 5) rather than a bug to chase further here.
 
-### v0.11 — Temperature in per-activity time-series samples 🔄
+### Stage 11 — Temperature in per-activity time-series samples 🔄
 
 Requested directly: is temperature synced with activity data? It wasn't — checked the schema and
 sync code and confirmed no temperature field existed anywhere, despite Garmin's per-second chart
-data (already fetched for `activity_samples`, milestone v0.5) including it for devices that
+data (already fetched for `activity_samples`, milestone Stage 5) including it for devices that
 record it.
 
 - ✅ New `temperature_celsius` field: `ActivitySample` dataclass, `_SAMPLE_METRIC_KEYS` gains
@@ -662,7 +662,7 @@ record it.
   `db.connect()`, and confirms both the new column appears and pre-existing data survives
   untouched.
 
-### v0.12 — Recovery, readiness & training-plan signals 🔄
+### Stage 12 — Recovery, readiness & training-plan signals 🔄
 
 The existing MCP tools describe **what happened** in a run, but nothing captured
 **recovery/readiness** — sleep, HRV, and Garmin's own training-readiness score are the earliest
@@ -694,24 +694,24 @@ across three PRs for review size.
   the many accounts with no active plan. New `planned_vs_actual(days=14)` MCP tool (planned
   workout LEFT JOINed against `activities` by calendar date).
 - ⬜ Field mappings for all six new/reused endpoints are **best-effort, not yet verified against
-  a live account** — same caveat as v0.1/v0.5/v0.11's still-open items. `get_rhr_day` and
+  a live account** — same caveat as Stage 1/Stage 5/Stage 11's still-open items. `get_rhr_day` and
   `get_sleep_data` both touch `self.display_name` internally, so the account already hitting
-  v0.10's known display-name gap may see `resting_hr`/sleep fields come back `NULL` specifically
+  Stage 10's known display-name gap may see `resting_hr`/sleep fields come back `NULL` specifically
   *because of that gap*, independent of whether the guessed JSON keys are right — check both
   possibilities before assuming a wrong field-name guess. The training-plan shape is still the
-  least certain of the six — see v0.15 for the first round of live-account fixes to it.
+  least certain of the six — see Stage 15 for the first round of live-account fixes to it.
 - ✅ Brand-new tables only (`daily_wellness`, `vo2max_history`, `planned_workouts`) — confirmed
-  none of the three need `_add_column_if_missing`/`ALTER TABLE` migration code, unlike v0.11's
+  none of the three need `_add_column_if_missing`/`ALTER TABLE` migration code, unlike Stage 11's
   `temperature_celsius` (which added a column to an already-shipped table). `CREATE TABLE IF NOT
   EXISTS` in `schema.sql` is sufficient for every existing install.
 
-### v0.13 — Incremental activity sync + per-record-type sync log counts 🔄
+### Stage 13 — Incremental activity sync + per-record-type sync log counts 🔄
 
 Regular scheduled syncs (`run_sync_once`) always fetched a fixed most-recent-20 activities
 (`GarminClient.fetch_recent_activities`) — a busy stretch (more than 20 activities logged since
 the last sync) would silently miss activities older than the 20th-most-recent, with no way to
 notice from the logs alone. Separately, the only per-sync signal available was a single
-"N activities" count — confirming whether the new v0.12 tables (`daily_wellness`,
+"N activities" count — confirming whether the new Stage 12 tables (`daily_wellness`,
 `vo2max_history`, `planned_workouts`) actually got fresh data required a direct SQL query against
 the database, rather than being visible from the add-on log alone.
 
@@ -731,7 +731,7 @@ the database, rather than being visible from the add-on log alone.
   confirming what actually synced is a log line away instead of requiring a direct SQL query.
   This is a log-only change; `sync_log`'s schema is untouched.
 
-### v0.14 — Backfill parity with regular sync + a real infinite-backfill-loop bug fix 🔄
+### Stage 14 — Backfill parity with regular sync + a real infinite-backfill-loop bug fix 🔄
 
 `run_backfill_sync` only ever wrote activities — `training_baseline`/`daily_wellness`/
 `vo2max_history`/`planned_workouts` stayed the regular scheduled sync's job, so backfilling
@@ -751,7 +751,7 @@ activities" repeating every second until the container was restarted.
   same fixed `[-_PLANNED_WORKOUT_LOOKBACK_DAYS, +_PLANNED_WORKOUT_LOOKAHEAD_DAYS]`-from-today
   window `run_sync_once` uses, regardless of `start_date`: a training plan is a forward-looking
   concept, not historical data a backfill would otherwise miss.
-- ✅ `run_backfill_sync` logs per-record-type counts on success/failure too, matching v0.13's
+- ✅ `run_backfill_sync` logs per-record-type counts on success/failure too, matching Stage 13's
   `run_sync_once` change.
 - ✅ **Root-caused and fixed the reported infinite-backfill-loop bug**: `app/mfa_web/server.py`'s
   backfill POST handler rendered the progress page directly (200 OK) instead of redirecting.
@@ -767,12 +767,12 @@ activities" repeating every second until the container was restarted.
   confirming `run_backfill_sync` is invoked exactly once no matter how many times the page
   "reloads" afterward.
 
-### v0.15 — First live-account fix for planned_workouts 🔄
+### Stage 15 — First live-account fix for planned_workouts 🔄
 
 A live user reported an actual active Garmin training plan (screenshotted from the Garmin
 Connect app's "Workout Schedule" view — named workouts like "Threshold"/"Base"/"Anaerobic"
 assigned to specific calendar dates) producing "0 planned workouts" on both sync and backfill,
-confirming the v0.12 field-mapping caveat was right to flag this as the least-certain of the six
+confirming the Stage 12 field-mapping caveat was right to flag this as the least-certain of the six
 endpoints.
 
 - ✅ **Confirmed and fixed a real bug**: `get_training_plans()`'s actual top-level key is
@@ -797,16 +797,16 @@ endpoints.
   both the training-plan detail endpoint and `get_scheduled_workouts` was sent to the reporting
   user; a follow-up fix once real output comes back. **Confirmed the `trainingPlanList` fix alone
   did not resolve the reported issue** (live re-test still shows `0 planned workouts`) — the
-  remaining gap was one level deeper: **found and fixed in v0.17** via the v0.16 Diagnostics
+  remaining gap was one level deeper: **found and fixed in Stage 17** via the Stage 16 Diagnostics
   panel (a plan entry's own id field is `trainingPlanId`, not `planId`/`id`). The detail
   response's own shape (workout dates/names/target pace/HR) is *still* unconfirmed — that's the
-  next thing v0.17 needs live output for.
+  next thing Stage 17 needs live output for.
 
-### v0.16 — In-app Diagnostics panel for live-account troubleshooting 🔄
+### Stage 16 — In-app Diagnostics panel for live-account troubleshooting 🔄
 
 This session has now hit the same shape of live-account bug four times (temperature sample key
-in v0.11, `fetch_vo2max`'s list-vs-dict crash and `fetch_daily_wellness`'s identical gap in the
-v0.12 follow-up fix, `planned_workouts`'s `trainingPlanList` key in v0.15) — each one required
+in Stage 11, `fetch_vo2max`'s list-vs-dict crash and `fetch_daily_wellness`'s identical gap in the
+Stage 12 follow-up fix, `planned_workouts`'s `trainingPlanList` key in Stage 15) — each one required
 handing the reporting user a one-off Python script to run via `docker exec`/`ha addons exec` just
 to see the real Garmin API response shape. Building that capability into the add-on itself means
 the next unconfirmed-field-mapping bug doesn't need a fresh script written and walked through
@@ -825,7 +825,7 @@ each time.
   `DIAGNOSTIC_CHECKS`, so adding a future check is a one-line addition) + a button that POSTs to
   a new `/diagnostics` route, logs in, runs the selected check, and renders the exact JSON
   response (`json.dumps(..., indent=2)`, capped at `_DIAGNOSTIC_OUTPUT_LIMIT` — originally 8000
-  chars, raised to 60000 in v0.17 once that turned out too small in practice) directly in the
+  chars, raised to 60000 in Stage 17 once that turned out too small in practice) directly in the
   page — no shell/docker access needed to report a wrong-looking field going forward.
 - ✅ Verified end-to-end with a live ASGI test client: `/settings` shows the new dropdown, and a
   mocked `/diagnostics` POST renders the raw JSON in the response body.
@@ -834,11 +834,11 @@ each time.
   `navigator.clipboard.writeText()` against the exact `<pre id="diagnostic-output">` text — not a
   re-serialized copy, so what gets pasted is byte-identical to what's displayed.
 
-### v0.17 — Second live-account fix for planned_workouts: the real `trainingPlanId` key 🔄
+### Stage 17 — Second live-account fix for planned_workouts: the real `trainingPlanId` key 🔄
 
-The v0.16 Diagnostics panel immediately paid off: the reporting user ran the `training_plans`
+The Stage 16 Diagnostics panel immediately paid off: the reporting user ran the `training_plans`
 check against their real active plan ("TCS Amsterdam Marathon Plan") and pasted back the actual
-JSON — confirming `trainingPlanList` (v0.15's fix) was right, but also that `_get(plan, "planId",
+JSON — confirming `trainingPlanList` (Stage 15's fix) was right, but also that `_get(plan, "planId",
 "id")` matched neither key on a real plan entry, so `plan_id` was always `None` and every plan
 was silently skipped. The `training_plan_detail` check's own diagnostic output made this
 unambiguous: `{"note": "Could not find a plan id (planId/id) on the first plan entry.", ...}`.
@@ -847,7 +847,7 @@ unambiguous: `{"note": "Could not find a plan id (planId/id) on the first plan e
   `43075722`), not `planId`/`id`. `fetch_planned_workouts` and `fetch_diagnostic`'s
   `training_plan_detail` check both updated to check `trainingPlanId` first, keeping the old
   guesses as lower-priority `_get()` fallbacks. Also confirmed live that this same account's plan
-  has `trainingPlanCategory: "FBT_ADAPTIVE"`, verifying v0.15's adaptive-routing fix is correct
+  has `trainingPlanCategory: "FBT_ADAPTIVE"`, verifying Stage 15's adaptive-routing fix is correct
   too — `get_adaptive_training_plan_by_id` is the right endpoint for this account.
 - ✅ Verified against the exact real JSON shape pasted by the reporting user (not just a synthetic
   test fixture): `fetch_planned_workouts` now correctly extracts `plan_id="43075722"` and calls
@@ -858,15 +858,15 @@ unambiguous: `{"note": "Could not find a plan id (planId/id) on the first plan e
   (`get_scheduled_workouts`'s `calendarItems` list is verbose; each item has ~30 mostly-null
   fields). The `<pre>` box already scrolls internally and the copy button handles large text
   fine, so there was no reason to keep the original conservative cap.
-- ✅ **Resolved in v0.18**: the training-plan detail response's own shape is now confirmed against
+- ✅ **Resolved in Stage 18**: the training-plan detail response's own shape is now confirmed against
   a real `get_adaptive_training_plan_by_id` response (the reporting user's `plan_id` fix from this
-  same milestone let the sync reach that endpoint for the first time). See v0.18.
+  same milestone let the sync reach that endpoint for the first time). See Stage 18.
 
-### v0.18 — Third live-account fix: the real `taskList`/`taskWorkout` shape, workouts confirmed end-to-end 🔄
+### Stage 18 — Third live-account fix: the real `taskList`/`taskWorkout` shape, workouts confirmed end-to-end 🔄
 
-With `plan_id` extraction fixed (v0.17), the reporting user's next sync reached the real
+With `plan_id` extraction fixed (Stage 17), the reporting user's next sync reached the real
 `get_adaptive_training_plan_by_id` response for the first time — and pasted it back complete.
-This is the first `planned_workouts` fix in three rounds (v0.15/v0.17/v0.18) confirmed
+This is the first `planned_workouts` fix in three rounds (Stage 15/Stage 17/Stage 18) confirmed
 byte-for-byte against real data end-to-end, not just "no longer 400s."
 
 - ✅ **Confirmed the scheduled-day list key is `taskList`**, not `workouts`/`scheduledWorkouts`/
@@ -898,12 +898,12 @@ byte-for-byte against real data end-to-end, not just "no longer 400s."
   reporting user pasted (7 day-entries: 5 real workouts + 2 rest days), asserting the exact
   durations/names/dates match and rest days are correctly excluded.
 
-### v1.0 — Documented, versioned, changelog-tracked release 🔄
+### Stage 19 — Documented, versioned, changelog-tracked release 🔄
 
-- ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added
+- ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone Stage 6 added
   `mcp_auth_token`), MCP connection instructions (`http://homeassistant.local:8765/mcp`), and the
   known-risk note about Garmin auth breakage
-- ✅ `README.md` complete: accurate status (v0.1–v0.4 implemented, nothing released yet), a
+- ✅ `README.md` complete: accurate status (Stage 1–Stage 4 implemented, nothing released yet), a
   standalone Quick Start (`docker build`/`docker run`, no HA instance required), install
   instructions, config table, and the known-risk note
 - ✅ `CHANGELOG.md` (root) and `stridesync/CHANGELOG.md` (add-on-local) populated for every
@@ -936,9 +936,9 @@ byte-for-byte against real data end-to-end, not just "no longer 400s."
 ### Build & run the add-on standalone
 
 See **Local Development & Testing** in `CLAUDE.md` for the full standalone `docker build` /
-`docker run` walkthrough — you do not need a Home Assistant instance until milestone v0.4.
+`docker run` walkthrough — you do not need a Home Assistant instance until milestone Stage 4.
 
-### Manual sync (v0.1+)
+### Manual sync (Stage 1+)
 
 ```bash
 cd stridesync
@@ -946,7 +946,7 @@ pip install -r app/requirements.txt
 python3 -m app.sync.scheduler --once   # one-shot sync, doesn't wait for the interval
 ```
 
-### HA Add-on Installation (once published, v0.4+)
+### HA Add-on Installation (once published, Stage 4+)
 
 1. Settings → Add-ons → Add-on Store → ⋮ → Repositories
 2. Add: `https://github.com/nsaputro/stride-sync`
