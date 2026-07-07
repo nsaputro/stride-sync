@@ -276,9 +276,10 @@ def _sync_activities(
     synced_at: str,
 ):
     """Write a fetched activity list (with laps/HR-zones/samples) to the DB, one at a time —
-    shared by `run_sync_once` and `run_backfill_sync`, which only differ in how the activity
-    list itself was fetched (most-recent-N vs. a date range) and whether `training_baseline`
-    gets refreshed.
+    shared by `run_sync_once` and `run_backfill_sync`, which only differ in which date range the
+    activity list itself was fetched for (since the last successful sync vs. an explicit
+    caller-given start date) and whether `training_baseline`/`daily_wellness`/`vo2max_history`/
+    `planned_workouts` get refreshed.
 
     A generator (yields once per completed activity) rather than returning a final count, so a
     caller iterating it still knows how many completed even if a later activity's fetch raises
@@ -296,11 +297,44 @@ def _sync_activities(
         yield
 
 
-def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> int:
-    """Run a single sync pass: login, fetch recent activities + laps, write to SQLite.
+# Fallback lookback window for the very first sync an account ever runs, when there is no prior
+# successful sync_log row to compute an incremental start date from.
+_FIRST_SYNC_LOOKBACK_DAYS = 7
+
+
+def _last_successful_sync_date(conn: sqlite3.Connection) -> Optional[str]:
+    """Calendar date (`YYYY-MM-DD`) of the most recent successful sync, or `None` if this
+    account has never completed one yet.
+
+    Used by `run_sync_once` to fetch activities incrementally (since that date) instead of a
+    fixed most-recent-N cutoff — a fixed count silently misses activities on a busy stretch (more
+    than N logged since the last sync) and re-fetches everything again on a quiet one. `started_at`
+    (not `finished_at`) is used deliberately: a failed sync still moved forward in time attempting
+    one, so the next attempt should re-cover from the same starting point rather than skip ahead
+    past whatever it failed to sync.
+    """
+    row = conn.execute(
+        "SELECT started_at FROM sync_log WHERE status = 'success' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return row["started_at"][:10]
+
+
+def run_sync_once(settings: Settings, client: GarminClient) -> int:
+    """Run a single sync pass: login, fetch activities since the last successful sync + laps,
+    write to SQLite.
+
+    Activities are fetched incrementally — since the previous successful sync's date, or
+    `_FIRST_SYNC_LOOKBACK_DAYS` (7) days back if this account has never synced successfully
+    before — rather than a fixed most-recent-N count, so a busy stretch (more activities logged
+    than a fixed count would cover) is never silently missed.
 
     Records the outcome in `sync_log` regardless of success or failure (CLAUDE.md: "Fail loud,
     not silent" — a broken sync must never leave the database looking current without a trace).
+    Every record type's count (activities, daily_wellness, vo2max_history, planned_workouts) is
+    logged on both the success and failure path, so an add-on log line alone is enough to confirm
+    what actually got synced without needing to query the database directly.
 
     Returns:
         Number of activities synced.
@@ -312,27 +346,34 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
     started_at = datetime.now(timezone.utc).isoformat()
     conn = db.connect(settings.db_path)
     activities_synced = 0
+    wellness_synced = 0
+    vo2max_synced = 0
+    planned_workouts_synced = 0
 
     try:
         client.login()
-        activities = client.fetch_recent_activities(limit=limit)
+        today = datetime.now(timezone.utc).date()
+        since_date = _last_successful_sync_date(conn) or (
+            today - timedelta(days=_FIRST_SYNC_LOOKBACK_DAYS)
+        ).isoformat()
+        activities = client.fetch_activities_since(since_date)
 
         synced_at = datetime.now(timezone.utc).isoformat()
         _upsert_training_baseline(conn, client.fetch_training_baseline(), synced_at)
-        today = datetime.now(timezone.utc).date()
         for offset in range(_WELLNESS_WINDOW_DAYS):
             cdate = (today - timedelta(days=offset)).isoformat()
             _upsert_daily_wellness(conn, client.fetch_daily_wellness(cdate), synced_at)
-            _upsert_vo2max(conn, client.fetch_vo2max(cdate), synced_at)
+            wellness_synced += 1
+            vo2max_reading = client.fetch_vo2max(cdate)
+            _upsert_vo2max(conn, vo2max_reading, synced_at)
+            if vo2max_reading is not None:
+                vo2max_synced += 1
         plan_start = (today - timedelta(days=_PLANNED_WORKOUT_LOOKBACK_DAYS)).isoformat()
         plan_end = (today + timedelta(days=_PLANNED_WORKOUT_LOOKAHEAD_DAYS)).isoformat()
-        _replace_planned_workouts(
-            conn,
-            plan_start,
-            plan_end,
-            client.fetch_planned_workouts(plan_start, plan_end),
-            synced_at,
-        )
+        planned_workouts = client.fetch_planned_workouts(plan_start, plan_end)
+        _replace_planned_workouts(conn, plan_start, plan_end, planned_workouts, synced_at)
+        planned_workouts_synced = len(planned_workouts)
+
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
         conn.commit()
@@ -345,7 +386,15 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
             (started_at, datetime.now(timezone.utc).isoformat(), activities_synced, str(exc)),
         )
         conn.commit()
-        logger.error("StrideSync sync failed: %s", exc)
+        logger.error(
+            "StrideSync sync failed: %s (partial progress before failure: %d activities, "
+            "%d wellness records, %d vo2max records, %d planned workouts)",
+            exc,
+            activities_synced,
+            wellness_synced,
+            vo2max_synced,
+            planned_workouts_synced,
+        )
         raise
     else:
         conn.execute(
@@ -356,7 +405,14 @@ def run_sync_once(settings: Settings, client: GarminClient, limit: int = 20) -> 
             (started_at, datetime.now(timezone.utc).isoformat(), activities_synced),
         )
         conn.commit()
-        logger.info("StrideSync sync succeeded: %d activities", activities_synced)
+        logger.info(
+            "StrideSync sync succeeded: %d activities, %d wellness records, %d vo2max records, "
+            "%d planned workouts",
+            activities_synced,
+            wellness_synced,
+            vo2max_synced,
+            planned_workouts_synced,
+        )
     finally:
         conn.close()
 
@@ -371,9 +427,11 @@ def run_backfill_sync(
 ) -> int:
     """One-off backfill: fetch every activity from `start_date` through today and write it the
     same way a regular sync does — a separate entry point from `run_sync_once` (see
-    PROJECT_PLAN.md milestone v0.8) since it's date-based rather than count-based, and can cover
-    far more activities in one call. Does not refresh `training_baseline`, `daily_wellness`,
-    `vo2max_history`, or `planned_workouts` either — those stay the regular scheduled sync's job.
+    PROJECT_PLAN.md milestone v0.8) since it takes an explicit caller-given start date that can
+    reach arbitrarily far into the past, rather than `run_sync_once`'s implicit "since the last
+    successful sync" range (see milestone v0.13), and so can cover far more activities in one
+    call. Does not refresh `training_baseline`, `daily_wellness`, `vo2max_history`, or
+    `planned_workouts` either — those stay the regular scheduled sync's job.
 
     Args:
         progress_callback: If given, called as `progress_callback(completed, total)` — once
@@ -446,7 +504,6 @@ def run_backfill_sync(
 def run_forever(
     settings: Settings,
     make_client: Callable[[], GarminClient],
-    limit: int = 20,
     interval_seconds: Optional[float] = None,
     stop_event: Optional[threading.Event] = None,
     max_iterations: Optional[int] = None,
@@ -473,7 +530,7 @@ def run_forever(
     iterations = 0
     while True:
         try:
-            run_sync_once(settings, make_client(), limit=limit)
+            run_sync_once(settings, make_client())
         except (GarminAuthError, GarminAPIError):
             pass  # already logged + recorded in sync_log; retry on the next interval
 
@@ -509,12 +566,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Used for manual CLI verification (see PROJECT_PLAN.md milestone v0.1)."
         ),
     )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=20,
-        help="Maximum number of recent activities to sync (default: 20).",
-    )
     args = parser.parse_args(argv)
 
     settings = Settings.from_env()
@@ -530,7 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.once:
         try:
-            count = run_sync_once(settings, make_client(), limit=args.limit)
+            count = run_sync_once(settings, make_client())
         except (GarminAuthError, GarminAPIError):
             return 1
         print(f"Synced {count} activities to {settings.db_path}")
@@ -541,7 +592,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     stop_event = threading.Event()
     _install_shutdown_handler(stop_event)
-    run_forever(settings, make_client, limit=args.limit, stop_event=stop_event)
+    run_forever(settings, make_client, stop_event=stop_event)
     return 0
 
 

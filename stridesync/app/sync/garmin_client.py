@@ -705,12 +705,14 @@ class GarminClient:
 
     def fetch_activities_since(self, start_date: str) -> List[GarminActivity]:
         """Fetch every activity from `start_date` (YYYY-MM-DD) through today, with the same
-        distance/pace/cadence detail as `fetch_recent_activities` — used for a one-off backfill
-        (see PROJECT_PLAN.md milestone v0.8). Unlike `fetch_recent_activities`'s count-based
-        `limit`, this is date-based and can return far more than 20 activities, so a wide date
-        range can take a while and make many Garmin API calls (one list page per 20 activities,
-        plus 4 detail calls per activity — the same per-activity cost a regular sync already
-        pays, just for more activities at once).
+        distance/pace/cadence detail as `fetch_recent_activities`. Used by both `run_sync_once`
+        (incrementally, since the last successful sync — see PROJECT_PLAN.md milestone v0.13)
+        and the one-off backfill (`run_backfill_sync`, with an explicit caller-given start date —
+        see milestone v0.8). Unlike `fetch_recent_activities`'s count-based `limit`, this is
+        date-based and can return far more than a fixed count, so a wide date range can take a
+        while and make many Garmin API calls (one list page per 20 activities, plus 4 detail
+        calls per activity — the same per-activity cost a regular sync already pays, just for
+        more activities at once).
 
         Args:
             start_date: First date to include, `YYYY-MM-DD`.

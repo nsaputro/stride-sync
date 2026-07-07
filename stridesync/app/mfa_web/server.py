@@ -522,7 +522,10 @@ async def backfill(request: Request) -> HTMLResponse:
     """GET shows the current backfill's progress (or redirects to Settings if none has run yet
     this process); POST starts a new one. Reusing `scheduler.run_backfill_sync` on a background
     thread — see that function's docstring for why it's a separate entry point from the regular
-    `run_sync_once`/"Sync now" flow (date-based, not count-based; can cover far more activities).
+    `run_sync_once`/"Sync now" flow: both fetch activities by date range now, but backfill takes
+    an explicit caller-given start date that can reach arbitrarily far into the past, while
+    `run_sync_once` always starts from the last successful sync (or a fixed 7-day lookback on
+    the very first sync) and so can cover far more activities in one call when going back years.
     """
     settings: Settings = request.app.state.settings
 

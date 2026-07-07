@@ -170,9 +170,10 @@ Garmin login flow:
   activities (name, date, distance).
 - **Running** — total distance per calendar week (Monday–Sunday), most recent week first.
 - **Settings** — one-off backfill: pick a start date and StrideSync fetches every activity from
-  then through today, in addition to what regular syncs already cover. Regular syncs only fetch
-  your most recent activities (`sync_interval_hours`, count-based); backfill is for pulling in
-  older history a regular sync would never reach. A wide date range can take a while — each
+  then through today, in addition to what regular syncs already cover. Regular syncs (every
+  `sync_interval_hours`) fetch activities incrementally, since the last successful sync (or the
+  last 7 days on the very first sync ever); backfill is for pulling in older history further back
+  than that. A wide date range can take a while — each
   activity costs several Garmin API calls, so backfilling years of daily activity could take
   minutes. The backfill runs in the background and the page shows a live progress bar
   ("N / total activities"); it's safe to navigate away and come back — the backfill keeps

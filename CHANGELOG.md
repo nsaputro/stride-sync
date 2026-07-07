@@ -29,6 +29,19 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   date. This is the most speculative addition in v0.12 — the underlying `get_training_plans`/
   `get_training_plan_by_id` response shape has no prior confirmation from a live account.
 
+### Changed
+- **Scheduled sync now fetches activities incrementally instead of a fixed most-recent-20**
+  (milestone v0.13): `run_sync_once` fetches everything since the last *successful* sync's date
+  (falling back to a 7-day lookback on an account's very first sync ever) instead of always the
+  most recent 20 — a fixed count could silently miss older activities logged during a busy
+  stretch. A failed sync doesn't count as "last successful," so a retry re-covers the same range
+  rather than skipping past whatever the failed attempt never actually synced. The now-unused
+  `--limit` CLI flag was removed along with it.
+- **Sync log now reports a per-record-type count**, not just activities (milestone v0.13):
+  `daily_wellness`, `vo2max_history` (only counting dates Garmin actually returned data for), and
+  `planned_workouts` row counts are logged on every sync pass, success or failure — confirming
+  what actually synced no longer requires a direct database query.
+
 ### Fixed
 - **Sync crash when `get_max_metrics` returns a list instead of a dict** (milestone v0.12):
   confirmed live on a real account — `GarminClient.fetch_vo2max`'s normalization step ran
