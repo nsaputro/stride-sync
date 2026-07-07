@@ -797,9 +797,10 @@ endpoints.
   both the training-plan detail endpoint and `get_scheduled_workouts` was sent to the reporting
   user; a follow-up fix once real output comes back. **Confirmed the `trainingPlanList` fix alone
   did not resolve the reported issue** (live re-test still shows `0 planned workouts`) — the
-  remaining gap is one level deeper (either the detail response's field names, or
-  `get_training_plans()` itself isn't returning what's expected for this account); see v0.16's
-  in-app Diagnostics panel, built specifically to get real output without another one-off script.
+  remaining gap was one level deeper: **found and fixed in v0.17** via the v0.16 Diagnostics
+  panel (a plan entry's own id field is `trainingPlanId`, not `planId`/`id`). The detail
+  response's own shape (workout dates/names/target pace/HR) is *still* unconfirmed — that's the
+  next thing v0.17 needs live output for.
 
 ### v0.16 — In-app Diagnostics panel for live-account troubleshooting 🔄
 
@@ -823,15 +824,53 @@ each time.
 - ✅ New "Diagnostics" section on the Settings tab: a dropdown (built straight from
   `DIAGNOSTIC_CHECKS`, so adding a future check is a one-line addition) + a button that POSTs to
   a new `/diagnostics` route, logs in, runs the selected check, and renders the exact JSON
-  response (`json.dumps(..., indent=2)`, capped at `_DIAGNOSTIC_OUTPUT_LIMIT` = 8000 chars so a
-  huge response can't make the ingress panel unusable) directly in the page — no shell/docker
-  access needed to report a wrong-looking field going forward.
+  response (`json.dumps(..., indent=2)`, capped at `_DIAGNOSTIC_OUTPUT_LIMIT` — originally 8000
+  chars, raised to 60000 in v0.17 once that turned out too small in practice) directly in the
+  page — no shell/docker access needed to report a wrong-looking field going forward.
 - ✅ Verified end-to-end with a live ASGI test client: `/settings` shows the new dropdown, and a
   mocked `/diagnostics` POST renders the raw JSON in the response body.
 - ✅ **Copy-to-clipboard button** on the diagnostic output (live feedback from the first real use
   of this panel: the JSON box was awkward to select/copy by hand for pasting into a bug report).
   `navigator.clipboard.writeText()` against the exact `<pre id="diagnostic-output">` text — not a
   re-serialized copy, so what gets pasted is byte-identical to what's displayed.
+
+### v0.17 — Second live-account fix for planned_workouts: the real `trainingPlanId` key 🔄
+
+The v0.16 Diagnostics panel immediately paid off: the reporting user ran the `training_plans`
+check against their real active plan ("TCS Amsterdam Marathon Plan") and pasted back the actual
+JSON — confirming `trainingPlanList` (v0.15's fix) was right, but also that `_get(plan, "planId",
+"id")` matched neither key on a real plan entry, so `plan_id` was always `None` and every plan
+was silently skipped. The `training_plan_detail` check's own diagnostic output made this
+unambiguous: `{"note": "Could not find a plan id (planId/id) on the first plan entry.", ...}`.
+
+- ✅ **Confirmed and fixed**: a plan entry's own id field is `trainingPlanId` (an integer, e.g.
+  `43075722`), not `planId`/`id`. `fetch_planned_workouts` and `fetch_diagnostic`'s
+  `training_plan_detail` check both updated to check `trainingPlanId` first, keeping the old
+  guesses as lower-priority `_get()` fallbacks. Also confirmed live that this same account's plan
+  has `trainingPlanCategory: "FBT_ADAPTIVE"`, verifying v0.15's adaptive-routing fix is correct
+  too — `get_adaptive_training_plan_by_id` is the right endpoint for this account.
+- ✅ Verified against the exact real JSON shape pasted by the reporting user (not just a synthetic
+  test fixture): `fetch_planned_workouts` now correctly extracts `plan_id="43075722"` and calls
+  `get_adaptive_training_plan_by_id(43075722)` (the real integer, not stringified) for this
+  account's plan.
+- ✅ Raised `_DIAGNOSTIC_OUTPUT_LIMIT` from 8000 to 60000 chars — a live `scheduled_workouts`
+  check for one calendar month truncated before reaching the dates that actually mattered
+  (`get_scheduled_workouts`'s `calendarItems` list is verbose; each item has ~30 mostly-null
+  fields). The `<pre>` box already scrolls internally and the copy button handles large text
+  fine, so there was no reason to keep the original conservative cap.
+- ⬜ **Still open**: the training-plan *detail* response's own shape (workout dates/names/target
+  pace/HR, handled by `_normalize_planned_workouts`) — now that `plan_id` extraction works, the
+  next sync/backfill or `training_plan_detail` diagnostic run should finally reach a real
+  `get_adaptive_training_plan_by_id` response, which is needed to confirm or fix those fields.
+  Separately, a real `get_scheduled_workouts` response is now confirmed to return genuinely
+  useful calendar data (`calendarItems[].{date, title, itemType, sportTypeKey, workoutId,
+  completionTarget}`, with `date` already in clean `YYYY-MM-DD` form) — a plausibly better-suited
+  source than the training-plan detail endpoint, since it's calendar-anchored and returned real
+  entries (both `itemType: "workout"` and `itemType: "event"`/race-goal items) without needing an
+  active plan's phase structure at all. Not yet migrated to, since the pasted sample was truncated
+  before reaching a real running workout's full field set (the visible entries were all
+  `sportTypeKey: "strength_training"`) — needs one more diagnostic round once the higher output
+  limit is live.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 

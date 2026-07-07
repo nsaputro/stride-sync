@@ -909,11 +909,15 @@ class GarminClient:
         `get_training_plans()`'s real top-level key is `trainingPlanList` — confirmed directly
         from `python-garminconnect`'s own bundled `demo.py` (`resp.get("trainingPlanList") or
         []`), not a guess; the original `trainingPlans`/`plans` guesses are kept as lower-priority
-        fallbacks in case this varies by API version. Each plan entry's `trainingPlanCategory`
-        field determines which detail endpoint to call — `demo.py` routes `"FBT_ADAPTIVE"` to
-        `get_adaptive_training_plan_by_id`, everything else to the phased `get_training_plan_by_id`
-        used here (this resolves what was previously an open unconfirmed follow-up). The detail
-        response's own shape (workout dates/names/targets, handled by
+        fallbacks in case this varies by API version. Each plan entry's own id field is
+        `trainingPlanId` (an integer) — confirmed via the Diagnostics panel against a live account
+        with a real active plan; the original `planId`/`id` guesses were both wrong, which is why
+        `planned_workouts` stayed empty even after the `trainingPlanList` fix. Each plan entry's
+        `trainingPlanCategory` field determines which detail endpoint to call — `demo.py` routes
+        `"FBT_ADAPTIVE"` to `get_adaptive_training_plan_by_id`, everything else to the phased
+        `get_training_plan_by_id` used here (this resolves what was previously an open unconfirmed
+        follow-up; also confirmed correct live — the same account's plan is `FBT_ADAPTIVE`). The
+        detail response's own shape (workout dates/names/targets, handled by
         `_normalize_planned_workouts`) is still unconfirmed — see that function's docstring.
 
         Most accounts have no active plan at all, which degrades to an empty list, not a failure.
@@ -939,7 +943,7 @@ class GarminClient:
         for plan in plan_list:
             if not isinstance(plan, dict):
                 continue
-            plan_id = _get(plan, "planId", "id")
+            plan_id = _get(plan, "trainingPlanId", "planId", "id")
             if plan_id is None:
                 continue
             is_adaptive = _get(plan, "trainingPlanCategory") == "FBT_ADAPTIVE"
@@ -993,10 +997,13 @@ class GarminClient:
             first = plan_list[0]
             if not isinstance(first, dict):
                 return {"note": "First plan entry wasn't a dict.", "raw_first_entry": first}
-            plan_id = _get(first, "planId", "id")
+            plan_id = _get(first, "trainingPlanId", "planId", "id")
             if plan_id is None:
                 return {
-                    "note": "Could not find a plan id (planId/id) on the first plan entry.",
+                    "note": (
+                        "Could not find a plan id (trainingPlanId/planId/id) on the first plan "
+                        "entry."
+                    ),
                     "first_entry_keys": list(first.keys()),
                     "raw_first_entry": first,
                 }

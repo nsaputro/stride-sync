@@ -75,6 +75,14 @@
   `"FBT_ADAPTIVE"` routes there; everything else uses the phased `get_training_plan_by_id`. The
   training-plan detail response's own shape is still unconfirmed — a follow-up fix is pending
   live-account output.
+- **`planned_workouts` still syncing zero rows after the `trainingPlanList` fix** (milestone
+  v0.17): the reporting user's real training plan (pasted via the new Diagnostics panel) revealed
+  the actual remaining cause — a plan entry's own id field is `trainingPlanId` (an integer), not
+  `planId`/`id` as originally guessed, so `plan_id` extraction always failed and every plan was
+  silently skipped. Also confirmed live that the `FBT_ADAPTIVE`-routing fix from v0.15 is correct
+  for this account. Also raised the Diagnostics panel's output cap from 8000 to 60000 characters
+  — a real `scheduled_workouts` check response was truncated before reaching the dates that
+  mattered.
 
 ## [0.2.2] - 2026-07-05
 
