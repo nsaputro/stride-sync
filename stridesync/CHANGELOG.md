@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- **Diagnostics panel: `resting_hr`/`vo2max` renamed to `resting_hr_latest`/`vo2max_latest`,
+  searching backward from today for the most recent available date instead of hardcoding
+  "today"**: both fields can legitimately be missing for today specifically because Garmin
+  hasn't finalized them yet, which previously looked identical to a wrong field-name guess in
+  the diagnostic output. The response now includes which date the data actually came from.
+
 ### Fixed
 - **`vo2max_history` silently syncing rows with every field `NULL`, despite the account having
   real VO2 max history in the Garmin Connect app** (milestone Stage 12 follow-up): the "list

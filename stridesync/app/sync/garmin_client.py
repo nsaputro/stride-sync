@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 import curl_cffi.requests.exceptions as curl_exceptions
@@ -622,9 +622,14 @@ DIAGNOSTIC_CHECKS: Dict[str, str] = {
     "hrv_data": "Today's HRV data (get_hrv_data)",
     "training_status": "Today's training status (get_training_status)",
     "training_readiness": "Today's training readiness (get_morning_training_readiness)",
-    "resting_hr": "Today's resting HR (get_rhr_day)",
-    "vo2max": "Today's VO2 max / fitness age (get_max_metrics)",
+    "resting_hr_latest": "Latest resting HR (get_rhr_day, most recent available)",
+    "vo2max_latest": "Latest VO2 max / fitness age (get_max_metrics, most recent available)",
 }
+
+# How far back fetch_diagnostic's "latest" checks search for a date with real data, since a
+# single hardcoded "today" query can come back empty simply because Garmin hasn't finalized
+# today's data yet -- not because the field-name guess is wrong.
+_DIAGNOSTIC_LATEST_LOOKBACK_DAYS = 14
 
 
 class GarminClient:
@@ -1019,13 +1024,22 @@ class GarminClient:
         reporting user a one-off script to run via `docker exec`. This is the same idea wired
         permanently into the Settings tab's Diagnostics panel instead.
 
-        The `sleep_data`/`hrv_data`/`training_status`/`training_readiness`/`resting_hr`/`vo2max`
-        checks were added after a live report that `daily_wellness`/`vo2max_history` rows were
-        coming back with real Garmin data unaccounted for (the account has both VO2 max and HRV
-        history in the Garmin Connect app, but StrideSync synced neither) — the same
-        wrong-field-name-guess failure class as `planned_workouts`, just not yet pinned down to a
-        specific key, so this exposes the raw response for each of `fetch_daily_wellness`'s five
-        sub-calls plus `fetch_vo2max`'s one, same as the training-plan checks did for that fix.
+        The `sleep_data`/`hrv_data`/`training_status`/`training_readiness`/`resting_hr_latest`/
+        `vo2max_latest` checks were added after a live report that `daily_wellness`/
+        `vo2max_history` rows were coming back with real Garmin data unaccounted for (the
+        account has both VO2 max and HRV history in the Garmin Connect app, but StrideSync
+        synced neither) — the same wrong-field-name-guess failure class as `planned_workouts`,
+        just not yet pinned down to a specific key, so this exposes the raw response for each of
+        `fetch_daily_wellness`'s five sub-calls plus `fetch_vo2max`'s one, same as the
+        training-plan checks did for that fix.
+
+        `resting_hr_latest`/`vo2max_latest` search backward from today (see
+        `_fetch_latest_diagnostic`) instead of hardcoding "today", since those two fields can
+        legitimately be missing for today specifically (not yet finalized by Garmin) without
+        that meaning anything about the field-name guess — the response includes which date the
+        data actually came from. Every other check still queries a fixed date ("today" for the
+        wellness/training-status endpoints, "this month" for `scheduled_workouts`) since those
+        are either always-current-day concepts or already return a wider window on their own.
 
         Deliberately does **not** wrap failures non-fatally like every other `fetch_*` method —
         the caller (the Diagnostics panel) wants to see the raw exception too, since "this
@@ -1084,13 +1098,52 @@ class GarminClient:
         if check == "training_readiness":
             return self._garmin.get_morning_training_readiness(today.isoformat())
 
-        if check == "resting_hr":
-            return self._garmin.get_rhr_day(today.isoformat())
+        if check == "resting_hr_latest":
 
-        if check == "vo2max":
-            return self._garmin.get_max_metrics(today.isoformat())
+            def _resting_hr_has_value(raw: Any) -> bool:
+                raw = raw if isinstance(raw, dict) else {}
+                return _get(raw, "restingHeartRate", "restingHR") is not None
+
+            return self._fetch_latest_diagnostic(self._garmin.get_rhr_day, _resting_hr_has_value)
+
+        if check == "vo2max_latest":
+
+            def _vo2max_has_value(raw: Any) -> bool:
+                reading = _normalize_vo2max(today.isoformat(), raw)
+                return reading.vo2_max_running is not None or reading.vo2_max_cycling is not None
+
+            return self._fetch_latest_diagnostic(self._garmin.get_max_metrics, _vo2max_has_value)
 
         raise ValueError(f"Unknown diagnostic check: {check!r}")
+
+    def _fetch_latest_diagnostic(
+        self, fetch_fn: Callable[[str], Any], has_value: Callable[[Any], bool]
+    ) -> Dict[str, Any]:
+        """Search backward from today, one day at a time, for the most recent date
+        `fetch_fn(cdate)` returns real data for — used by `fetch_diagnostic`'s "latest" checks
+        instead of hardcoding "today", since a device/account can simply not have today's data
+        finalized yet, which would otherwise look identical to a wrong field-name guess in a
+        diagnostic reader's eyes. Returns the raw response plus the date it came from so that
+        distinction is visible; if nothing is found within `_DIAGNOSTIC_LATEST_LOOKBACK_DAYS`,
+        returns a note plus the most recent raw response actually checked, for troubleshooting.
+        """
+        today = datetime.now(timezone.utc).date()
+        last_raw: Any = None
+        last_date: Optional[str] = None
+        for offset in range(_DIAGNOSTIC_LATEST_LOOKBACK_DAYS):
+            cdate = (today - timedelta(days=offset)).isoformat()
+            raw = fetch_fn(cdate)
+            last_raw, last_date = raw, cdate
+            if has_value(raw):
+                return {"date": cdate, "raw": raw}
+        return {
+            "date": None,
+            "note": (
+                f"No data found in the last {_DIAGNOSTIC_LATEST_LOOKBACK_DAYS} days "
+                f"(most recent date checked: {last_date})"
+            ),
+            "most_recent_raw_checked": last_raw,
+        }
 
     def fetch_activity_hr_zones(self, activity_id: int) -> List[HrZoneTime]:
         """Fetch seconds-in-each-HR-zone for one activity (see PROJECT_PLAN.md milestone v0.5).
