@@ -730,6 +730,12 @@ the database, rather than being visible from the add-on log alone.
   actually returned data, not every date in the window), and `planned_workouts` rows — so
   confirming what actually synced is a log line away instead of requiring a direct SQL query.
   This is a log-only change; `sync_log`'s schema is untouched.
+- ✅ **Dashboard tab extended with the same per-record-type totals** (follow-up, requested
+  live): `_sync_summary` (`app/mfa_web/server.py`) now also runs `COUNT(*)` against
+  `daily_wellness`/`vo2max_history`/`planned_workouts`, alongside the existing
+  `Total activities synced` stat — the dashboard previously only ever showed the activities
+  count, even though the log lines above already reported all four. Plain `COUNT(*)` queries
+  against current table contents, not a new `sync_log` column — no schema change.
 
 ### Stage 14 — Backfill parity with regular sync + a real infinite-backfill-loop bug fix 🔄
 
