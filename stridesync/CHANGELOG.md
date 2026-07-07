@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **`vo2max_history` silently syncing rows with every field `NULL`, despite the account having
+  real VO2 max history in the Garmin Connect app** (milestone Stage 12 follow-up): the "list
+  means unexpected shape, degrade to no data" guard added in `0.3.1` was itself the bug —
+  `get_max_metrics`'s real successful response is a list containing one dict
+  (`[{"generic": {...}, ...}]`), not a bare dict, so that guard was silently discarding every
+  real response instead of only the genuinely-empty ones. `_normalize_vo2max` now unwraps that
+  list before extracting fields, confirmed against a real account's Diagnostics panel output
+  (`vo2MaxPreciseValue: 55.2`). Also fixed `fitnessAge`, which actually lives nested under
+  `generic`, not at the top level as originally guessed.
+
 ## [0.3.1] - 2026-07-07
 
 ### Added
