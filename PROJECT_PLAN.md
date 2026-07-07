@@ -698,12 +698,8 @@ across three PRs for review size.
   `get_sleep_data` both touch `self.display_name` internally, so the account already hitting
   v0.10's known display-name gap may see `resting_hr`/sleep fields come back `NULL` specifically
   *because of that gap*, independent of whether the guessed JSON keys are right — check both
-  possibilities before assuming a wrong field-name guess. The training-plan shape
-  (`get_training_plans`/`get_training_plan_by_id`) is the least certain of the six — verify with
-  an account that has an actual active plan configured before trusting `planned_vs_actual` beyond
-  "does this degrade to an empty list gracefully." `get_adaptive_training_plan_by_id` is
-  deliberately not wired in yet — which plan type needs it vs. the phased endpoint is unconfirmed;
-  a follow-up once a live account clarifies this.
+  possibilities before assuming a wrong field-name guess. The training-plan shape is still the
+  least certain of the six — see v0.15 for the first round of live-account fixes to it.
 - ✅ Brand-new tables only (`daily_wellness`, `vo2max_history`, `planned_workouts`) — confirmed
   none of the three need `_add_column_if_missing`/`ALTER TABLE` migration code, unlike v0.11's
   `temperature_celsius` (which added a column to an already-shipped table). `CREATE TABLE IF NOT
@@ -770,6 +766,36 @@ activities" repeating every second until the container was restarted.
   ASGI-level test client simulating repeated `location.reload()`-style reloads after the fix,
   confirming `run_backfill_sync` is invoked exactly once no matter how many times the page
   "reloads" afterward.
+
+### v0.15 — First live-account fix for planned_workouts 🔄
+
+A live user reported an actual active Garmin training plan (screenshotted from the Garmin
+Connect app's "Workout Schedule" view — named workouts like "Threshold"/"Base"/"Anaerobic"
+assigned to specific calendar dates) producing "0 planned workouts" on both sync and backfill,
+confirming the v0.12 field-mapping caveat was right to flag this as the least-certain of the six
+endpoints.
+
+- ✅ **Confirmed and fixed a real bug**: `get_training_plans()`'s actual top-level key is
+  `trainingPlanList`, not the `trainingPlans`/`plans` originally guessed — confirmed directly
+  from `python-garminconnect`'s own bundled `demo.py` (`resp.get("trainingPlanList") or []`), not
+  another guess. The old code's `_get(plans, "trainingPlans", "plans")` matched neither key, so
+  `plan_list` fell through to `None` and `fetch_planned_workouts` returned `[]` silently on every
+  sync — this alone plausibly explains the reported "0 planned workouts" outright. The old guesses
+  are kept as lower-priority fallbacks in `_get()`'s candidate list in case this varies by API
+  version.
+- ✅ **Resolved the previously-open `get_adaptive_training_plan_by_id` question**: `demo.py`
+  routes a plan whose `trainingPlanCategory` field equals `"FBT_ADAPTIVE"` to
+  `get_adaptive_training_plan_by_id`, everything else to the phased `get_training_plan_by_id`.
+  `fetch_planned_workouts` now checks this field per-plan and calls the matching endpoint.
+- ⬜ The training-plan *detail* response's own shape (workout dates/names/target pace/HR, handled
+  by `_normalize_planned_workouts`) is still unconfirmed — `python-garminconnect`'s own demo
+  script only pretty-prints the raw response without field-level access, so no further
+  confirmation was available from that source. Also discovered `get_scheduled_workouts(year,
+  month)` (the calendar-service endpoint, `/calendar-service/year/{year}/month/{month-1}`) as a
+  plausibly better-matched source for a literal "workout schedule by calendar date" view like the
+  one screenshotted — but its response shape is equally unconfirmed. A diagnostic script covering
+  both the training-plan detail endpoint and `get_scheduled_workouts` was sent to the reporting
+  user; a follow-up fix once real output comes back.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 

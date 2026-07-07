@@ -890,15 +890,20 @@ class GarminClient:
         """Fetch scheduled workouts from every active Garmin Connect training plan, filtered to
         `[start_date, end_date]` (see PROJECT_PLAN.md milestone v0.12).
 
-        The most speculative fetch method in this module — `get_training_plans()`/
-        `get_training_plan_by_id()`'s response shape has zero prior confirmation anywhere in
-        this codebase (see `PlannedWorkout`'s docstring). Most accounts have no active plan at
-        all, which degrades to an empty list, not a failure. A failure fetching one plan's detail
-        is isolated to that plan — it must not discard workouts from sibling plans, so each
-        `get_training_plan_by_id` call is wrapped individually inside the loop below rather than
-        wrapping the whole loop in one try/except. `get_adaptive_training_plan_by_id` is
-        deliberately not wired in yet — which plan type needs it vs. this phased endpoint is
-        unconfirmed; a follow-up once a live account clarifies this.
+        `get_training_plans()`'s real top-level key is `trainingPlanList` — confirmed directly
+        from `python-garminconnect`'s own bundled `demo.py` (`resp.get("trainingPlanList") or
+        []`), not a guess; the original `trainingPlans`/`plans` guesses are kept as lower-priority
+        fallbacks in case this varies by API version. Each plan entry's `trainingPlanCategory`
+        field determines which detail endpoint to call — `demo.py` routes `"FBT_ADAPTIVE"` to
+        `get_adaptive_training_plan_by_id`, everything else to the phased `get_training_plan_by_id`
+        used here (this resolves what was previously an open unconfirmed follow-up). The detail
+        response's own shape (workout dates/names/targets, handled by
+        `_normalize_planned_workouts`) is still unconfirmed — see that function's docstring.
+
+        Most accounts have no active plan at all, which degrades to an empty list, not a failure.
+        A failure fetching one plan's detail is isolated to that plan — it must not discard
+        workouts from sibling plans, so each detail call is wrapped individually inside the loop
+        below rather than wrapping the whole loop in one try/except.
         """
         try:
             plans = self._garmin.get_training_plans()
@@ -906,7 +911,11 @@ class GarminClient:
             logger.warning("Could not fetch training plans (non-fatal): %s", exc)
             return []
 
-        plan_list = _get(plans, "trainingPlans", "plans") if isinstance(plans, dict) else plans
+        plan_list = (
+            _get(plans, "trainingPlanList", "trainingPlans", "plans")
+            if isinstance(plans, dict)
+            else plans
+        )
         if not isinstance(plan_list, list):
             return []
 
@@ -917,8 +926,14 @@ class GarminClient:
             plan_id = _get(plan, "planId", "id")
             if plan_id is None:
                 continue
+            is_adaptive = _get(plan, "trainingPlanCategory") == "FBT_ADAPTIVE"
+            fetch_detail = (
+                self._garmin.get_adaptive_training_plan_by_id
+                if is_adaptive
+                else self._garmin.get_training_plan_by_id
+            )
             try:
-                detail = self._garmin.get_training_plan_by_id(plan_id) or {}
+                detail = fetch_detail(plan_id) or {}
             except Exception as exc:  # noqa: BLE001 - isolate one plan's failure from siblings
                 logger.warning(
                     "Could not fetch training plan %s (non-fatal): %s", plan_id, exc
