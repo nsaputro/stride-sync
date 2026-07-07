@@ -8,6 +8,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Fixed
+- **VO2 max backfill log noise**: `fetch_vo2max`'s "unexpected response shape" line fires once
+  per calendar date whenever Garmin has no VO2 max estimate for that date — confirmed live as
+  the routine case for older dates, not a rare anomaly — so a months-long backfill was logging
+  one `WARNING` per missing date. Downgraded to `DEBUG`; the non-fatal "treat as unavailable"
+  behavior itself is unchanged.
+
 ## [0.3.0] - 2026-07-07
 
 ### Added
