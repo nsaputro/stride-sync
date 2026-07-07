@@ -795,7 +795,39 @@ endpoints.
   plausibly better-matched source for a literal "workout schedule by calendar date" view like the
   one screenshotted — but its response shape is equally unconfirmed. A diagnostic script covering
   both the training-plan detail endpoint and `get_scheduled_workouts` was sent to the reporting
-  user; a follow-up fix once real output comes back.
+  user; a follow-up fix once real output comes back. **Confirmed the `trainingPlanList` fix alone
+  did not resolve the reported issue** (live re-test still shows `0 planned workouts`) — the
+  remaining gap is one level deeper (either the detail response's field names, or
+  `get_training_plans()` itself isn't returning what's expected for this account); see v0.16's
+  in-app Diagnostics panel, built specifically to get real output without another one-off script.
+
+### v0.16 — In-app Diagnostics panel for live-account troubleshooting 🔄
+
+This session has now hit the same shape of live-account bug four times (temperature sample key
+in v0.11, `fetch_vo2max`'s list-vs-dict crash and `fetch_daily_wellness`'s identical gap in the
+v0.12 follow-up fix, `planned_workouts`'s `trainingPlanList` key in v0.15) — each one required
+handing the reporting user a one-off Python script to run via `docker exec`/`ha addons exec` just
+to see the real Garmin API response shape. Building that capability into the add-on itself means
+the next unconfirmed-field-mapping bug doesn't need a fresh script written and walked through
+each time.
+
+- ✅ New `GarminClient.fetch_diagnostic(check)` method + `DIAGNOSTIC_CHECKS` dict (id → human
+  label) in `garmin_client.py`: returns the **raw, unnormalized** JSON response for one of a
+  fixed, curated set of read-only checks (`training_plans`, `training_plan_detail`,
+  `scheduled_workouts`) — deliberately not open to an arbitrary method name, since several
+  `python-garminconnect` methods are write operations (`schedule_workout`, `upload_workout`,
+  `delete_workout`, etc.) and StrideSync must never write back to Garmin (CLAUDE.md/README).
+  Unlike every other `fetch_*` method, failures are **not** swallowed non-fatally — the caller
+  wants to see the raw exception too, since "this endpoint failed with X" is itself useful
+  diagnostic information.
+- ✅ New "Diagnostics" section on the Settings tab: a dropdown (built straight from
+  `DIAGNOSTIC_CHECKS`, so adding a future check is a one-line addition) + a button that POSTs to
+  a new `/diagnostics` route, logs in, runs the selected check, and renders the exact JSON
+  response (`json.dumps(..., indent=2)`, capped at `_DIAGNOSTIC_OUTPUT_LIMIT` = 8000 chars so a
+  huge response can't make the ingress panel unusable) directly in the page — no shell/docker
+  access needed to report a wrong-looking field going forward.
+- ✅ Verified end-to-end with a live ASGI test client: `/settings` shows the new dropdown, and a
+  mocked `/diagnostics` POST renders the raw JSON in the response body.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 

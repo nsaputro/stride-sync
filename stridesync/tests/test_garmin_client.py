@@ -905,3 +905,67 @@ class TestGarminClientFetch:
         client._garmin.get_activity_details.side_effect = GarminConnectConnectionError("boom")
 
         assert client.fetch_activity_samples(123) == []
+
+    def test_fetch_diagnostic_training_plans_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = {"trainingPlanList": [{"planId": "p1"}]}
+
+        assert client.fetch_diagnostic("training_plans") == {
+            "trainingPlanList": [{"planId": "p1"}]
+        }
+
+    def test_fetch_diagnostic_training_plan_detail_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = {
+            "trainingPlanList": [{"planId": "p1", "trainingPlanCategory": "FBT_BASIC"}]
+        }
+        client._garmin.get_training_plan_by_id.return_value = {"workouts": ["raw"]}
+
+        result = client.fetch_diagnostic("training_plan_detail")
+
+        assert result == {"workouts": ["raw"]}
+        client._garmin.get_training_plan_by_id.assert_called_once_with("p1")
+
+    def test_fetch_diagnostic_training_plan_detail_routes_adaptive_plans(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = {
+            "trainingPlanList": [{"planId": "p1", "trainingPlanCategory": "FBT_ADAPTIVE"}]
+        }
+        client._garmin.get_adaptive_training_plan_by_id.return_value = {"workouts": ["adaptive"]}
+
+        result = client.fetch_diagnostic("training_plan_detail")
+
+        assert result == {"workouts": ["adaptive"]}
+        client._garmin.get_adaptive_training_plan_by_id.assert_called_once_with("p1")
+
+    def test_fetch_diagnostic_training_plan_detail_reports_no_plans_found(self):
+        client = make_client()
+        client._garmin.get_training_plans.return_value = {"trainingPlanList": []}
+
+        result = client.fetch_diagnostic("training_plan_detail")
+
+        assert "No training plans found" in result["note"]
+
+    def test_fetch_diagnostic_scheduled_workouts_returns_raw_response(self):
+        client = make_client()
+        client._garmin.get_scheduled_workouts.return_value = {"raw": "calendar-data"}
+
+        result = client.fetch_diagnostic("scheduled_workouts")
+
+        assert result == {"raw": "calendar-data"}
+        client._garmin.get_scheduled_workouts.assert_called_once()
+
+    def test_fetch_diagnostic_unknown_check_raises_value_error(self):
+        client = make_client()
+
+        with pytest.raises(ValueError, match="Unknown diagnostic check"):
+            client.fetch_diagnostic("not_a_real_check")
+
+    def test_fetch_diagnostic_propagates_raw_exceptions(self):
+        # Unlike every other fetch_* method, fetch_diagnostic must NOT swallow failures --
+        # seeing the raw exception is the entire point of a diagnostic tool.
+        client = make_client()
+        client._garmin.get_training_plans.side_effect = GarminConnectConnectionError("boom")
+
+        with pytest.raises(GarminConnectConnectionError):
+            client.fetch_diagnostic("training_plans")

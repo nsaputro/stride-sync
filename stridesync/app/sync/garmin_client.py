@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 import curl_cffi.requests.exceptions as curl_exceptions
@@ -564,6 +565,21 @@ def _normalize_samples(activity_id: int, raw: Dict[str, Any]) -> List[ActivitySa
     return samples
 
 
+# Read-only raw-response checks exposed via GarminClient.fetch_diagnostic (see its docstring) --
+# id -> human label, so the Settings tab's Diagnostics panel can build its dropdown straight from
+# this dict rather than duplicating the check list. Only ever calls known GET-shaped
+# python-garminconnect methods; never one of its write operations (schedule_workout,
+# upload_workout, etc.) -- StrideSync never writes back to Garmin (see CLAUDE.md/README).
+DIAGNOSTIC_CHECKS: Dict[str, str] = {
+    "training_plans": "Training plans (get_training_plans)",
+    "training_plan_detail": (
+        "First training plan's detail (get_training_plan_by_id / "
+        "get_adaptive_training_plan_by_id)"
+    ),
+    "scheduled_workouts": "Scheduled workouts this month (get_scheduled_workouts)",
+}
+
+
 class GarminClient:
     """Authenticates against Garmin Connect and fetches activity data.
 
@@ -943,6 +959,60 @@ class GarminClient:
                 _normalize_planned_workouts(str(plan_id), detail, start_date, end_date)
             )
         return workouts
+
+    def fetch_diagnostic(self, check: str) -> Any:
+        """Run one read-only raw Garmin Connect API call for troubleshooting, returning the
+        *unnormalized* JSON response — unlike every other `fetch_*` method here, which all
+        normalize into a dataclass. `check` must be a key in `DIAGNOSTIC_CHECKS` above.
+
+        Exists because this codebase has repeatedly needed exactly this to fix a wrong
+        field-name guess (temperature sample key, `fetch_vo2max`'s list-vs-dict crash,
+        `planned_workouts`'s `trainingPlanList` key) — previously that meant handing the
+        reporting user a one-off script to run via `docker exec`. This is the same idea wired
+        permanently into the Settings tab's Diagnostics panel instead.
+
+        Deliberately does **not** wrap failures non-fatally like every other `fetch_*` method —
+        the caller (the Diagnostics panel) wants to see the raw exception too, since "this
+        endpoint failed with X" is itself useful diagnostic information, not a failure to hide.
+
+        Raises:
+            ValueError: if `check` isn't a key in `DIAGNOSTIC_CHECKS`.
+        """
+        if check == "training_plans":
+            return self._garmin.get_training_plans()
+
+        if check == "training_plan_detail":
+            plans = self._garmin.get_training_plans()
+            plan_list = (
+                _get(plans, "trainingPlanList", "trainingPlans", "plans")
+                if isinstance(plans, dict)
+                else plans
+            )
+            if not isinstance(plan_list, list) or not plan_list:
+                return {"note": "No training plans found via get_training_plans().", "raw": plans}
+            first = plan_list[0]
+            if not isinstance(first, dict):
+                return {"note": "First plan entry wasn't a dict.", "raw_first_entry": first}
+            plan_id = _get(first, "planId", "id")
+            if plan_id is None:
+                return {
+                    "note": "Could not find a plan id (planId/id) on the first plan entry.",
+                    "first_entry_keys": list(first.keys()),
+                    "raw_first_entry": first,
+                }
+            is_adaptive = _get(first, "trainingPlanCategory") == "FBT_ADAPTIVE"
+            fetch_detail = (
+                self._garmin.get_adaptive_training_plan_by_id
+                if is_adaptive
+                else self._garmin.get_training_plan_by_id
+            )
+            return fetch_detail(plan_id)
+
+        if check == "scheduled_workouts":
+            today = datetime.now(timezone.utc).date()
+            return self._garmin.get_scheduled_workouts(today.year, today.month)
+
+        raise ValueError(f"Unknown diagnostic check: {check!r}")
 
     def fetch_activity_hr_zones(self, activity_id: int) -> List[HrZoneTime]:
         """Fetch seconds-in-each-HR-zone for one activity (see PROJECT_PLAN.md milestone v0.5).

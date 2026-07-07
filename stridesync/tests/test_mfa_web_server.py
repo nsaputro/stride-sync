@@ -534,6 +534,14 @@ def test_settings_tab_shows_backfill_form(tmp_path):
     assert 'input type="date" name="start_date"' in response.text
 
 
+def test_settings_tab_shows_diagnostics_form(tmp_path):
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert 'action="diagnostics"' in response.text
+    assert "training_plans" in response.text
+
+
 def test_settings_tab_shows_progress_bar_while_backfill_is_running(tmp_path):
     # Regression test: switching to another nav tab and back to Settings mid-backfill must not
     # lose the progress bar — it used to always render the plain static form.
@@ -764,6 +772,52 @@ def test_backfill_progress_body_shows_progress_bar_while_running():
     assert '<progress id="backfill-bar" value="12" max="50"' in body
     assert "12 / 50 activities" in body
     assert "backfill/status" in body  # the polling script is present
+
+
+def test_diagnostics_route_shows_raw_json_response(tmp_path):
+    with patch("app.mfa_web.server.GarminClient") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        mock_client.fetch_diagnostic.return_value = {"trainingPlanList": [{"planId": "p1"}]}
+
+        response = _client(tmp_path).post("/diagnostics", data={"check": "training_plans"})
+
+    assert response.status_code == 200
+    assert "trainingPlanList" in response.text
+    assert "p1" in response.text
+    mock_client.login.assert_called_once()
+    mock_client.fetch_diagnostic.assert_called_once_with("training_plans")
+
+
+def test_diagnostics_route_shows_raw_error_message(tmp_path):
+    # Unlike sync/backfill's generic "failed unexpectedly" message, diagnostics shows the raw
+    # exception -- that's the whole point of a troubleshooting tool.
+    with patch("app.mfa_web.server.GarminClient") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        mock_client.fetch_diagnostic.side_effect = RuntimeError("endpoint returned 403")
+
+        response = _client(tmp_path).post("/diagnostics", data={"check": "training_plans"})
+
+    assert response.status_code == 200
+    assert "Check failed" in response.text
+    assert "endpoint returned 403" in response.text
+
+
+def test_diagnostics_route_rejects_unknown_check(tmp_path):
+    response = _client(tmp_path).post("/diagnostics", data={"check": "not_a_real_check"})
+
+    assert response.status_code == 200
+    assert "Unknown check" in response.text
+
+
+def test_diagnostics_route_truncates_long_output(tmp_path):
+    with patch("app.mfa_web.server.GarminClient") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        mock_client.fetch_diagnostic.return_value = {"data": "x" * 20000}
+
+        response = _client(tmp_path).post("/diagnostics", data={"check": "training_plans"})
+
+    assert response.status_code == 200
+    assert "Output truncated" in response.text
 
 
 def test_format_timestamp_drops_microseconds_and_offset():
