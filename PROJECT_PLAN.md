@@ -858,19 +858,45 @@ unambiguous: `{"note": "Could not find a plan id (planId/id) on the first plan e
   (`get_scheduled_workouts`'s `calendarItems` list is verbose; each item has ~30 mostly-null
   fields). The `<pre>` box already scrolls internally and the copy button handles large text
   fine, so there was no reason to keep the original conservative cap.
-- ⬜ **Still open**: the training-plan *detail* response's own shape (workout dates/names/target
-  pace/HR, handled by `_normalize_planned_workouts`) — now that `plan_id` extraction works, the
-  next sync/backfill or `training_plan_detail` diagnostic run should finally reach a real
-  `get_adaptive_training_plan_by_id` response, which is needed to confirm or fix those fields.
-  Separately, a real `get_scheduled_workouts` response is now confirmed to return genuinely
-  useful calendar data (`calendarItems[].{date, title, itemType, sportTypeKey, workoutId,
-  completionTarget}`, with `date` already in clean `YYYY-MM-DD` form) — a plausibly better-suited
-  source than the training-plan detail endpoint, since it's calendar-anchored and returned real
-  entries (both `itemType: "workout"` and `itemType: "event"`/race-goal items) without needing an
-  active plan's phase structure at all. Not yet migrated to, since the pasted sample was truncated
-  before reaching a real running workout's full field set (the visible entries were all
-  `sportTypeKey: "strength_training"`) — needs one more diagnostic round once the higher output
-  limit is live.
+- ✅ **Resolved in v0.18**: the training-plan detail response's own shape is now confirmed against
+  a real `get_adaptive_training_plan_by_id` response (the reporting user's `plan_id` fix from this
+  same milestone let the sync reach that endpoint for the first time). See v0.18.
+
+### v0.18 — Third live-account fix: the real `taskList`/`taskWorkout` shape, workouts confirmed end-to-end 🔄
+
+With `plan_id` extraction fixed (v0.17), the reporting user's next sync reached the real
+`get_adaptive_training_plan_by_id` response for the first time — and pasted it back complete.
+This is the first `planned_workouts` fix in three rounds (v0.15/v0.17/v0.18) confirmed
+byte-for-byte against real data end-to-end, not just "no longer 400s."
+
+- ✅ **Confirmed the scheduled-day list key is `taskList`**, not `workouts`/`scheduledWorkouts`/
+  `days` as guessed — kept as lower-priority `_get()` fallbacks for an unconfirmed non-adaptive
+  (phased) plan shape. Each day entry's date is `calendarDate`, already `YYYY-MM-DD` (one of the
+  original guesses happened to be right).
+- ✅ **Confirmed workout name/type/duration live nested one level deeper**, under
+  `taskWorkout`, not on the day entry itself: `taskWorkout.workoutName` (e.g. `"Threshold"`,
+  `"Base"`, `"Anaerobic"` — exact match to the reporting user's Garmin Connect app screenshot),
+  `taskWorkout.trainingEffectLabel` (e.g. `"LACTATE_THRESHOLD"`, `"AEROBIC_BASE"`,
+  `"ANAEROBIC_CAPACITY"`) mapped to `workout_type`, and `taskWorkout.estimatedDurationInSecs`
+  mapped to `planned_duration_seconds` — verified byte-for-byte: `3660`/`3120`/`5100`/`3000`
+  seconds matched that account's own app showing `"1:01:00"`/`"52:00"`/`"1:25:00"`/`"50:00"` for
+  the same four workouts, respectively.
+- ✅ **Confirmed and handled rest days**: a day entry whose `taskWorkout.restDay` is `true` has no
+  real workout (`workoutName`/`sportType` are `null`) — skipped rather than stored as an empty
+  placeholder row.
+- ⬜ **Still open**: no structured pace or heart-rate-zone target field exists anywhere in the
+  real response — Garmin represents that as free text in `taskWorkout.workoutDescription`
+  instead (e.g. `"2x18:00@162bpm"`, `"137bpm"`, `"7x1:00@Very Hard"`), format varying enough
+  (sometimes an `@`-prefixed bpm, sometimes bare, sometimes no numeric value at all for
+  effort-based intervals) that parsing wasn't attempted this round.
+  `planned_target_pace_sec_per_km`/`planned_target_hr_low`/`planned_target_hr_high` are `None`
+  for every workout for now — a possible follow-up once more real examples across different
+  workout types confirm a reliable text-parsing pattern. `planned_distance_meters` is `None` too
+  — no distance field exists at all for this account's (duration/HR-based) workouts; may differ
+  for a distance-based plan.
+- ✅ New regression test byte-for-byte reproducing the full real `taskList` response the
+  reporting user pasted (7 day-entries: 5 real workouts + 2 rest days), asserting the exact
+  durations/names/dates match and rest days are correctly excluded.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 

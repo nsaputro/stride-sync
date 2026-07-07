@@ -244,50 +244,222 @@ class TestNormalizeVo2Max:
         assert reading.fitness_age is None
 
 
+def make_task_entry(
+    calendar_date="2026-07-07",
+    workout_name="Threshold",
+    training_effect_label="LACTATE_THRESHOLD",
+    duration_secs=3660,
+    rest_day=False,
+):
+    """Build one `taskList` entry matching the real `get_adaptive_training_plan_by_id` shape
+    (see `_normalize_planned_workouts`'s docstring) -- confirmed live, not a guess.
+    """
+    if rest_day:
+        task_workout = {
+            "workoutId": None,
+            "sportType": None,
+            "workoutName": None,
+            "workoutDescription": None,
+            "scheduledDate": f"{calendar_date}T00:25:36.0",
+            "restDay": True,
+        }
+    else:
+        task_workout = {
+            "workoutId": None,
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+            "workoutName": workout_name,
+            "workoutDescription": "2x18:00@162bpm",
+            "scheduledDate": f"{calendar_date}T00:25:36.0",
+            "estimatedDurationInSecs": duration_secs,
+            "trainingEffectLabel": training_effect_label,
+            "restDay": False,
+        }
+    return {
+        "trainingPlanId": 43075722,
+        "weekId": 33,
+        "dayOfWeekId": 2,
+        "taskWorkout": task_workout,
+        "calendarDate": calendar_date,
+    }
+
+
 class TestNormalizePlannedWorkouts:
     def test_normalizes_one_in_window_workout(self):
+        # Real shape confirmed live against an FBT_ADAPTIVE plan -- estimatedDurationInSecs=3120
+        # matched that account's Garmin Connect app showing "52:00" for the same workout.
         detail = {
-            "workouts": [
-                {
-                    "date": "2026-07-06",
-                    "workoutName": "Tempo Run",
-                    "workoutType": "tempo",
-                    "plannedDistanceInMeters": 8000.0,
-                    "plannedDurationInSeconds": 2400.0,
-                    "plannedAverageSpeed": 3.33,
-                    "targetHeartRateZone": {"zoneLow": 150, "zoneHigh": 165},
-                }
+            "taskList": [
+                make_task_entry(
+                    calendar_date="2026-07-10",
+                    workout_name="Base",
+                    training_effect_label="AEROBIC_BASE",
+                    duration_secs=3120,
+                )
             ]
         }
 
-        workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
+        workouts = _normalize_planned_workouts("43075722", detail, "2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         w = workouts[0]
-        assert w.plan_id == "plan-1"
-        assert w.workout_date == "2026-07-06"
-        assert w.workout_name == "Tempo Run"
-        assert w.workout_type == "tempo"
-        assert w.planned_distance_meters == 8000.0
-        assert w.planned_duration_seconds == 2400.0
-        assert w.planned_target_pace_sec_per_km == pytest.approx(1000.0 / 3.33)
-        assert w.planned_target_hr_low == 150
-        assert w.planned_target_hr_high == 165
+        assert w.plan_id == "43075722"
+        assert w.workout_date == "2026-07-10"
+        assert w.workout_name == "Base"
+        assert w.workout_type == "AEROBIC_BASE"
+        assert w.planned_duration_seconds == 3120
+        # No structured target field exists in the real response -- always None for now.
+        assert w.planned_distance_meters is None
+        assert w.planned_target_pace_sec_per_km is None
+        assert w.planned_target_hr_low is None
+        assert w.planned_target_hr_high is None
+
+    def test_skips_rest_days(self):
+        # A day entry whose taskWorkout.restDay is true has no real workout (workoutName/
+        # sportType are null) -- must not produce an empty placeholder row.
+        detail = {
+            "taskList": [
+                make_task_entry(calendar_date="2026-07-08", rest_day=True),
+                make_task_entry(calendar_date="2026-07-09", workout_name="Base"),
+            ]
+        }
+
+        workouts = _normalize_planned_workouts("43075722", detail, "2026-07-01", "2026-07-10")
+
+        assert len(workouts) == 1
+        assert workouts[0].workout_date == "2026-07-09"
 
     def test_filters_out_workout_outside_window(self):
-        detail = {"workouts": [{"date": "2026-08-01", "workoutName": "Long Run"}]}
+        detail = {"taskList": [make_task_entry(calendar_date="2026-08-01")]}
 
         workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
 
         assert workouts == []
 
-    def test_missing_workouts_key_returns_empty(self):
+    def test_missing_task_list_key_returns_empty(self):
         assert _normalize_planned_workouts("plan-1", {}, "2026-07-01", "2026-07-10") == []
 
     def test_entry_missing_date_is_skipped(self):
-        detail = {"workouts": [{"workoutName": "No Date Run"}]}
+        detail = {"taskList": [{"taskWorkout": {"workoutName": "No Date Run"}}]}
 
         assert _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10") == []
+
+    def test_falls_back_to_legacy_workouts_key(self):
+        # Kept as a lower-priority fallback in case a non-adaptive (phased) plan's shape
+        # differs from the confirmed FBT_ADAPTIVE taskList shape.
+        detail = {"workouts": [{"date": "2026-07-06", "taskWorkout": {"workoutName": "Tempo"}}]}
+
+        workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
+
+        assert len(workouts) == 1
+        assert workouts[0].workout_name == "Tempo"
+
+    def test_normalizes_the_exact_real_response_reported_live(self):
+        # Trimmed but structurally faithful copy of the actual get_adaptive_training_plan_by_id
+        # response a live user pasted back via the Diagnostics panel -- the durations below
+        # (3660/3120/3000 secs) were independently confirmed to match "1:01:00"/"52:00"/"50:00"
+        # shown in that account's own Garmin Connect app for the same workouts.
+        detail = {
+            "trainingPlanId": 43075722,
+            "trainingPlanCategory": "FBT_ADAPTIVE",
+            "name": "TCS Amsterdam Marathon Plan",
+            "taskList": [
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Threshold",
+                        "workoutDescription": "2x18:00@162bpm",
+                        "estimatedDurationInSecs": 3660,
+                        "trainingEffectLabel": "LACTATE_THRESHOLD",
+                        "restDay": False,
+                    },
+                    "calendarDate": "2026-07-07",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": None,
+                        "workoutName": None,
+                        "workoutDescription": None,
+                        "trainingEffectLabel": "INVALID",
+                        "restDay": True,
+                    },
+                    "calendarDate": "2026-07-08",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Base",
+                        "workoutDescription": "137bpm",
+                        "estimatedDurationInSecs": 5100,
+                        "trainingEffectLabel": "AEROBIC_BASE",
+                        "restDay": False,
+                    },
+                    "calendarDate": "2026-07-09",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Base",
+                        "workoutDescription": "137bpm",
+                        "estimatedDurationInSecs": 3120,
+                        "trainingEffectLabel": "AEROBIC_BASE",
+                        "restDay": False,
+                    },
+                    "calendarDate": "2026-07-10",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Anaerobic",
+                        "workoutDescription": "7x1:00@Very Hard",
+                        "estimatedDurationInSecs": 3000,
+                        "trainingEffectLabel": "ANAEROBIC_CAPACITY",
+                        "restDay": False,
+                    },
+                    "calendarDate": "2026-07-11",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Base",
+                        "workoutDescription": "137bpm",
+                        "estimatedDurationInSecs": 3480,
+                        "trainingEffectLabel": "AEROBIC_BASE",
+                        "restDay": False,
+                    },
+                    "calendarDate": "2026-07-12",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "taskWorkout": {
+                        "sportType": None,
+                        "workoutName": None,
+                        "workoutDescription": None,
+                        "trainingEffectLabel": "INVALID",
+                        "restDay": True,
+                    },
+                    "calendarDate": "2026-07-13",
+                },
+            ],
+            "adaptivePlanPhases": [{"trainingPhase": "BUILD", "currentPhase": True}],
+        }
+
+        workouts = _normalize_planned_workouts("43075722", detail, "2026-07-01", "2026-07-31")
+
+        # Two rest days (Jul 8, Jul 13) excluded -- 5 real workouts remain.
+        assert len(workouts) == 5
+        by_date = {w.workout_date: w for w in workouts}
+        assert by_date["2026-07-07"].workout_name == "Threshold"
+        assert by_date["2026-07-07"].planned_duration_seconds == 3660  # 1:01:00
+        assert by_date["2026-07-10"].planned_duration_seconds == 3120  # 52:00
+        assert by_date["2026-07-11"].workout_name == "Anaerobic"
+        assert by_date["2026-07-11"].planned_duration_seconds == 3000  # 50:00
+        assert all(w.plan_id == "43075722" for w in workouts)
 
 
 class TestNormalizeHrZones:
@@ -773,7 +945,9 @@ class TestGarminClientFetch:
         client = make_client()
         client._garmin.get_training_plans.return_value = [{"planId": "plan-1"}]
         client._garmin.get_training_plan_by_id.return_value = {
-            "workouts": [{"date": "2026-07-06", "workoutName": "Tempo Run"}]
+            "workouts": [
+                {"date": "2026-07-06", "taskWorkout": {"workoutName": "Tempo Run"}}
+            ]
         }
 
         workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
@@ -833,7 +1007,9 @@ class TestGarminClientFetch:
             ]
         }
         client._garmin.get_adaptive_training_plan_by_id.return_value = {
-            "workouts": [{"date": "2026-07-06", "workoutName": "Adaptive Run"}]
+            "workouts": [
+                {"date": "2026-07-06", "taskWorkout": {"workoutName": "Adaptive Run"}}
+            ]
         }
 
         workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
