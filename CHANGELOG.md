@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-07
+
 ### Added
 - **Diagnostics panel: wellness/VO2 max checks** (milestone Stage 16 follow-up): six new checks
   (`sleep_data`, `hrv_data`, `training_status`, `training_readiness`, `resting_hr`, `vo2max`) in
@@ -424,7 +426,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/nsaputro/stride-sync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nsaputro/stride-sync/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/nsaputro/stride-sync/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/nsaputro/stride-sync/compare/v0.2.0...v0.2.1
