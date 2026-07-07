@@ -416,11 +416,25 @@ def _normalize_daily_wellness(
 def _normalize_vo2max(cdate: str, raw: Any) -> Vo2MaxReading:
     """Convert `Client.get_max_metrics(cdate)`'s raw response into a `Vo2MaxReading`.
 
-    Best-effort field mapping, same caveat as `_normalize_training_baseline` — see
-    PROJECT_PLAN.md milestone v0.12. Confirmed on a live account that `get_max_metrics` can
-    return a list rather than a dict (shape otherwise unconfirmed) — coerced to `{}` here so
-    every field degrades to `None` instead of crashing on `.get()`.
+    Confirmed live (see PROJECT_PLAN.md milestone Stage 12 follow-up, via the Diagnostics
+    panel's `vo2max` check): the real response is a *list* containing one dict —
+    `[{"userId": ..., "generic": {...}, "cycling": ..., ...}]` — not a bare dict as originally
+    guessed. That list-vs-dict mismatch was previously only defended against as a crash guard
+    (treating any list as "no data, degrade to `None`"), which meant every real response was
+    silently discarded — rows still got inserted (`calendar_date` was always known) but every
+    numeric field came back `None`. Unwrapped here instead: the first dict-shaped list element
+    is extracted before field lookup.
+
+    `generic.vo2MaxPreciseValue`/`vo2MaxValue` and `cycling.vo2MaxPreciseValue`/`vo2MaxValue`
+    were already guessed correctly (confirmed against real values: `55.2`/`55.0`). `fitnessAge`
+    was guessed at the top level but actually lives nested under `generic` — confirmed as a key
+    that exists there (its value was `null` for this account/device, so only its *location* is
+    confirmed, not a real value). The old top-level guess is kept as a lower-priority fallback.
+    A non-list, non-dict, or list-with-no-dict-element response still degrades every field to
+    `None` rather than crashing.
     """
+    if isinstance(raw, list):
+        raw = next((item for item in raw if isinstance(item, dict)), {})
     raw = raw if isinstance(raw, dict) else {}
     generic = raw.get("generic") or {}
     cycling = raw.get("cycling") or {}
@@ -428,7 +442,7 @@ def _normalize_vo2max(cdate: str, raw: Any) -> Vo2MaxReading:
         calendar_date=cdate,
         vo2_max_running=_get(generic, "vo2MaxPreciseValue", "vo2MaxValue"),
         vo2_max_cycling=_get(cycling, "vo2MaxPreciseValue", "vo2MaxValue"),
-        fitness_age=_get(raw, "fitnessAge"),
+        fitness_age=_get(generic, "fitnessAge") or _get(raw, "fitnessAge"),
     )
 
 
@@ -912,29 +926,19 @@ class GarminClient:
         underlying endpoint here (unlike `fetch_daily_wellness`'s five), so nothing to partially
         degrade within a single call.
 
-        Confirmed via a real crash on a live account: `get_max_metrics` can return a list rather
-        than a dict, and the normalization step used to run *outside* this try/except — the
-        resulting `AttributeError` propagated all the way through `run_sync_once`, which only
-        catches `GarminAuthError`/`GarminAPIError`, crashing the whole sync pass without even
-        writing a `sync_log` failure row. The normalize call is now inside this try/except too,
-        so any unexpected response shape degrades to `None` (no row written) like any other
-        fetch failure, instead of crashing the sync.
-
-        Confirmed live this is the routine shape for a date with no VO2 max estimate at all
-        (an empty/placeholder list) rather than a rare anomaly — a backfill spanning months
-        hits it repeatedly for older dates, so it's logged at debug rather than warning to
-        avoid flooding the log with one "warning" per date for expected, non-fatal misses.
+        Originally hardened after a real crash on a live account (`get_max_metrics` returning a
+        list crashed the unguarded normalize call). That hardening was then *wrongly*
+        interpreted as "a list means no data for this date" and used to short-circuit straight
+        to `None` before ever calling `_normalize_vo2max` — but a second live report (real VO2
+        max history visible in the Garmin Connect app, yet every synced row was `NULL`) proved
+        a list containing one real data dict is actually the routine successful-response shape,
+        and that short-circuit was silently discarding it every time. Fixed by letting
+        `_normalize_vo2max` itself unwrap the list (see its docstring) instead of bailing out
+        here — this method's job is now just to catch genuine fetch failures (network/auth
+        errors), never a shape it doesn't recognize.
         """
         try:
             raw = self._garmin.get_max_metrics(cdate) or {}
-            if not isinstance(raw, dict):
-                logger.debug(
-                    "Unexpected VO2 max response shape for %s (expected dict, got %s) — "
-                    "treating as unavailable, non-fatal",
-                    cdate,
-                    type(raw).__name__,
-                )
-                return None
             return _normalize_vo2max(cdate, raw)
         except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
             logger.warning("Could not fetch VO2 max for %s (non-fatal): %s", cdate, exc)

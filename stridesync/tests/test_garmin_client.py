@@ -233,15 +233,49 @@ class TestNormalizeVo2Max:
         assert reading.vo2_max_cycling is None
         assert reading.fitness_age is None
 
-    def test_list_response_does_not_crash(self):
-        # Regression test: a live account returned a list from get_max_metrics instead of a
-        # dict -- raw.get("generic") used to raise AttributeError uncaught, crashing the sync.
-        reading = _normalize_vo2max("2026-07-06", [{"generic": {"vo2MaxValue": 50.0}}])
+    def test_unwraps_the_real_list_wrapped_response(self):
+        # Regression test: get_max_metrics' real successful response is a *list* containing one
+        # dict, not a bare dict -- a prior guard treated any list as "no data" and silently
+        # discarded every real response (rows still got inserted via calendar_date, but every
+        # numeric field came back NULL). Values below match a real account's pasted diagnostic
+        # output byte-for-byte (see PROJECT_PLAN.md milestone Stage 12 follow-up).
+        raw = [
+            {
+                "userId": 86560492,
+                "generic": {
+                    "calendarDate": "2026-07-07",
+                    "vo2MaxPreciseValue": 55.2,
+                    "vo2MaxValue": 55.0,
+                    "fitnessAge": None,
+                    "fitnessAgeDescription": None,
+                    "maxMetCategory": 0,
+                },
+                "cycling": None,
+                "heatAltitudeAcclimation": {"calendarDate": "2026-07-07"},
+            }
+        ]
+
+        reading = _normalize_vo2max("2026-07-06", raw)
+
+        assert reading.calendar_date == "2026-07-06"
+        assert reading.vo2_max_running == 55.2
+        assert reading.vo2_max_cycling is None
+        assert reading.fitness_age is None
+
+    def test_list_with_no_dict_element_does_not_crash(self):
+        reading = _normalize_vo2max("2026-07-06", ["not-a-dict", 42])
 
         assert reading.calendar_date == "2026-07-06"
         assert reading.vo2_max_running is None
         assert reading.vo2_max_cycling is None
         assert reading.fitness_age is None
+
+    def test_fitness_age_nested_under_generic_takes_priority_over_top_level(self):
+        raw = {"generic": {"fitnessAge": 28}, "fitnessAge": 99}
+
+        reading = _normalize_vo2max("2026-07-06", raw)
+
+        assert reading.fitness_age == 28
 
 
 def make_task_entry(
@@ -931,15 +965,28 @@ class TestGarminClientFetch:
 
         assert client.fetch_vo2max("2026-07-06") is None
 
-    def test_fetch_vo2max_returns_none_on_unexpected_list_response(self):
-        # Regression test for a real production crash: a live account's get_max_metrics
-        # returned a list instead of a dict, and the normalize call used to run outside this
-        # try/except -- the resulting AttributeError crashed the whole sync, bypassing
-        # run_sync_once's sync_log failure recording entirely.
+    def test_fetch_vo2max_unwraps_the_real_list_wrapped_response(self):
+        # Regression test: get_max_metrics' real successful response is a list containing one
+        # dict, not a bare dict. An earlier guard (added after a real crash on a list response)
+        # short-circuited any list straight to None before ever normalizing it -- silently
+        # discarding every real VO2 max reading. Fixed by unwrapping inside _normalize_vo2max
+        # instead of bailing out here (see its docstring for the full history).
         client = make_client()
         client._garmin.get_max_metrics.return_value = [{"generic": {"vo2MaxValue": 50.0}}]
 
-        assert client.fetch_vo2max("2026-07-06") is None
+        reading = client.fetch_vo2max("2026-07-06")
+
+        assert reading is not None
+        assert reading.vo2_max_running == 50.0
+
+    def test_fetch_vo2max_returns_none_on_list_with_no_dict_element(self):
+        client = make_client()
+        client._garmin.get_max_metrics.return_value = ["not-a-dict"]
+
+        reading = client.fetch_vo2max("2026-07-06")
+
+        assert reading is not None
+        assert reading.vo2_max_running is None
 
     def test_fetch_planned_workouts_returns_normalized_result(self):
         client = make_client()

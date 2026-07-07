@@ -687,6 +687,16 @@ across three PRs for review size.
 - ✅ `vo2max_history` table + `GarminClient.fetch_vo2max(cdate)` (`get_max_metrics`), same
   rolling-window daily-fetch pattern — additive to (not a replacement for) the existing
   `training_baseline` table/tool. New `vo2max_trend(days=90)` MCP tool.
+- ✅ **VO2 max field mapping confirmed and fixed** (follow-up, via the new `vo2max` Diagnostics
+  check): `get_max_metrics`'s real successful response is a *list* containing one dict, not a
+  bare dict — the earlier crash-guard's "list means unexpected/no data" assumption was wrong and
+  was silently discarding every real reading (rows still got inserted via `calendar_date`, but
+  every numeric field came back `NULL` — this is what the dashboard's new per-record-type totals
+  vs. `vo2max_trend`'s all-`null` MCP output exposed). `_normalize_vo2max` now unwraps that list;
+  `generic.vo2MaxPreciseValue`/`vo2MaxValue` were already guessed right (confirmed:
+  `55.2`/`55.0`), `fitnessAge` was fixed to look nested under `generic` instead of the top level.
+  Also confirmed via the `hrv_data` Diagnostics check that `hrvSummary.status`/`weeklyAvg`/
+  `lastNightAvg` were already guessed correctly — no fix needed there.
 - ✅ `planned_workouts` table + `GarminClient.fetch_planned_workouts(start_date, end_date)`
   (`get_training_plans` + `get_training_plan_by_id` per plan) — delete-then-bulk-insert scoped to
   a rolling ±14-day window on every sync, since Garmin's training-plan response has no confirmed
