@@ -255,20 +255,38 @@ def _connect_readonly(db_path: str) -> sqlite3.Connection:
 
 
 def _sync_summary(db_path: str) -> Dict[str, Any]:
-    """Best-effort total-activities-synced + last-sync-outcome summary for display.
+    """Best-effort per-record-type synced totals + last-sync-outcome summary for display.
 
     Opens its own read-only connection rather than reuse `app/mcp/server.py`'s (which serves the
     same `sync_log`/`activities` data to MCP clients) — this module and the MCP server are meant
-    to stay independently runnable (CLAUDE.md), so importing one from the other for a two-query
-    lookup isn't worth coupling them. Returns defaults, not an error, if the DB file doesn't
-    exist yet (e.g. the sync-scheduler service hasn't completed its first pass).
+    to stay independently runnable (CLAUDE.md), so importing one from the other for a handful of
+    count queries isn't worth coupling them. Returns defaults, not an error, if the DB file
+    doesn't exist yet (e.g. the sync-scheduler service hasn't completed its first pass).
+
+    Counts every milestone Stage 12 table alongside `activities`, not just activities — a live
+    request to show these on the dashboard, not only in the sync log lines.
     """
     if not os.path.exists(db_path):
-        return {"total_activities": 0, "last_sync": None}
+        return {
+            "total_activities": 0,
+            "total_wellness_records": 0,
+            "total_vo2max_records": 0,
+            "total_planned_workouts": 0,
+            "last_sync": None,
+        }
 
     conn = _connect_readonly(db_path)
     try:
         total_activities = conn.execute("SELECT COUNT(*) AS n FROM activities").fetchone()["n"]
+        total_wellness_records = conn.execute(
+            "SELECT COUNT(*) AS n FROM daily_wellness"
+        ).fetchone()["n"]
+        total_vo2max_records = conn.execute(
+            "SELECT COUNT(*) AS n FROM vo2max_history"
+        ).fetchone()["n"]
+        total_planned_workouts = conn.execute(
+            "SELECT COUNT(*) AS n FROM planned_workouts"
+        ).fetchone()["n"]
         last_sync_row = conn.execute(
             """
             SELECT started_at, finished_at, status, activities_synced, error_message
@@ -280,13 +298,23 @@ def _sync_summary(db_path: str) -> Dict[str, Any]:
 
     return {
         "total_activities": total_activities,
+        "total_wellness_records": total_wellness_records,
+        "total_vo2max_records": total_vo2max_records,
+        "total_planned_workouts": total_planned_workouts,
         "last_sync": dict(last_sync_row) if last_sync_row is not None else None,
     }
 
 
 def _sync_summary_html(settings: Settings) -> str:
     summary = _sync_summary(settings.db_path)
-    html = f'<p class="stat">Total activities synced: {summary["total_activities"]}</p>'
+    html = (
+        f'<p class="stat">Total activities synced: {summary["total_activities"]}</p>'
+        f'<p class="stat">Total wellness records synced: '
+        f'{summary["total_wellness_records"]}</p>'
+        f'<p class="stat">Total VO2 max records synced: {summary["total_vo2max_records"]}</p>'
+        f'<p class="stat">Total planned workouts synced: '
+        f'{summary["total_planned_workouts"]}</p>'
+    )
 
     last_sync = summary["last_sync"]
     if last_sync is None:

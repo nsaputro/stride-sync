@@ -95,6 +95,9 @@ def test_index_shows_no_sync_yet_when_db_missing(tmp_path):
 
     assert response.status_code == 200
     assert "Total activities synced: 0" in response.text
+    assert "Total wellness records synced: 0" in response.text
+    assert "Total VO2 max records synced: 0" in response.text
+    assert "Total planned workouts synced: 0" in response.text
     assert "No sync has run yet" in response.text
 
 
@@ -107,6 +110,19 @@ def test_index_shows_total_activities_and_last_sync_success(tmp_path):
         conn.execute(
             "INSERT INTO activities (activity_id, start_time_local, synced_at) VALUES (?, ?, ?)",
             (activity_id, "2026-07-01 06:00:00", "2026-07-01T06:05:00"),
+        )
+    conn.execute(
+        "INSERT INTO daily_wellness (calendar_date, synced_at) VALUES (?, ?)",
+        ("2026-07-01", "2026-07-01T06:05:00"),
+    )
+    conn.execute(
+        "INSERT INTO vo2max_history (calendar_date, synced_at) VALUES (?, ?)",
+        ("2026-07-01", "2026-07-01T06:05:00"),
+    )
+    for workout_date in ("2026-07-02", "2026-07-03"):
+        conn.execute(
+            "INSERT INTO planned_workouts (plan_id, workout_date, synced_at) VALUES (?, ?, ?)",
+            ("plan-1", workout_date, "2026-07-01T06:05:00"),
         )
     conn.execute(
         """
@@ -122,6 +138,9 @@ def test_index_shows_total_activities_and_last_sync_success(tmp_path):
 
     assert response.status_code == 200
     assert "Total activities synced: 3" in response.text
+    assert "Total wellness records synced: 1" in response.text
+    assert "Total VO2 max records synced: 1" in response.text
+    assert "Total planned workouts synced: 2" in response.text
     assert "Last sync: success at 2026-07-01 06:05 UTC (3 activities)" in response.text
 
 

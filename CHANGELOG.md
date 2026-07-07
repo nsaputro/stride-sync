@@ -16,6 +16,11 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   the same wrong-field-name-guess failure class as `planned_workouts`, not yet pinned to a
   specific key. Exposes the raw response for each of `fetch_daily_wellness`'s five sub-calls
   plus `fetch_vo2max`'s one, the same way the training-plan checks did for that earlier fix.
+- **Dashboard shows per-record-type sync totals, not just activities** (milestone Stage 13
+  follow-up, requested live): the Dashboard tab now also shows total `daily_wellness`,
+  `vo2max_history`, and `planned_workouts` row counts alongside the existing
+  "Total activities synced" stat — previously that breakdown was only visible in the add-on log
+  lines, not the web UI.
 
 ### Fixed
 - **VO2 max backfill log noise**: `fetch_vo2max`'s "unexpected response shape" line fires once
