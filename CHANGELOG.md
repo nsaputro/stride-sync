@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-07
+
 ### Fixed
 - **`vo2max_history` silently syncing rows with every field `NULL`, despite the account having
   real VO2 max history in the Garmin Connect app** (milestone Stage 12 follow-up): the "list
@@ -437,7 +439,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/nsaputro/stride-sync/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/nsaputro/stride-sync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/nsaputro/stride-sync/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/nsaputro/stride-sync/compare/v0.2.1...v0.2.2
