@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -1249,23 +1250,51 @@ class TestGarminClientFetch:
         assert result == {"score": 72}
         client._garmin.get_morning_training_readiness.assert_called_once()
 
-    def test_fetch_diagnostic_resting_hr_returns_raw_response(self):
+    def test_fetch_diagnostic_resting_hr_latest_returns_most_recent_available_date(self):
+        # "Latest" (not "today") because today's resting HR can legitimately be unavailable if
+        # Garmin hasn't finalized it yet -- that shouldn't look like a wrong field-name guess.
         client = make_client()
-        client._garmin.get_rhr_day.return_value = {"restingHeartRate": 48}
+        today = datetime.now(timezone.utc).date()
+        three_days_ago = (today - timedelta(days=3)).isoformat()
 
-        result = client.fetch_diagnostic("resting_hr")
+        def _rhr_side_effect(cdate):
+            if cdate == three_days_ago:
+                return {"restingHeartRate": 48}
+            return {"restingHeartRate": None}
 
-        assert result == {"restingHeartRate": 48}
-        client._garmin.get_rhr_day.assert_called_once()
+        client._garmin.get_rhr_day.side_effect = _rhr_side_effect
 
-    def test_fetch_diagnostic_vo2max_returns_raw_response(self):
+        result = client.fetch_diagnostic("resting_hr_latest")
+
+        assert result == {"date": three_days_ago, "raw": {"restingHeartRate": 48}}
+        assert client._garmin.get_rhr_day.call_count == 4  # today, -1, -2, -3
+
+    def test_fetch_diagnostic_resting_hr_latest_reports_no_data_found(self):
         client = make_client()
-        client._garmin.get_max_metrics.return_value = {"generic": {"vo2MaxValue": 51.2}}
+        client._garmin.get_rhr_day.return_value = {"restingHeartRate": None}
 
-        result = client.fetch_diagnostic("vo2max")
+        result = client.fetch_diagnostic("resting_hr_latest")
 
-        assert result == {"generic": {"vo2MaxValue": 51.2}}
-        client._garmin.get_max_metrics.assert_called_once()
+        assert result["date"] is None
+        assert "No data found" in result["note"]
+        assert client._garmin.get_rhr_day.call_count == 14
+
+    def test_fetch_diagnostic_vo2max_latest_returns_most_recent_available_date(self):
+        client = make_client()
+        today = datetime.now(timezone.utc).date()
+        two_days_ago = (today - timedelta(days=2)).isoformat()
+
+        def _vo2max_side_effect(cdate):
+            if cdate == two_days_ago:
+                return {"generic": {"vo2MaxValue": 51.2}}
+            return {"generic": {"vo2MaxValue": None}}
+
+        client._garmin.get_max_metrics.side_effect = _vo2max_side_effect
+
+        result = client.fetch_diagnostic("vo2max_latest")
+
+        assert result == {"date": two_days_ago, "raw": {"generic": {"vo2MaxValue": 51.2}}}
+        assert client._garmin.get_max_metrics.call_count == 3  # today, -1, -2
 
     def test_fetch_diagnostic_unknown_check_raises_value_error(self):
         client = make_client()

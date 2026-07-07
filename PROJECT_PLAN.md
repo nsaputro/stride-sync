@@ -857,6 +857,14 @@ each time.
   response for each of `fetch_daily_wellness`'s five sub-calls plus `fetch_vo2max`'s one, so the
   actual field names can be confirmed the same way `planned_workouts`'s were (Stage 15/17/18)
   once the reporting user pastes the output back.
+- ✅ **`resting_hr`/`vo2max` renamed to `resting_hr_latest`/`vo2max_latest`, searching backward
+  from today instead of hardcoding it** (follow-up, requested live): both fields can legitimately
+  be missing for today specifically because Garmin hasn't finalized them yet — that would have
+  looked identical to a wrong field-name guess to someone reading the diagnostic output. New
+  `GarminClient._fetch_latest_diagnostic(fetch_fn, has_value)` helper scans backward one day at
+  a time (`_DIAGNOSTIC_LATEST_LOOKBACK_DAYS = 14`) and returns `{"date": ..., "raw": ...}` for
+  the first date with real data, or a `"note"` plus the most recent raw response actually
+  checked if nothing was found in the window.
 
 ### Stage 17 — Second live-account fix for planned_workouts: the real `trainingPlanId` key 🔄
 
