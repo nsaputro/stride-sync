@@ -27,7 +27,8 @@
   or missing can be diagnosed and reported without needing shell/docker access to the add-on.
   Backed by a fixed, curated set of checks (`GarminClient.fetch_diagnostic`) — never an arbitrary
   method name, since several `python-garminconnect` methods are write operations and StrideSync
-  never writes back to Garmin.
+  never writes back to Garmin. Includes a copy-to-clipboard button on the output, so the raw JSON
+  doesn't need to be manually selected out of the (often long) scrollable box.
 
 ### Changed
 - **Scheduled sync now fetches activities incrementally instead of a fixed most-recent-20**

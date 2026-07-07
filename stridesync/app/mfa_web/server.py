@@ -128,6 +128,12 @@ _STYLE = """
     overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 0.5rem;
     padding: 0.75rem;
   }
+  .diagnostic-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .diagnostic-header h2 { margin: 0; }
+  button.copy-btn {
+    width: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; font-weight: 500;
+    flex-shrink: 0;
+  }
   a { color: var(--primary); }
 """
 
@@ -140,6 +146,19 @@ document.addEventListener("submit", function (event) {
     button.textContent = "Working…";
   }
 });
+
+function copyDiagnosticOutput(button) {
+  var pre = document.getElementById("diagnostic-output");
+  if (!pre) { return; }
+  var original = button.textContent;
+  navigator.clipboard.writeText(pre.textContent).then(function () {
+    button.textContent = "✅ Copied";
+    setTimeout(function () { button.textContent = original; }, 1500);
+  }, function () {
+    button.textContent = "Copy failed";
+    setTimeout(function () { button.textContent = original; }, 1500);
+  });
+}
 </script>
 """
 
@@ -852,8 +871,12 @@ async def diagnostics(request: Request) -> HTMLResponse:
     dumped = json.dumps(result, indent=2, default=str, ensure_ascii=False)
     truncated = len(dumped) > _DIAGNOSTIC_OUTPUT_LIMIT
     output_html = (
+        '<div class="diagnostic-header">'
         f"<h2>{escape(DIAGNOSTIC_CHECKS[check])}</h2>"
-        f'<pre class="diagnostic-output">{escape(dumped[:_DIAGNOSTIC_OUTPUT_LIMIT])}</pre>'
+        '<button type="button" class="copy-btn" onclick="copyDiagnosticOutput(this)">'
+        "📋 Copy</button></div>"
+        f'<pre id="diagnostic-output" class="diagnostic-output">'
+        f"{escape(dumped[:_DIAGNOSTIC_OUTPUT_LIMIT])}</pre>"
     )
     if truncated:
         output_html += '<p class="error">Output truncated.</p>'

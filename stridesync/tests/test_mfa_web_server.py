@@ -786,6 +786,9 @@ def test_diagnostics_route_shows_raw_json_response(tmp_path):
     assert "p1" in response.text
     mock_client.login.assert_called_once()
     mock_client.fetch_diagnostic.assert_called_once_with("training_plans")
+    # Copy button targets the <pre> holding the exact output, not a re-serialized copy.
+    assert 'id="diagnostic-output"' in response.text
+    assert "copyDiagnosticOutput(this)" in response.text
 
 
 def test_diagnostics_route_shows_raw_error_message(tmp_path):
