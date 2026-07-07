@@ -161,6 +161,15 @@ Claude answers these by calling StrideSync's MCP tools directly (recent activiti
 pace/cadence/HR trend, training load, training baseline, HR zones, per-activity samples,
 last-sync status) — no need to open Garmin Connect or the StrideSync web UI yourself.
 
+### Want more structured coaching? Try a Claude Skill
+
+The prompts above work standalone, but for a consistent, opinionated coaching workflow — race
+target tracking, training-progression checks, recovery/readiness cross-referencing, and
+structured-workout lap analysis, all pulling live StrideSync data — see the example
+[`running-coach`](https://github.com/nsaputro/stride-sync/blob/main/docs/skills/running-coach/SKILL.md)
+Claude Skill in this repo's `docs/skills/` directory. Skills are optional; the MCP tools above
+work fine without one.
+
 ## Web UI
 
 Open the **StrideSync** panel in the Home Assistant sidebar for a small dashboard alongside the
