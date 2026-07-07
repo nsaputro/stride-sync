@@ -913,11 +913,16 @@ class GarminClient:
         writing a `sync_log` failure row. The normalize call is now inside this try/except too,
         so any unexpected response shape degrades to `None` (no row written) like any other
         fetch failure, instead of crashing the sync.
+
+        Confirmed live this is the routine shape for a date with no VO2 max estimate at all
+        (an empty/placeholder list) rather than a rare anomaly — a backfill spanning months
+        hits it repeatedly for older dates, so it's logged at debug rather than warning to
+        avoid flooding the log with one "warning" per date for expected, non-fatal misses.
         """
         try:
             raw = self._garmin.get_max_metrics(cdate) or {}
             if not isinstance(raw, dict):
-                logger.warning(
+                logger.debug(
                     "Unexpected VO2 max response shape for %s (expected dict, got %s) — "
                     "treating as unavailable, non-fatal",
                     cdate,
