@@ -28,6 +28,12 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `planned_vs_actual(days=14)`, joining planned workouts against completed activities by calendar
   date. This is the most speculative addition in v0.12 — the underlying `get_training_plans`/
   `get_training_plan_by_id` response shape has no prior confirmation from a live account.
+- **Diagnostics panel on the Settings tab** (milestone v0.16): runs a read-only raw Garmin
+  Connect API call and shows its exact JSON response, so a synced field that's coming back wrong
+  or missing can be diagnosed and reported without needing shell/docker access to the add-on.
+  Backed by a fixed, curated set of checks (`GarminClient.fetch_diagnostic`) — never an arbitrary
+  method name, since several `python-garminconnect` methods are write operations and StrideSync
+  never writes back to Garmin.
 
 ### Changed
 - **Scheduled sync now fetches activities incrementally instead of a fixed most-recent-20**

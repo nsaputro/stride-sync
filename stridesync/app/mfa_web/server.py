@@ -17,6 +17,7 @@ module-level slot guarded by a lock — not a per-visitor session store.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -34,6 +35,7 @@ from starlette.routing import Route
 from app.config import Settings
 from app.sync import mfa_login
 from app.sync.garmin_client import (
+    DIAGNOSTIC_CHECKS,
     TRANSPORT_ERRORS,
     GarminAPIError,
     GarminAuthError,
@@ -115,7 +117,17 @@ _STYLE = """
   input[type=text], input[type=date] {
     background: var(--card); color: var(--text); margin-bottom: 0.5rem;
   }
+  select {
+    font-size: 1rem; padding: 0.7rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border);
+    width: 100%; font-family: inherit; background: var(--card); color: var(--text);
+    margin-bottom: 0.5rem;
+  }
   progress { width: 100%; height: 0.9rem; margin: 0.5rem 0; accent-color: var(--primary); }
+  pre.diagnostic-output {
+    white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; max-height: 24rem;
+    overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 0.5rem;
+    padding: 0.75rem;
+  }
   a { color: var(--primary); }
 """
 
@@ -375,6 +387,22 @@ async def running(request: Request) -> HTMLResponse:
     return _page("Running", _weekly_distance_html(settings), active_tab="running")
 
 
+def _diagnostics_form_html() -> str:
+    options_html = "".join(
+        f'<option value="{escape(check_id)}">{escape(label)}</option>'
+        for check_id, label in DIAGNOSTIC_CHECKS.items()
+    )
+    return (
+        "<h2>Diagnostics</h2>"
+        "<p>Runs one read-only Garmin Connect API call and shows its exact response — useful "
+        "when a synced field is coming back wrong or missing and you want to report it, without "
+        "needing shell/docker access to the add-on.</p>"
+        '<form method="post" action="diagnostics">'
+        f'<select name="check" required>{options_html}</select>'
+        '<button type="submit" class="primary">Run check</button></form>'
+    )
+
+
 def _settings_body() -> str:
     """Reflects the current backfill state, not just a static form — the "Settings" nav tab is
     reachable independently of the "/backfill" URL (e.g. the user switches to another tab and
@@ -395,9 +423,10 @@ def _settings_body() -> str:
         '<input type="date" name="start_date" required>'
         '<button type="submit" class="primary">Backfill</button></form>'
     )
+    diagnostics_html = _diagnostics_form_html()
 
     if state["running"]:
-        return _backfill_progress_body()
+        return _backfill_progress_body() + diagnostics_html
 
     if state["done"] and state["start_date"] is not None:
         start_date = escape(state["start_date"])
@@ -408,9 +437,9 @@ def _settings_body() -> str:
                 f'<p class="ok">Last backfill: {_activity_count(state["result_count"] or 0)} '
                 f"since {start_date}.</p>"
             )
-        return status_html + form_html
+        return status_html + form_html + diagnostics_html
 
-    return form_html
+    return form_html + diagnostics_html
 
 
 async def settings_tab(request: Request) -> HTMLResponse:
@@ -775,6 +804,63 @@ async def sync(request: Request) -> HTMLResponse:
     )
 
 
+# Raw diagnostic output is a debugging aid, not something meant to be browsed as a full page --
+# capped well short of anything that would make the ingress panel unusable on a slow connection.
+_DIAGNOSTIC_OUTPUT_LIMIT = 8000
+
+
+async def diagnostics(request: Request) -> HTMLResponse:
+    """Runs one read-only raw Garmin Connect API call (`GarminClient.fetch_diagnostic`) and shows
+    its exact JSON response, so a synced field that's coming back wrong or missing can be
+    diagnosed and reported from the Settings tab directly — this repo has repeatedly needed
+    exactly this (temperature sample key, `fetch_vo2max`'s list-vs-dict crash, `planned_workouts`'s
+    `trainingPlanList` key), and previously that meant handing the reporting user a one-off script
+    to run via `docker exec` each time.
+
+    Unlike `sync`/`backfill`, failures here show the *raw* exception message rather than a
+    generic "failed unexpectedly" — for a diagnostic tool, the exact failure (e.g. an endpoint
+    404ing or a permission error) is itself useful information, not something to hide. No
+    credentials/tokens ever appear in a Garmin API error message, so this is safe to surface
+    as-is (same reasoning `describe_transport_error` already relies on elsewhere in this codebase).
+    """
+    settings: Settings = request.app.state.settings
+    form = await request.form()
+    check = str(form.get("check", "")).strip()
+    back_link = '<p><a href="settings">Back to Settings</a></p>'
+
+    if check not in DIAGNOSTIC_CHECKS:
+        return _page(
+            "Diagnostics",
+            f'<p class="error">Unknown check.</p>{back_link}',
+            active_tab="settings",
+        )
+
+    client = GarminClient(
+        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+    )
+    try:
+        client.login()
+        result = client.fetch_diagnostic(check)
+    except Exception as exc:  # noqa: BLE001 - diagnostic tool: the raw error is the point
+        logger.exception("Diagnostic check %s failed", check)
+        return _page(
+            "Diagnostics",
+            f'<p class="error">Check failed: {escape(str(exc))}</p>{back_link}',
+            active_tab="settings",
+        )
+
+    dumped = json.dumps(result, indent=2, default=str, ensure_ascii=False)
+    truncated = len(dumped) > _DIAGNOSTIC_OUTPUT_LIMIT
+    output_html = (
+        f"<h2>{escape(DIAGNOSTIC_CHECKS[check])}</h2>"
+        f'<pre class="diagnostic-output">{escape(dumped[:_DIAGNOSTIC_OUTPUT_LIMIT])}</pre>'
+    )
+    if truncated:
+        output_html += '<p class="error">Output truncated.</p>'
+
+    return _page("Diagnostics", output_html + back_link, active_tab="settings")
+
+
 def create_app(settings: Settings) -> Starlette:
     app = Starlette(
         routes=[
@@ -786,6 +872,7 @@ def create_app(settings: Settings) -> Starlette:
             Route("/sync", sync, methods=["POST"]),
             Route("/backfill", backfill, methods=["GET", "POST"]),
             Route("/backfill/status", backfill_status, methods=["GET"]),
+            Route("/diagnostics", diagnostics, methods=["POST"]),
         ]
     )
     app.state.settings = settings
