@@ -604,6 +604,12 @@ DIAGNOSTIC_CHECKS: Dict[str, str] = {
         "get_adaptive_training_plan_by_id)"
     ),
     "scheduled_workouts": "Scheduled workouts this month (get_scheduled_workouts)",
+    "sleep_data": "Today's sleep data (get_sleep_data)",
+    "hrv_data": "Today's HRV data (get_hrv_data)",
+    "training_status": "Today's training status (get_training_status)",
+    "training_readiness": "Today's training readiness (get_morning_training_readiness)",
+    "resting_hr": "Today's resting HR (get_rhr_day)",
+    "vo2max": "Today's VO2 max / fitness age (get_max_metrics)",
 }
 
 
@@ -1009,6 +1015,14 @@ class GarminClient:
         reporting user a one-off script to run via `docker exec`. This is the same idea wired
         permanently into the Settings tab's Diagnostics panel instead.
 
+        The `sleep_data`/`hrv_data`/`training_status`/`training_readiness`/`resting_hr`/`vo2max`
+        checks were added after a live report that `daily_wellness`/`vo2max_history` rows were
+        coming back with real Garmin data unaccounted for (the account has both VO2 max and HRV
+        history in the Garmin Connect app, but StrideSync synced neither) — the same
+        wrong-field-name-guess failure class as `planned_workouts`, just not yet pinned down to a
+        specific key, so this exposes the raw response for each of `fetch_daily_wellness`'s five
+        sub-calls plus `fetch_vo2max`'s one, same as the training-plan checks did for that fix.
+
         Deliberately does **not** wrap failures non-fatally like every other `fetch_*` method —
         the caller (the Diagnostics panel) wants to see the raw exception too, since "this
         endpoint failed with X" is itself useful diagnostic information, not a failure to hide.
@@ -1016,6 +1030,8 @@ class GarminClient:
         Raises:
             ValueError: if `check` isn't a key in `DIAGNOSTIC_CHECKS`.
         """
+        today = datetime.now(timezone.utc).date()
+
         if check == "training_plans":
             return self._garmin.get_training_plans()
 
@@ -1050,8 +1066,25 @@ class GarminClient:
             return fetch_detail(plan_id)
 
         if check == "scheduled_workouts":
-            today = datetime.now(timezone.utc).date()
             return self._garmin.get_scheduled_workouts(today.year, today.month)
+
+        if check == "sleep_data":
+            return self._garmin.get_sleep_data(today.isoformat())
+
+        if check == "hrv_data":
+            return self._garmin.get_hrv_data(today.isoformat())
+
+        if check == "training_status":
+            return self._garmin.get_training_status(today.isoformat())
+
+        if check == "training_readiness":
+            return self._garmin.get_morning_training_readiness(today.isoformat())
+
+        if check == "resting_hr":
+            return self._garmin.get_rhr_day(today.isoformat())
+
+        if check == "vo2max":
+            return self._garmin.get_max_metrics(today.isoformat())
 
         raise ValueError(f"Unknown diagnostic check: {check!r}")
 

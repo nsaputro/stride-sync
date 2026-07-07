@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+- **Diagnostics panel: wellness/VO2 max checks** (milestone Stage 16 follow-up): six new checks
+  (`sleep_data`, `hrv_data`, `training_status`, `training_readiness`, `resting_hr`, `vo2max`) in
+  the Settings tab's Diagnostics dropdown, added after a live report that an account with real
+  VO2 max and HRV history in the Garmin Connect app was getting `NULL` for both in StrideSync —
+  the same wrong-field-name-guess failure class as `planned_workouts`, not yet pinned to a
+  specific key. Exposes the raw response for each of `fetch_daily_wellness`'s five sub-calls
+  plus `fetch_vo2max`'s one, the same way the training-plan checks did for that earlier fix.
+
 ### Fixed
 - **VO2 max backfill log noise**: `fetch_vo2max`'s "unexpected response shape" line fires once
   per calendar date whenever Garmin has no VO2 max estimate for that date — confirmed live as

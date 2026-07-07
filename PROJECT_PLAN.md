@@ -833,6 +833,14 @@ each time.
   of this panel: the JSON box was awkward to select/copy by hand for pasting into a bug report).
   `navigator.clipboard.writeText()` against the exact `<pre id="diagnostic-output">` text — not a
   re-serialized copy, so what gets pasted is byte-identical to what's displayed.
+- ✅ **Extended `DIAGNOSTIC_CHECKS` to the `daily_wellness`/`vo2max_history` endpoints**:
+  `sleep_data`, `hrv_data`, `training_status`, `training_readiness`, `resting_hr`, `vo2max` —
+  live report that an account with real VO2 max and HRV history in the Garmin Connect app was
+  getting `NULL` for both in StrideSync, the same wrong-field-name-guess failure class as
+  `planned_workouts`, just not yet pinned to a specific key. These six checks expose the raw
+  response for each of `fetch_daily_wellness`'s five sub-calls plus `fetch_vo2max`'s one, so the
+  actual field names can be confirmed the same way `planned_workouts`'s were (Stage 15/17/18)
+  once the reporting user pastes the output back.
 
 ### Stage 17 — Second live-account fix for planned_workouts: the real `trainingPlanId` key 🔄
 
