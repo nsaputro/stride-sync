@@ -828,6 +828,10 @@ each time.
   access needed to report a wrong-looking field going forward.
 - ✅ Verified end-to-end with a live ASGI test client: `/settings` shows the new dropdown, and a
   mocked `/diagnostics` POST renders the raw JSON in the response body.
+- ✅ **Copy-to-clipboard button** on the diagnostic output (live feedback from the first real use
+  of this panel: the JSON box was awkward to select/copy by hand for pasting into a bug report).
+  `navigator.clipboard.writeText()` against the exact `<pre id="diagnostic-output">` text — not a
+  re-serialized copy, so what gets pasted is byte-identical to what's displayed.
 
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
