@@ -41,6 +41,12 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `daily_wellness`, `vo2max_history` (only counting dates Garmin actually returned data for), and
   `planned_workouts` row counts are logged on every sync pass, success or failure — confirming
   what actually synced no longer requires a direct database query.
+- **Backfill now has parity with regular sync** (milestone v0.14): `run_backfill_sync` refreshes
+  `training_baseline`, and fetches `daily_wellness`/`vo2max_history` for every date from the
+  given start date through today (not just a fixed rolling window), so historical wellness/VO2
+  max data is actually backfilled, not just activities. `planned_workouts` is refreshed too,
+  using the same forward-looking window as regular sync (it's not historical data). Backfill now
+  also logs per-record-type counts, matching v0.13's regular-sync change.
 
 ### Fixed
 - **Sync crash when `get_max_metrics` returns a list instead of a dict** (milestone v0.12):
@@ -51,6 +57,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   inside the try/except and hardening it against non-dict input; applied the same defensive fix
   to `fetch_daily_wellness`'s merge step, since it has the identical unguarded-call shape and the
   same live account demonstrated Garmin's API can return unexpected response shapes.
+- **Backfill button looping forever, restarting the backfill every ~1 second** (milestone v0.14):
+  confirmed live — the Settings tab's backfill POST handler rendered the progress page directly
+  instead of redirecting, so the polling script's `location.reload()` (fired once it saw the
+  backfill finish) re-submitted the original POST rather than doing a plain GET, silently
+  restarting the backfill forever until the container was restarted. Fixed with the standard
+  Post/Redirect/Get pattern: the POST handler now redirects to the `GET /backfill` route instead
+  of rendering the page itself.
 
 ## [0.2.2] - 2026-07-05
 
