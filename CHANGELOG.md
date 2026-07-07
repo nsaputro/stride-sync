@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-07
+
 ### Added
 - **Daily wellness sync** (milestone v0.12): new `daily_wellness` table — sleep (score, duration,
   deep/light/REM/awake seconds), HRV (status, weekly/last-night averages), Garmin's own
@@ -401,7 +403,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nsaputro/stride-sync/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/nsaputro/stride-sync/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/nsaputro/stride-sync/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nsaputro/stride-sync/compare/v0.1.0...v0.2.0
