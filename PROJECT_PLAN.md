@@ -709,6 +709,32 @@ across three PRs for review size.
   `temperature_celsius` (which added a column to an already-shipped table). `CREATE TABLE IF NOT
   EXISTS` in `schema.sql` is sufficient for every existing install.
 
+### v0.13 — Incremental activity sync + per-record-type sync log counts 🔄
+
+Regular scheduled syncs (`run_sync_once`) always fetched a fixed most-recent-20 activities
+(`GarminClient.fetch_recent_activities`) — a busy stretch (more than 20 activities logged since
+the last sync) would silently miss activities older than the 20th-most-recent, with no way to
+notice from the logs alone. Separately, the only per-sync signal available was a single
+"N activities" count — confirming whether the new v0.12 tables (`daily_wellness`,
+`vo2max_history`, `planned_workouts`) actually got fresh data required a direct SQL query against
+the database, rather than being visible from the add-on log alone.
+
+- ✅ `run_sync_once` now fetches activities via `GarminClient.fetch_activities_since` (already
+  used by `run_backfill_sync`) instead of `fetch_recent_activities`, using the most recent
+  *successful* sync's date (`_last_successful_sync_date`, reading `sync_log.started_at` filtered
+  to `status = 'success'`) as the start date — or `_FIRST_SYNC_LOOKBACK_DAYS` (7) days back if
+  this account has never completed a successful sync yet. A failed sync is deliberately not
+  treated as "last successful" so a retry re-covers the same range rather than skipping past
+  whatever the failed attempt never actually synced. `fetch_recent_activities` itself is
+  unchanged and still available on `GarminClient` (tested, just no longer called by the
+  scheduler) — the now-meaningless `--limit` CLI flag and the `limit` parameter threaded through
+  `run_sync_once`/`run_forever`/`main()` were removed instead of left as dead wiring.
+- ✅ `run_sync_once` now logs a per-record-type count on both the success and failure path —
+  activities, `daily_wellness` rows, `vo2max_history` rows (only counting ones where Garmin
+  actually returned data, not every date in the window), and `planned_workouts` rows — so
+  confirming what actually synced is a log line away instead of requiring a direct SQL query.
+  This is a log-only change; `sync_log`'s schema is untouched.
+
 ### v1.0 — Documented, versioned, changelog-tracked release 🔄
 
 - ✅ `DOCS.md` complete: install steps, all config options (now six, since milestone v0.6 added

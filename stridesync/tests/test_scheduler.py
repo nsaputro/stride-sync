@@ -1,3 +1,4 @@
+import logging
 import signal
 import threading
 import time
@@ -20,6 +21,7 @@ from app.sync.garmin_client import (
 )
 from app.sync.scheduler import (
     _install_shutdown_handler,
+    _last_successful_sync_date,
     run_backfill_sync,
     run_forever,
     run_sync_once,
@@ -165,7 +167,6 @@ class FakeGarminClient:
         activities=None,
         laps=None,
         login_error=None,
-        fetch_error=None,
         baseline=None,
         hr_zones=None,
         samples=None,
@@ -178,7 +179,6 @@ class FakeGarminClient:
         self._activities = activities or []
         self._laps = laps or {}
         self._login_error = login_error
-        self._fetch_error = fetch_error
         self._baseline = baseline
         self._hr_zones = hr_zones or {}
         self._samples = samples or {}
@@ -195,11 +195,6 @@ class FakeGarminClient:
         self.login_called = True
         if self._login_error:
             raise self._login_error
-
-    def fetch_recent_activities(self, limit=20):
-        if self._fetch_error:
-            raise self._fetch_error
-        return self._activities
 
     def fetch_activities_since(self, start_date):
         self.since_start_date = start_date
@@ -249,6 +244,130 @@ class FakeGarminClient:
     def fetch_planned_workouts(self, start_date, end_date):
         self.planned_workouts_call_args = (start_date, end_date)
         return self._planned_workouts
+
+
+class TestLastSuccessfulSyncDate:
+    def test_returns_none_when_no_prior_sync(self, tmp_path):
+        settings = make_settings(tmp_path)
+        from app import db
+
+        conn = db.connect(settings.db_path)
+        try:
+            assert _last_successful_sync_date(conn) is None
+        finally:
+            conn.close()
+
+    def test_returns_date_of_most_recent_success_ignoring_failures(self, tmp_path):
+        settings = make_settings(tmp_path)
+        from app import db
+
+        conn = db.connect(settings.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO sync_log
+                    (started_at, finished_at, status, activities_synced, error_message)
+                VALUES
+                    ('2026-06-01T08:00:00+00:00', '2026-06-01T08:00:05+00:00', 'failed', 0, 'boom')
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO sync_log
+                    (started_at, finished_at, status, activities_synced, error_message)
+                VALUES
+                    ('2026-06-15T08:00:00+00:00', '2026-06-15T08:00:05+00:00', 'success', 2, NULL)
+                """
+            )
+            conn.commit()
+
+            assert _last_successful_sync_date(conn) == "2026-06-15"
+        finally:
+            conn.close()
+
+
+def test_run_sync_once_fetches_since_seven_days_back_on_first_sync(tmp_path):
+    # First-ever sync for this account -- no prior sync_log row to compute an incremental
+    # start date from, so it falls back to a fixed 7-day lookback.
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(activities=[make_activity()])
+
+    run_sync_once(settings, client)
+
+    expected = (datetime.now(timezone.utc).date() - timedelta(days=7)).isoformat()
+    assert client.since_start_date == expected
+
+
+def test_run_sync_once_fetches_since_last_successful_sync(tmp_path):
+    settings = make_settings(tmp_path)
+    client1 = FakeGarminClient(activities=[make_activity()])
+    run_sync_once(settings, client1)
+
+    client2 = FakeGarminClient(activities=[make_activity()])
+    run_sync_once(settings, client2)
+
+    from app import db
+
+    conn = db.connect(settings.db_path)
+    try:
+        first_started_at = conn.execute(
+            "SELECT started_at FROM sync_log ORDER BY id ASC LIMIT 1"
+        ).fetchone()["started_at"]
+    finally:
+        conn.close()
+
+    assert client2.since_start_date == first_started_at[:10]
+
+
+def test_run_sync_once_does_not_advance_since_date_past_a_failed_sync(tmp_path):
+    # A failed sync must not be treated as "last successful sync" -- otherwise a retry would
+    # skip over whatever date range the failed attempt never actually covered.
+    settings = make_settings(tmp_path)
+    failing_client = FakeGarminClient(since_error=GarminAPIError("garmin is down"))
+    with pytest.raises(GarminAPIError):
+        run_sync_once(settings, failing_client)
+
+    retry_client = FakeGarminClient(activities=[make_activity()])
+    run_sync_once(settings, retry_client)
+
+    expected = (datetime.now(timezone.utc).date() - timedelta(days=7)).isoformat()
+    assert retry_client.since_start_date == expected
+
+
+def test_run_sync_once_logs_record_counts_on_success(tmp_path, caplog):
+    settings = make_settings(tmp_path)
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    client = FakeGarminClient(
+        activities=[make_activity()],
+        vo2max={today_str: make_vo2max_reading(today_str)},
+        planned_workouts=[make_planned_workout()],
+    )
+
+    with caplog.at_level(logging.INFO):
+        run_sync_once(settings, client)
+
+    assert "1 activities" in caplog.text
+    assert "4 wellness records" in caplog.text
+    assert "1 vo2max records" in caplog.text
+    assert "1 planned workouts" in caplog.text
+
+
+def test_run_sync_once_logs_zero_counts_when_activity_fetch_fails_immediately(tmp_path, caplog):
+    # fetch_activities_since runs before the wellness/vo2max/planned_workouts fetches, so a
+    # failure there means every count is still at its initialized zero -- the failure log line
+    # must still format cleanly with all-zero counts rather than crashing or omitting them.
+    settings = make_settings(tmp_path)
+    client = FakeGarminClient(since_error=GarminAPIError("garmin is down"))
+
+    with caplog.at_level(logging.INFO):
+        with pytest.raises(GarminAPIError):
+            run_sync_once(settings, client)
+
+    assert "0 activities" in caplog.text
+    assert "0 wellness records" in caplog.text
+    assert "0 vo2max records" in caplog.text
+    assert "0 planned workouts" in caplog.text
+    assert "garmin is down" in caplog.text
 
 
 def test_run_sync_once_writes_activities_and_laps(tmp_path):
@@ -535,8 +654,10 @@ def test_run_sync_once_logs_failure_on_auth_error(tmp_path):
 
 
 def test_run_sync_once_logs_failure_on_fetch_error(tmp_path):
+    # run_sync_once fetches activities via fetch_activities_since (incremental, not
+    # fetch_recent_activities's count-based fetch_error) -- see since_error, not fetch_error.
     settings = make_settings(tmp_path)
-    client = FakeGarminClient(fetch_error=GarminAPIError("garmin is down"))
+    client = FakeGarminClient(since_error=GarminAPIError("garmin is down"))
 
     with pytest.raises(GarminAPIError):
         run_sync_once(settings, client)
