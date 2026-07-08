@@ -172,7 +172,15 @@ jobs:
           # 2. Bump NEXT_VERSION to next patch
           echo "$NEXT" > stridesync/NEXT_VERSION
 
-          # 3. Update CHANGELOG.md and generate stridesync/CHANGELOG.md
+          # 3. Bump stridesync-dev/config.yaml to track the new NEXT_VERSION's first beta.
+          # Without this, CI's version-ordering check (stridesync-dev must start with
+          # NEXT_VERSION) breaks the instant this PR merges, since NEXT_VERSION just moved but
+          # the dev config didn't -- staying broken until some later PR happens to bump it. b1
+          # is always safe here: NEXT_VERSION was just set to a value that never existed before,
+          # so no `v${NEXT}b1` tag can possibly exist yet.
+          sed -i "s/^version:.*/version: \"${NEXT}b1\"/" stridesync-dev/config.yaml
+
+          # 4. Update CHANGELOG.md and generate stridesync/CHANGELOG.md
           TODAY="$TODAY" python3 - <<'PYEOF'
           import os, re, pathlib
 
@@ -265,7 +273,8 @@ jobs:
           print(f"Updated CHANGELOG.md and generated stridesync/CHANGELOG.md for {version}")
           PYEOF
 
-          git add stridesync/config.yaml stridesync/NEXT_VERSION CHANGELOG.md stridesync/CHANGELOG.md
+          git add stridesync/config.yaml stridesync/NEXT_VERSION stridesync-dev/config.yaml \
+            CHANGELOG.md stridesync/CHANGELOG.md
           git commit -m "chore: post-release ${VERSION} — stamp versions and update changelog"
           git push --force origin "$BRANCH"
 
@@ -295,6 +304,7 @@ jobs:
           **Changes in this PR:**
           - \`stridesync/config.yaml\` version → \`${VERSION}\` (stamps the released version so HA offers the update)
           - \`stridesync/NEXT_VERSION\` → \`${NEXT}\` (next patch target)
+          - \`stridesync-dev/config.yaml\` version → \`${NEXT}b1\` (keeps it tracking \`NEXT_VERSION\`, so CI's version-ordering check doesn't fail on \`main\` until some later PR happens to bump it)
           - \`CHANGELOG.md\` — \`[${VERSION}]\` section dated; comparison links updated
           - \`stridesync/CHANGELOG.md\` — regenerated from main changelog
 
