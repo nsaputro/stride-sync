@@ -285,9 +285,13 @@ def make_task_entry(
     training_effect_label="LACTATE_THRESHOLD",
     duration_secs=3660,
     rest_day=False,
+    adaptive_status="NOT_COMPLETE",
 ):
     """Build one `taskList` entry matching the real `get_adaptive_training_plan_by_id` shape
     (see `_normalize_planned_workouts`'s docstring) -- confirmed live, not a guess.
+    `adaptive_status` mirrors `taskWorkout.adaptiveCoachingWorkoutStatus`, present on every real
+    entry seen so far; pass `None` to simulate a response shape where the field is absent
+    entirely (e.g. an unconfirmed phased/non-adaptive plan).
     """
     if rest_day:
         task_workout = {
@@ -309,6 +313,8 @@ def make_task_entry(
             "trainingEffectLabel": training_effect_label,
             "restDay": False,
         }
+    if adaptive_status is not None:
+        task_workout["adaptiveCoachingWorkoutStatus"] = adaptive_status
     return {
         "trainingPlanId": 43075722,
         "weekId": 33,
@@ -370,6 +376,65 @@ class TestNormalizePlannedWorkouts:
         # The rest day still counts as "covered" -- it's a real answer from Garmin, just not a
         # PlannedWorkout row -- so a stale row on that date still gets cleared by the caller.
         assert covered_dates == {"2026-07-08", "2026-07-09"}
+
+    def test_excludes_completed_days_from_both_workouts_and_covered_dates(self):
+        # Reported live: a day already worked (adaptiveCoachingWorkoutStatus ==
+        # "COMPLETED_TODAYS_WORKOUT") must never be touched again by a later sync, and can
+        # simply vanish from a later taskList response entirely -- excluding it from
+        # covered_dates (not just from the workouts list) is what makes the caller's
+        # delete-then-replace leave its already-stored row alone.
+        detail = {
+            "taskList": [
+                make_task_entry(
+                    calendar_date="2026-07-08",
+                    workout_name="Base",
+                    adaptive_status="COMPLETED_TODAYS_WORKOUT",
+                ),
+                make_task_entry(calendar_date="2026-07-09", workout_name="Threshold"),
+            ]
+        }
+
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-10"
+        )
+
+        assert len(workouts) == 1
+        assert workouts[0].workout_date == "2026-07-09"
+        assert covered_dates == {"2026-07-09"}
+
+    def test_excludes_completed_rest_day_from_covered_dates(self):
+        detail = {
+            "taskList": [
+                make_task_entry(
+                    calendar_date="2026-07-08",
+                    rest_day=True,
+                    adaptive_status="COMPLETED_TODAYS_WORKOUT",
+                ),
+            ]
+        }
+
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-10"
+        )
+
+        assert workouts == []
+        assert covered_dates == set()
+
+    def test_treats_missing_adaptive_status_as_covered(self):
+        # Field absent entirely (unconfirmed phased/non-adaptive plan shape) -- falls back to
+        # the pre-existing behavior rather than guessing it means "completed."
+        detail = {
+            "taskList": [
+                make_task_entry(calendar_date="2026-07-09", adaptive_status=None),
+            ]
+        }
+
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-10"
+        )
+
+        assert len(workouts) == 1
+        assert covered_dates == {"2026-07-09"}
 
     def test_filters_out_workout_outside_window(self):
         detail = {"taskList": [make_task_entry(calendar_date="2026-08-01")]}
@@ -514,8 +579,9 @@ class TestNormalizePlannedWorkouts:
         assert by_date["2026-07-11"].workout_name == "Anaerobic"
         assert by_date["2026-07-11"].planned_duration_seconds == 3000  # 50:00
         assert all(w.plan_id == "43075722" for w in workouts)
-        # All 7 days (5 workouts + 2 rest days) count as covered -- this is the real live
-        # response confirming taskList only ever spans one week (weekId 34, Jul 7-13).
+        # All 7 days (5 workouts + 2 rest days) count as covered -- none of this fixture's
+        # entries have adaptiveCoachingWorkoutStatus (this was pasted before that field was
+        # confirmed), so every date falls back to the pre-existing "covered" behavior.
         assert covered_dates == {
             "2026-07-07",
             "2026-07-08",
@@ -525,6 +591,144 @@ class TestNormalizePlannedWorkouts:
             "2026-07-12",
             "2026-07-13",
         }
+
+    def test_normalizes_the_second_exact_real_response_reported_live(self):
+        # A second live response, pasted back the next day: proves taskList is a small rolling
+        # window (not a fixed calendar week -- 6 entries share weekId 34, the last one is
+        # weekId 35), and that today's already-completed workout
+        # (adaptiveCoachingWorkoutStatus="COMPLETED_TODAYS_WORKOUT") must be excluded from
+        # covered_dates so it's never touched again -- Jul 7 (from the first live response, a
+        # day earlier) has already dropped out of this response entirely.
+        detail = {
+            "trainingPlanId": 43075722,
+            "trainingPlanCategory": "FBT_ADAPTIVE",
+            "name": "TCS Amsterdam Marathon Plan",
+            "taskList": [
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 34,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Base",
+                        "workoutDescription": "137bpm",
+                        "estimatedDurationInSecs": 3120,
+                        "trainingEffectLabel": "AEROBIC_BASE",
+                        "restDay": False,
+                        "adaptiveCoachingWorkoutStatus": "COMPLETED_TODAYS_WORKOUT",
+                    },
+                    "calendarDate": "2026-07-08",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 34,
+                    "taskWorkout": {
+                        "sportType": None,
+                        "workoutName": None,
+                        "workoutDescription": None,
+                        "trainingEffectLabel": "INVALID",
+                        "restDay": True,
+                        "adaptiveCoachingWorkoutStatus": "NOT_COMPLETE",
+                    },
+                    "calendarDate": "2026-07-09",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 34,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Threshold",
+                        "workoutDescription": "2x18:00@162bpm",
+                        "estimatedDurationInSecs": 3660,
+                        "trainingEffectLabel": "LACTATE_THRESHOLD",
+                        "restDay": False,
+                        "adaptiveCoachingWorkoutStatus": "NOT_COMPLETE",
+                    },
+                    "calendarDate": "2026-07-10",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 34,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Base",
+                        "workoutDescription": "137bpm",
+                        "estimatedDurationInSecs": 2520,
+                        "trainingEffectLabel": "AEROBIC_BASE",
+                        "restDay": False,
+                        "adaptiveCoachingWorkoutStatus": "NOT_COMPLETE",
+                    },
+                    "calendarDate": "2026-07-11",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 34,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "Long Run",
+                        "workoutDescription": "137bpm",
+                        "estimatedDurationInSecs": 5340,
+                        "trainingEffectLabel": "AEROBIC_BASE",
+                        "restDay": False,
+                        "adaptiveCoachingWorkoutStatus": "NOT_COMPLETE",
+                    },
+                    "calendarDate": "2026-07-12",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 34,
+                    "taskWorkout": {
+                        "sportType": None,
+                        "workoutName": None,
+                        "workoutDescription": None,
+                        "trainingEffectLabel": "INVALID",
+                        "restDay": True,
+                        "adaptiveCoachingWorkoutStatus": "NOT_COMPLETE",
+                    },
+                    "calendarDate": "2026-07-13",
+                },
+                {
+                    "trainingPlanId": 43075722,
+                    "weekId": 35,
+                    "taskWorkout": {
+                        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+                        "workoutName": "VO2 Max",
+                        "workoutDescription": "5x3:00@173bpm",
+                        "estimatedDurationInSecs": 2580,
+                        "trainingEffectLabel": "VO2MAX",
+                        "restDay": False,
+                        "adaptiveCoachingWorkoutStatus": "NOT_COMPLETE",
+                    },
+                    "calendarDate": "2026-07-14",
+                },
+            ],
+            "adaptivePlanPhases": [{"trainingPhase": "BUILD", "currentPhase": True}],
+        }
+
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-31"
+        )
+
+        # Jul 8 (completed) and the two rest days (Jul 9, Jul 13) excluded -- 4 real workouts.
+        assert len(workouts) == 4
+        by_date = {w.workout_date: w for w in workouts}
+        assert set(by_date) == {"2026-07-10", "2026-07-11", "2026-07-12", "2026-07-14"}
+        assert by_date["2026-07-14"].workout_name == "VO2 Max"
+        assert by_date["2026-07-14"].planned_duration_seconds == 2580
+
+        # Jul 8 excluded from covered_dates too (completed -- must never be touched again),
+        # even though it's still present in this response.
+        assert covered_dates == {
+            "2026-07-09",
+            "2026-07-10",
+            "2026-07-11",
+            "2026-07-12",
+            "2026-07-13",
+            "2026-07-14",
+        }
+        assert "2026-07-08" not in covered_dates
+        # Jul 7 isn't in this response at all (dropped out entirely since the prior fetch) --
+        # also correctly not "covered", so a caller leaves whatever's already stored for it alone.
+        assert "2026-07-07" not in covered_dates
 
 
 class TestNormalizeHrZones:

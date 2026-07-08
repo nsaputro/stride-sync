@@ -247,15 +247,19 @@ def _replace_planned_workouts(
     `PlannedWorkout`'s docstring).
 
     `covered_dates` (from `GarminClient.fetch_planned_workouts`) is the set of calendar dates
-    this sync's fetch actually got a definitive answer for — confirmed live, `taskList` only
-    ever contains one week's worth of entries no matter how wide a window was requested. An
-    earlier version of this function deleted the *entire* requested `[start_date, end_date]`
-    window regardless of how much of it Garmin actually re-answered, silently wiping out any
-    other week's already-synced rows with nothing to replace them — `covered_dates` fixes that
-    by scoping the DELETE to only the dates this call actually has fresh data for (including
-    rest-day dates, so a day that flips from "workout" to "rest day" still clears its stale row
-    even though rest days aren't stored as rows themselves). An empty `covered_dates` (e.g. a
-    transient fetch failure) is a no-op — nothing is known to be stale, so nothing is touched.
+    this sync's fetch actually got a definitive, still-changeable answer for — confirmed live,
+    `taskList` is only ever a small rolling window of the current/upcoming days (~7 entries, not
+    the full multi-week plan) no matter how wide a window was requested, and already-*completed*
+    days are excluded even from that window (see `_normalize_planned_workouts`'s docstring) since
+    a completed day's row must never be touched again and can simply stop appearing in later
+    responses entirely. An earlier version of this function deleted the *entire* requested
+    `[start_date, end_date]` window regardless of how much of it Garmin actually re-answered,
+    silently wiping out any other week's already-synced rows with nothing to replace them —
+    `covered_dates` fixes that by scoping the DELETE to only the dates this call actually has
+    fresh, not-yet-completed data for (including rest-day dates, so a day that flips from
+    "workout" to "rest day" still clears its stale row even though rest days aren't stored as
+    rows themselves). An empty `covered_dates` (e.g. a transient fetch failure) is a no-op —
+    nothing is known to be stale, so nothing is touched.
     """
     if not covered_dates:
         return
