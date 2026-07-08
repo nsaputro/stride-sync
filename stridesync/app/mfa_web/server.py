@@ -52,13 +52,15 @@ _pending_garmin: Optional[Garmin] = None
 _STYLE = """
   :root {
     color-scheme: light dark;
-    --bg: #f2f3f5; --card: #ffffff; --text: #1a1a1a; --muted: #6b7280; --border: #e3e5e8;
-    --ok: #0a7d28; --ok-bg: #e6f4ea; --error: #b00020; --error-bg: #fbe9eb;
+    --bg: #f1f3f7; --card: #ffffff; --tile: #f4f6fa; --text: #161a20; --muted: #5b6472;
+    --border: #e2e6ec; --border-soft: #ebeef3;
+    --ok: #147d3d; --ok-bg: #e5f6ea; --error: #b3261e; --error-bg: #fcebe9;
     --primary: #1f6feb; --primary-text: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16181c; --card: #202329; --text: #e7e9ea; --muted: #9aa0a6; --border: #33373d;
+      --bg: #14161b; --card: #1c1f26; --tile: #21252d; --text: #e8eaed; --muted: #93a0b3;
+      --border: #2c313a; --border-soft: #262a32;
       --ok: #4ade80; --ok-bg: #113420; --error: #f87171; --error-bg: #3a1a1d;
       --primary: #4c8dff; --primary-text: #0b1220;
     }
@@ -69,57 +71,78 @@ _STYLE = """
     background: var(--bg); color: var(--text);
     max-width: 26rem; margin: 0 auto; padding: 1.5rem 1rem 3rem;
   }
-  h1 { font-size: 1.4rem; margin: 0.25rem 0 1rem; }
-  nav.tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 1.375rem; font-weight: 700; margin: 0.1rem 0 1rem; letter-spacing: -0.01em; }
+  nav.tabs { display: flex; gap: 1.25rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
   nav.tabs a {
-    display: inline-block; padding: 0.5rem 0.1rem; margin-bottom: -1px; text-decoration: none;
-    color: var(--muted); font-weight: 600; border-bottom: 2px solid transparent;
+    display: inline-block; padding: 0.5rem 0.05rem; margin-bottom: -1px; text-decoration: none;
+    color: var(--muted); font-weight: 600; font-size: 0.9rem; border-bottom: 2px solid transparent;
   }
   nav.tabs a.active { color: var(--text); border-bottom-color: var(--primary); }
-  ul.week-list { list-style: none; margin: 0; padding: 0; }
-  ul.week-list li {
-    display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0;
-    border-top: 1px solid var(--border);
+  .eyebrow {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin: 1.5rem 0 0.6rem;
   }
-  ul.week-list li:first-child { border-top: none; }
-  .week-range { color: var(--muted); }
-  .week-total { font-weight: 600; }
+  .eyebrow:first-child { margin-top: 0; }
+  .badge {
+    display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 600;
+    padding: 0.55rem 0.8rem; border-radius: 999px; margin-bottom: 1.1rem; color: var(--muted);
+    background: var(--tile);
+  }
+  .badge.ok { color: var(--ok); background: var(--ok-bg); }
+  .badge.error { color: var(--error); background: var(--error-bg); }
+  .badge-dot { width: 0.45rem; height: 0.45rem; border-radius: 999px; background: currentColor; flex-shrink: 0; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-bottom: 0.5rem; }
+  .stat-tile {
+    background: var(--tile); border: 1px solid var(--border-soft); border-radius: 0.85rem;
+    padding: 0.85rem 0.95rem;
+  }
+  .stat-value {
+    font-size: 1.7rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1;
+  }
+  .stat-label { font-size: 0.76rem; font-weight: 500; color: var(--muted); margin-top: 0.3rem; }
+  .row-list { display: flex; flex-direction: column; gap: 0.55rem; }
+  .row-card {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+    background: var(--card); border: 1px solid var(--border-soft); border-radius: 0.8rem;
+    padding: 0.7rem 0.9rem;
+  }
+  .row-title { font-size: 0.92rem; font-weight: 600; }
+  .row-meta { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+  .row-value {
+    font-size: 0.98rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+    text-align: right;
+  }
+  .row-value.muted { color: var(--muted); font-weight: 500; font-size: 0.85rem; }
   .card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem;
-    padding: 1.1rem 1.25rem; margin-bottom: 1rem;
+    background: var(--card); border: 1px solid var(--border-soft); border-radius: 0.85rem;
+    padding: 1rem 1.05rem; margin-bottom: 0.9rem;
   }
+  .card h2 { font-size: 0.98rem; font-weight: 700; margin: 0 0 0.4rem; color: var(--text); }
+  .card > p { font-size: 0.85rem; color: var(--muted); }
   p { line-height: 1.5; margin: 0.5rem 0; }
-  p.stat { font-weight: 600; }
-  h2 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--muted); }
-  ul.activity-list { list-style: none; margin: 0; padding: 0; }
-  ul.activity-list li {
-    display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0;
-    border-top: 1px solid var(--border);
-  }
-  ul.activity-list li:first-child { border-top: none; }
-  .activity-name { font-weight: 600; }
-  .activity-meta { color: var(--muted); text-align: right; white-space: nowrap; }
+  h2 { font-size: 0.98rem; font-weight: 700; margin: 1.5rem 0 0.6rem; }
   p.error {
     color: var(--error); background: var(--error-bg); padding: 0.6rem 0.75rem;
     border-radius: 0.5rem;
   }
   p.ok { color: var(--ok); font-weight: 600; }
   form { margin: 0.6rem 0; }
+  .sync-cta { margin: 1.4rem 0; }
   button, input[type=text], input[type=date] {
-    font-size: 1rem; padding: 0.7rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border);
+    font-size: 0.92rem; padding: 0.7rem 1rem; border-radius: 0.6rem; border: 1px solid var(--border);
     width: 100%; font-family: inherit;
   }
   button {
-    cursor: pointer; font-weight: 600; background: var(--card); color: var(--text);
+    cursor: pointer; font-weight: 600; background: var(--tile); color: var(--text);
   }
   button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
   button:disabled { opacity: 0.6; cursor: default; }
   input[type=text], input[type=date] {
-    background: var(--card); color: var(--text); margin-bottom: 0.5rem;
+    background: var(--bg); color: var(--text); margin-bottom: 0.5rem;
   }
   select {
-    font-size: 1rem; padding: 0.7rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border);
-    width: 100%; font-family: inherit; background: var(--card); color: var(--text);
+    font-size: 0.92rem; padding: 0.7rem 1rem; border-radius: 0.6rem; border: 1px solid var(--border);
+    width: 100%; font-family: inherit; background: var(--bg); color: var(--text);
     margin-bottom: 0.5rem;
   }
   progress { width: 100%; height: 0.9rem; margin: 0.5rem 0; accent-color: var(--primary); }
@@ -189,7 +212,7 @@ def _page(title: str, body: str, active_tab: str = "dashboard") -> HTMLResponse:
         f"<style>{_STYLE}</style>"
         "</head>"
         f"<body><h1>StrideSync</h1>{_nav_html(active_tab)}"
-        f'<div class="card">{body}</div>{_SCRIPT}</body></html>'
+        f"{body}{_SCRIPT}</body></html>"
     )
 
 
@@ -305,30 +328,40 @@ def _sync_summary(db_path: str) -> Dict[str, Any]:
     }
 
 
+def _stat_tile(value: int, label: str) -> str:
+    return f'<div class="stat-tile"><div class="stat-value">{value}</div>' f'<div class="stat-label">{escape(label)}</div></div>'
+
+
 def _sync_summary_html(settings: Settings) -> str:
     summary = _sync_summary(settings.db_path)
-    html = (
-        f'<p class="stat">Total activities synced: {summary["total_activities"]}</p>'
-        f'<p class="stat">Total wellness records synced: '
-        f'{summary["total_wellness_records"]}</p>'
-        f'<p class="stat">Total VO2 max records synced: {summary["total_vo2max_records"]}</p>'
-        f'<p class="stat">Total planned workouts synced: '
-        f'{summary["total_planned_workouts"]}</p>'
-    )
-
     last_sync = summary["last_sync"]
-    if last_sync is None:
-        return html + "<p>No sync has run yet.</p>"
 
-    css_class = "ok" if last_sync["status"] == "success" else "error"
-    when = _format_timestamp(last_sync["finished_at"] or last_sync["started_at"])
-    html += (
-        f'<p class="{css_class}">Last sync: {escape(last_sync["status"])} at {escape(when)} '
-        f'({_activity_count(last_sync["activities_synced"])})</p>'
+    if last_sync is None:
+        badge_html = '<div class="badge">No sync has run yet.</div>'
+        error_html = ""
+    else:
+        css_class = "ok" if last_sync["status"] == "success" else "error"
+        when = _format_timestamp(last_sync["finished_at"] or last_sync["started_at"])
+        badge_html = (
+            f'<div class="badge {css_class}"><span class="badge-dot"></span>'
+            f'Last sync: {escape(last_sync["status"])} at {escape(when)} '
+            f'({_activity_count(last_sync["activities_synced"])})</div>'
+        )
+        error_html = ""
+        if last_sync["status"] != "success" and last_sync["error_message"]:
+            error_html = (
+                f'<p class="error">Last sync error: {escape(last_sync["error_message"])}</p>'
+            )
+
+    stats_html = (
+        '<div class="stat-grid">'
+        + _stat_tile(summary["total_activities"], "Activities synced")
+        + _stat_tile(summary["total_wellness_records"], "Wellness records")
+        + _stat_tile(summary["total_vo2max_records"], "VO2 max records")
+        + _stat_tile(summary["total_planned_workouts"], "Planned workouts")
+        + "</div>"
     )
-    if last_sync["status"] != "success" and last_sync["error_message"]:
-        html += f'<p class="error">Last sync error: {escape(last_sync["error_message"])}</p>'
-    return html
+    return badge_html + stats_html + error_html
 
 
 def _format_distance(distance_meters: Optional[float]) -> str:
@@ -367,14 +400,17 @@ def _recent_activities_html(settings: Settings) -> str:
         return ""
 
     items = "".join(
-        '<li><span class="activity-name">'
+        '<div class="row-card"><div>'
+        f'<div class="row-title">'
         f'{escape(activity["activity_name"] or activity["activity_type"] or "Activity")}'
-        "</span>"
-        f'<span class="activity-meta">{escape(_format_activity_time(activity["start_time_local"]))}'
-        f" · {escape(_format_distance(activity['distance_meters']))}</span></li>"
+        "</div>"
+        f'<div class="row-meta">{escape(_format_activity_time(activity["start_time_local"]))}'
+        "</div></div>"
+        f'<div class="row-value{"" if activity["distance_meters"] else " muted"}">'
+        f'{escape(_format_distance(activity["distance_meters"]))}</div></div>'
         for activity in activities
     )
-    return f'<h2>Recent activities</h2><ul class="activity-list">{items}</ul>'
+    return f'<div class="eyebrow">Recent activities</div><div class="row-list">{items}</div>'
 
 
 def _weekly_distance(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
@@ -422,11 +458,12 @@ def _weekly_distance_html(settings: Settings) -> str:
         return "<p>No activities synced yet.</p>"
 
     items = "".join(
-        f'<li><span class="week-range">{escape(week["week_start"].strftime("%Y-%m-%d"))}</span>'
-        f'<span class="week-total">{week["distance_km"]:.2f} km</span></li>'
+        '<div class="row-card">'
+        f'<div class="row-title">Week of {escape(week["week_start"].strftime("%Y-%m-%d"))}</div>'
+        f'<div class="row-value">{week["distance_km"]:.2f} km</div></div>'
         for week in weeks
     )
-    return f'<h2>Weekly total distance</h2><ul class="week-list">{items}</ul>'
+    return f'<div class="eyebrow">Weekly total distance</div><div class="row-list">{items}</div>'
 
 
 async def running(request: Request) -> HTMLResponse:
@@ -440,17 +477,18 @@ def _diagnostics_form_html() -> str:
         for check_id, label in DIAGNOSTIC_CHECKS.items()
     )
     return (
-        "<h2>Diagnostics</h2>"
+        '<div class="eyebrow">Diagnostics</div><div class="card">'
+        "<h2>Run a diagnostic check</h2>"
         "<p>Runs one read-only Garmin Connect API call and shows its exact response — useful "
         "when a synced field is coming back wrong or missing and you want to report it, without "
         "needing shell/docker access to the add-on.</p>"
         '<form method="post" action="diagnostics">'
         f'<select name="check" required>{options_html}</select>'
-        '<button type="submit" class="primary">Run check</button></form>'
+        '<button type="submit" class="primary">Run check</button></form></div>'
     )
 
 
-def _settings_body() -> str:
+def _settings_body(settings: Settings) -> str:
     """Reflects the current backfill state, not just a static form — the "Settings" nav tab is
     reachable independently of the "/backfill" URL (e.g. the user switches to another tab and
     back), so it must show a running backfill's progress bar, not silently reset to the plain
@@ -470,12 +508,10 @@ def _settings_body() -> str:
         '<input type="date" name="start_date" required>'
         '<button type="submit" class="primary">Backfill</button></form>'
     )
-    diagnostics_html = _diagnostics_form_html()
 
     if state["running"]:
-        return _backfill_progress_body() + diagnostics_html
-
-    if state["done"] and state["start_date"] is not None:
+        backfill_html = _backfill_progress_body()
+    elif state["done"] and state["start_date"] is not None:
         start_date = escape(state["start_date"])
         if state["error"]:
             status_html = f'<p class="error">Last backfill failed: {escape(state["error"])}</p>'
@@ -484,13 +520,22 @@ def _settings_body() -> str:
                 f'<p class="ok">Last backfill: {_activity_count(state["result_count"] or 0)} '
                 f"since {start_date}.</p>"
             )
-        return status_html + form_html + diagnostics_html
+        backfill_html = status_html + form_html
+    else:
+        backfill_html = form_html
 
-    return form_html + diagnostics_html
+    return (
+        _account_html(settings)
+        + '<div class="eyebrow">Backfill</div><div class="card">'
+        + backfill_html
+        + "</div>"
+        + _diagnostics_form_html()
+    )
 
 
 async def settings_tab(request: Request) -> HTMLResponse:
-    return _page("Settings", _settings_body(), active_tab="settings")
+    settings: Settings = request.app.state.settings
+    return _page("Settings", _settings_body(settings), active_tab="settings")
 
 
 # Backfill state (see module docstring re: single-account, single-in-flight-operation design —
@@ -668,7 +713,10 @@ async def backfill_status(request: Request) -> JSONResponse:
         )
 
 
-def _status_body(settings: Settings) -> str:
+def _account_html(settings: Settings) -> str:
+    """The Garmin Connect login status + button — lives on the Settings tab (moved off the
+    Dashboard, which is for at-a-glance sync status/stats, not account management).
+    """
     has_session = _has_cached_session(settings.garmin_token_dir)
     if has_session:
         message = (
@@ -676,32 +724,49 @@ def _status_body(settings: Settings) -> str:
             "this session.</p>"
         )
         button_label = "Log in again (forces a fresh login, including MFA if required)"
+        button_class = ""
     else:
         message = (
             "<p>No valid Garmin Connect session yet. Click below to log in — if your account "
             "requires a multi-factor code, you'll be asked for it next.</p>"
         )
         button_label = "Log in to Garmin Connect"
+        button_class = ' class="primary"'
 
-    body = f"{message}{_sync_summary_html(settings)}{_recent_activities_html(settings)}"
+    return (
+        '<div class="eyebrow">Account</div><div class="card">'
+        f"{message}"
+        f'<form method="post" action="start"><button type="submit"{button_class}>'
+        f"{escape(button_label)}</button></form></div>"
+    )
+
+
+def _dashboard_body(settings: Settings) -> str:
+    has_session = _has_cached_session(settings.garmin_token_dir)
+    body = ""
+    if not has_session:
+        # Deliberately a plain p.error, not the flex-laid-out .badge used below -- .badge has no
+        # flex-wrap, so a message containing an inline <a> (a second flex item) overflowed/
+        # garbled instead of wrapping. .badge is for single-text-run status chips only.
+        body += (
+            '<p class="error">Not connected to Garmin Connect — '
+            '<a href="settings">connect in Settings</a>.</p>'
+        )
+    body += _sync_summary_html(settings)
     # The primary action is whichever one you'd reach for day-to-day: once logged in, that's
-    # syncing, not logging in again — so "Sync now" gets the prominent styling and comes first.
-    login_button_class = "" if has_session else " class=\"primary\""
+    # syncing — the login/re-login action itself lives on the Settings tab now, not here.
     if has_session:
         body += (
-            '<form method="post" action="sync">'
-            '<button type="submit" class="primary">Sync now</button></form>'
+            '<div class="sync-cta"><form method="post" action="sync">'
+            '<button type="submit" class="primary">Sync now</button></form></div>'
         )
-    body += (
-        f'<form method="post" action="start"><button type="submit"{login_button_class}>'
-        f"{escape(button_label)}</button></form>"
-    )
+    body += _recent_activities_html(settings)
     return body
 
 
 async def index(request: Request) -> HTMLResponse:
     settings: Settings = request.app.state.settings
-    return _page("Garmin login", _status_body(settings))
+    return _page("Dashboard", _dashboard_body(settings))
 
 
 async def start(request: Request) -> HTMLResponse:
@@ -712,7 +777,8 @@ async def start(request: Request) -> HTMLResponse:
         return _page(
             "Login failed",
             '<p class="error">Login failed: garmin_username and garmin_password are not set '
-            "in the add-on configuration.</p><p><a href=\".\">Back</a></p>",
+            'in the add-on configuration.</p><p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
 
     garmin = Garmin(
@@ -720,7 +786,7 @@ async def start(request: Request) -> HTMLResponse:
         password=settings.garmin_password,
         return_on_mfa=True,
     )
-    # If a session is already cached, this click is "Log in again" (see _status_body) — the user
+    # If a session is already cached, this click is "Log in again" (see _account_html) — the user
     # explicitly wants a real re-authentication, so force one instead of silently resuming the
     # existing session, which would skip MFA entirely and look like clicking the button did
     # nothing (a real reported bug: an MFA-enabled account clicking "Log in again" never saw the
@@ -733,21 +799,25 @@ async def start(request: Request) -> HTMLResponse:
     except GarminConnectAuthenticationError as exc:
         return _page(
             "Login failed",
-            f'<p class="error">Login failed: {escape(str(exc))}</p><p><a href=".">Back</a></p>',
+            f'<p class="error">Login failed: {escape(str(exc))}</p>'
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
     except TRANSPORT_ERRORS as exc:
         return _page(
             "Login failed",
             f'<p class="error">Could not reach Garmin Connect: '
             f'{escape(describe_transport_error(exc))}</p>'
-            '<p><a href=".">Back</a></p>',
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
     except Exception:
         logger.exception("Unexpected error starting Garmin login")
         return _page(
             "Login failed",
             '<p class="error">Login failed unexpectedly — check the add-on log for details.</p>'
-            '<p><a href=".">Back</a></p>',
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
 
     if isinstance(result, mfa_login.NeedsMfa):
@@ -761,9 +831,10 @@ async def start(request: Request) -> HTMLResponse:
             '<input type="text" name="code" placeholder="MFA code" autofocus required '
             'inputmode="numeric" autocomplete="one-time-code">'
             '<button type="submit" class="primary">Verify</button></form>',
+            active_tab="settings",
         )
 
-    return _page("Garmin login", _status_body(settings))
+    return _page("Settings", _settings_body(settings), active_tab="settings")
 
 
 async def verify(request: Request) -> HTMLResponse:
@@ -780,7 +851,8 @@ async def verify(request: Request) -> HTMLResponse:
         return _page(
             "No login in progress",
             '<p class="error">No login is currently waiting for an MFA code — start over.</p>'
-            '<p><a href=".">Back</a></p>',
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
 
     try:
@@ -789,21 +861,24 @@ async def verify(request: Request) -> HTMLResponse:
         return _page(
             "MFA verification failed",
             f'<p class="error">MFA verification failed: {escape(str(exc))}</p>'
-            '<p><a href=".">Back</a></p>',
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
     except TRANSPORT_ERRORS as exc:
         return _page(
             "MFA verification failed",
             f'<p class="error">Could not reach Garmin Connect: '
             f'{escape(describe_transport_error(exc))}</p>'
-            '<p><a href=".">Back</a></p>',
+            '<p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
     except Exception:
         logger.exception("Unexpected error verifying Garmin MFA code")
         return _page(
             "MFA verification failed",
             '<p class="error">Verification failed unexpectedly — check the add-on log for '
-            "details.</p><p><a href=\".\">Back</a></p>",
+            'details.</p><p><a href="settings">Back</a></p>',
+            active_tab="settings",
         )
 
     with _lock:
@@ -812,7 +887,8 @@ async def verify(request: Request) -> HTMLResponse:
     return _page(
         "Logged in",
         '<p class="ok">Logged in successfully. Scheduled syncs will now reuse this session.</p>'
-        '<p><a href=".">Back</a></p>',
+        '<p><a href="settings">Back</a></p>',
+        active_tab="settings",
     )
 
 

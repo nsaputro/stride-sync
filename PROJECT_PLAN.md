@@ -973,6 +973,59 @@ byte-for-byte against real data end-to-end, not just "no longer 400s."
   something to trigger unprompted. Once `stridesync/NEXT_VERSION` (`0.1.0`) is confirmed correct:
   **Actions → Release → Run workflow** on `main`. See `CLAUDE.md`'s CI / Release section.
 
+### Stage 20 — Web UI redesign: typographic hierarchy, boxed cards, login moved to Settings 🔄
+
+Requested live, with two real device screenshots for reference (the add-on's own Dashboard, and
+Garmin Connect's "Personal Records" list): the ingress web UI's typography was effectively
+monotone (one weight/size for almost everything) and the stat/activity lists were flat
+hairline-bordered lists rather than the boxed-card look the reference screenshot used. A design
+mockup was built and shared as an Artifact for review before any code changed, per explicit
+request — approved, then implemented.
+
+- ✅ New CSS token set in `_STYLE` (`app/mfa_web/server.py`): kept the existing `--bg`/`--card`/
+  `--text`/`--muted`/`--border`/`--ok`/`--error`/`--primary` token *roles* (the color palette
+  itself wasn't asked to change), but shifted the neutrals from flat grey to a subtle cool
+  blue-grey that harmonizes with the existing blue `--primary`, and added a `--tile`/
+  `--border-soft` pair so stat tiles read as a grouped unit without heavy borders. New type scale
+  replacing the previous one-weight-everywhere styling: `.eyebrow` (0.7rem, uppercase, letter-
+  spaced section labels), `.stat-label` (0.76rem), body copy (0.85rem), `.row-title` (0.92rem),
+  `.stat-value`/`.row-value` (0.98–1.7rem, bold, `font-variant-numeric: tabular-nums` so digits
+  don't jitter), `h1` (1.375rem).
+- ✅ Dashboard's four "Total X synced" lines (previously plain `<p class="stat">` text) became a
+  2×2 grid of boxed `.stat-tile`s (label on top, big number below); "Recent activities" became
+  individual rounded `.row-card` rows (title+timestamp left, distance right) instead of a
+  hairline-bordered `<ul>` — both patterns lifted directly from the Garmin Personal-Records
+  reference screenshot. The Running tab's weekly-mileage list got the same `.row-card` treatment
+  for visual consistency, even though it wasn't explicitly called out.
+- ✅ **Login moved from the Dashboard to the Settings tab**: new `_account_html()` (an "Account"
+  card, same login-status message/button copy as before, just relocated) is now prepended to
+  `_settings_body()`. The Dashboard no longer shows login status/controls at all — instead, a
+  `p.error` notice ("Not connected to Garmin Connect — connect in Settings.") appears only when
+  there's no cached session, and "Sync now" only appears once connected (unchanged logic, just
+  relocated). `start()`/`verify()`'s error/success pages and their "Back" links now point at
+  `settings` (with `active_tab="settings"`) instead of the Dashboard, since that's where the
+  login flow now lives; `sync()`'s pages correctly keep pointing at the Dashboard, since that's
+  where "Sync now" itself lives.
+- ✅ **Real bug caught during manual browser verification, not by the test suite**: `_page()` used
+  to wrap every page's entire body in one outer `<div class="card">` — harmless when content was
+  flat paragraphs, but once individual `.stat-tile`/`.row-card`/`.card` elements were introduced
+  *inside* that same body, everything was doubly-boxed (one big white card containing smaller
+  grey-on-white cards, barely distinguishable). Fixed by removing the outer wrapper entirely.
+- ✅ **Second real bug caught the same way**: the "not connected" notice was originally a
+  `.badge` (the same `display:flex` pill used for the compact "Last sync: …" status), but
+  `.badge` has no `flex-wrap` and the notice's text contains an inline `<a>` link — a flex
+  container splits text-around-an-element into separate anonymous flex items, and without wrap
+  they overlapped/garbled instead of line-wrapping normally. `.badge` is now documented as
+  single-text-run-only; the notice uses the existing `p.error` block style instead, which wraps
+  arbitrary inline content correctly.
+- ✅ Verified with a real headless-browser session (Playwright against a locally-run
+  `python3 -m app.mfa_web.server`, seeded with realistic data), not just `TestClient` substring
+  assertions: screenshotted Dashboard/Running/Settings in both the connected and
+  not-connected-yet states, in both light and dark `prefers-color-scheme` — both bugs above were
+  only visible this way, not from the updated test suite (which still passed the whole time).
+- ✅ Minor version bump (`0.4.0`, not a patch) — a user-facing redesign + a real information-
+  architecture change (login relocated to a different tab), not a bug fix.
+
 ---
 
 ## Getting Started (Development)
