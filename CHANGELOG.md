@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-08
+
 ### Fixed
 - **`planned_workouts` sync could still repeatedly delete-and-reinsert (and eventually lose)
   already-*completed* days** (milestone Stage 22, `planned_workouts` follow-up to Stage 18):
@@ -489,7 +491,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/nsaputro/stride-sync/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nsaputro/stride-sync/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/nsaputro/stride-sync/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/nsaputro/stride-sync/compare/v0.3.1...v0.3.2
