@@ -1058,6 +1058,38 @@ almost every PR this session).
   release-workflow-owned-by-default, with a PR only needing to bump it further when shipping a
   *second* pre-release before the next stable release.
 
+### Stage 22 — Fourth live-account fix for planned_workouts: completed days must never be re-deleted 🔄
+
+Reported live, one day after Stage 18's fix shipped, with a second full real
+`get_adaptive_training_plan_by_id` response pasted for comparison: Stage 18's `covered_dates`
+mechanism correctly stopped deleting *other weeks'* rows, but it was still unconditionally adding
+every in-window date — including already-*completed* ones — to `covered_dates`, so a completed
+day's row kept getting deleted-and-reinserted on every sync it still happened to appear in, and
+worse, once Garmin stopped returning it at all (confirmed live: `2026-07-07`'s "Threshold"
+workout, present in the first pasted response, was gone entirely from the second one pasted a day
+later) there was no longer even a fresh row to replace the deleted one with.
+
+- ✅ **Confirmed `taskList` is a small rolling window (~7 entries), not a fixed calendar week**:
+  the second pasted response has 6 entries on `weekId 34` and a 7th on `weekId 35` — Stage
+  18/19's "only ever one week" description is now known to be wrong; corrected throughout
+  `garmin_client.py`/`scheduler.py` docstrings.
+- ✅ **Confirmed each entry carries `taskWorkout.adaptiveCoachingWorkoutStatus`**, at least
+  `"NOT_COMPLETE"` (still pending, safe to treat as covered/refreshable) and
+  `"COMPLETED_TODAYS_WORKOUT"` (already done). Per the user's explicit instruction, only
+  `"NOT_COMPLETE"` days are now added to `covered_dates`/replaced; a day with any other status is
+  skipped entirely — its existing row, if any, is left untouched — and a day whose
+  `taskWorkout` has no `adaptiveCoachingWorkoutStatus` field at all falls back to the pre-Stage-22
+  "covered" behavior (for the unconfirmed non-adaptive/phased plan shape).
+- ✅ New regression test byte-for-byte reproducing the second pasted response (7 entries, 4
+  `NOT_COMPLETE` workouts survive, the `COMPLETED_TODAYS_WORKOUT` entry and both rest days are
+  excluded from `covered_dates`), plus three focused unit tests covering the completed-workout,
+  completed-rest-day, and missing-status-field cases individually.
+  Full suite: 270 passed.
+- ✅ Verified end-to-end against a real temporary SQLite DB (not just mocks): synced a
+  `NOT_COMPLETE` day, then re-synced with that same day now `COMPLETED_TODAYS_WORKOUT` — confirmed
+  its row was excluded from the second sync's `covered_dates` and survived completely untouched
+  (`synced_at` still pointed at the first sync).
+
 ---
 
 ## Getting Started (Development)

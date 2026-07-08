@@ -468,7 +468,7 @@ def _normalize_planned_workouts(
     """Convert one `Client.get_training_plan_by_id`/`get_adaptive_training_plan_by_id` response
     into `PlannedWorkout`s, filtered to `[start_date, end_date]` (inclusive, `YYYY-MM-DD`
     strings). Also returns the set of calendar dates this response actually covers — see the
-    "only ever one week" note below.
+    "rolling window, not a fixed week" and "completed days" notes below.
 
     Field names below are confirmed against a live `FBT_ADAPTIVE` plan's real response (see
     PROJECT_PLAN.md milestone v0.18) — the scheduled-day list is `taskList`, each entry's date is
@@ -478,9 +478,9 @@ def _normalize_planned_workouts(
     Garmin Connect app showing "52:00" and "50:00" for the same two workouts. A day entry whose
     `taskWorkout.restDay` is `true` has no real workout (`workoutName`/`sportType` are `null`) and
     is skipped rather than stored as an empty row — but its date still counts as "covered" (see
-    below), since a rest day is a real, definitive answer from Garmin too. The old
-    `workouts`/`scheduledWorkouts`/`days` and top-level-field guesses are kept as lower-priority
-    `_get()` fallbacks in case a non-adaptive (phased) plan's shape differs.
+    below) unless it's also completed, since a rest day is a real, definitive answer from Garmin
+    too. The old `workouts`/`scheduledWorkouts`/`days` and top-level-field guesses are kept as
+    lower-priority `_get()` fallbacks in case a non-adaptive (phased) plan's shape differs.
 
     No structured pace or heart-rate-zone target field was found anywhere in the real response —
     Garmin represents that as free text in `taskWorkout.workoutDescription` instead (e.g.
@@ -489,13 +489,24 @@ def _normalize_planned_workouts(
     `planned_target_hr_low`/`planned_target_hr_high` are therefore always `None` for now — a
     possible follow-up once more real examples confirm a reliable pattern.
 
-    Confirmed live (see PROJECT_PLAN.md milestone Stage 12 follow-up) that `taskList` only ever
-    contains one *week* of entries (~7 dates, all sharing one `weekId`) regardless of how wide a
-    `[start_date, end_date]` window the caller asked for — this endpoint doesn't take a date
-    range at all, so the same current week comes back every time. The returned `covered_dates`
-    set exists so the caller (`GarminClient.fetch_planned_workouts`) knows precisely which dates
-    this response actually answered for, instead of wrongly assuming the whole requested window
-    was covered.
+    Confirmed live (see PROJECT_PLAN.md milestone Stage 12 follow-up) that `taskList` is a small
+    rolling window of the current/upcoming days (~7 entries), not the full multi-week plan, and
+    not a fixed calendar week either — a second live response showed 6 dates under one `weekId`
+    plus one more date under the *next* `weekId`, so entries can straddle a week boundary.
+    Neither detail endpoint takes a date-range argument at all.
+
+    **Completed days must never be touched again, and can vanish from later responses
+    entirely** — confirmed live: a day already worked (`taskWorkout.adaptiveCoachingWorkoutStatus`
+    something other than `"NOT_COMPLETE"`, e.g. `"COMPLETED_TODAYS_WORKOUT"` for today's just-done
+    workout) is excluded from `covered_dates` here, so the caller's delete-then-replace leaves
+    whatever's already stored for that date alone — and a follow-up fetch the same live account
+    made the next day confirmed a completed date can simply stop appearing in `taskList` at all,
+    which `covered_dates` already handles correctly (a date not present isn't "covered", so it's
+    never touched). Adaptive coaching can reshuffle *future* (`"NOT_COMPLETE"`) days between
+    fetches — that's the entire point of "adaptive" — so those are the only days that should keep
+    getting refreshed on every sync. When the field is absent entirely (a phased, non-adaptive
+    plan's response shape is unconfirmed), the date is treated as covered as before, matching the
+    pre-existing behavior rather than guessing.
     """
     raw_workouts = _get(detail, "taskList", "workouts", "scheduledWorkouts", "days") or []
     if not isinstance(raw_workouts, list):
@@ -509,10 +520,16 @@ def _normalize_planned_workouts(
         workout_date = _get(entry, "calendarDate", "date", "workoutDate")
         if not workout_date or not (start_date <= workout_date <= end_date):
             continue
-        covered_dates.add(workout_date)
 
         task_workout = entry.get("taskWorkout")
         task_workout = task_workout if isinstance(task_workout, dict) else {}
+
+        coaching_status = task_workout.get("adaptiveCoachingWorkoutStatus")
+        if coaching_status is not None and coaching_status != "NOT_COMPLETE":
+            continue
+
+        covered_dates.add(workout_date)
+
         if task_workout.get("restDay"):
             continue
 
@@ -977,9 +994,9 @@ class GarminClient:
     ) -> Tuple[List[PlannedWorkout], Set[str]]:
         """Fetch scheduled workouts from every active Garmin Connect training plan, filtered to
         `[start_date, end_date]` (see PROJECT_PLAN.md milestone v0.12). Also returns the set of
-        calendar dates this call actually got a definitive answer for — see "only ever one week"
-        below; the caller must use this, not `[start_date, end_date]`, to decide what's safe to
-        replace in the database.
+        calendar dates this call actually got a definitive answer for — see "rolling window" and
+        "completed days" below; the caller must use this, not `[start_date, end_date]`, to decide
+        what's safe to replace in the database.
 
         `get_training_plans()`'s real top-level key is `trainingPlanList` — confirmed directly
         from `python-garminconnect`'s own bundled `demo.py` (`resp.get("trainingPlanList") or
@@ -998,17 +1015,21 @@ class GarminClient:
         them.
 
         Confirmed live that neither detail endpoint takes a date range at all — each call always
-        returns just the plan's *current* week (~7 dates), regardless of `[start_date, end_date]`.
-        A prior version of this method (and its caller in `scheduler.py`) wrongly assumed a
-        successful call meant the whole requested window was covered, and deleted+replaced that
-        entire window every sync — silently wiping out any other week's already-synced rows
-        without anything to replace them with. `covered_dates` fixes that: it's the union of only
-        the dates each plan's response actually answered for. If Garmin confirms there's no
-        active plan at all (`trainingPlanList` is a real, empty list), that *is* a complete answer
-        for the whole window, so the full `[start_date, end_date]` range counts as covered in that
-        case — clearing genuinely-stale rows for an since-removed plan. A transient failure
-        fetching the plan list, or an unrecognized response shape, returns an empty
-        `covered_dates` instead, so a temporary Garmin outage doesn't wipe out otherwise-good data.
+        returns just a small rolling window of the current/upcoming days (~7 dates, which can
+        straddle two `weekId`s — not a fixed calendar week), regardless of `[start_date,
+        end_date]`. A prior version of this method (and its caller in `scheduler.py`) wrongly
+        assumed a successful call meant the whole requested window was covered, and
+        deleted+replaced that entire window every sync — silently wiping out any other week's
+        already-synced rows without anything to replace them with. `covered_dates` fixes that:
+        it's the union of only the dates each plan's response actually answered for — which also
+        excludes already-*completed* days (see `_normalize_planned_workouts`'s docstring), since
+        a completed day's row must never be touched again and can simply stop appearing in later
+        responses entirely. If Garmin confirms there's no active plan at all (`trainingPlanList`
+        is a real, empty list), that *is* a complete answer for the whole window, so the full
+        `[start_date, end_date]` range counts as covered in that case — clearing genuinely-stale
+        rows for an since-removed plan. A transient failure fetching the plan list, or an
+        unrecognized response shape, returns an empty `covered_dates` instead, so a temporary
+        Garmin outage doesn't wipe out otherwise-good data.
 
         Most accounts have no active plan at all, which degrades to an empty list, not a failure.
         A failure fetching one plan's detail is isolated to that plan — it must not discard
