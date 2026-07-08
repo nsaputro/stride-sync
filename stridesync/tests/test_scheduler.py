@@ -242,8 +242,22 @@ class FakeGarminClient:
         return self._vo2max.get(cdate)
 
     def fetch_planned_workouts(self, start_date, end_date):
+        # Mirrors real GarminClient.fetch_planned_workouts's two cases: a non-empty configured
+        # list simulates "plan exists, this response covers those workouts' own dates"; an empty
+        # one simulates "confirmed no active plan," where the whole requested window counts as a
+        # complete (empty) answer -- see that method's docstring.
         self.planned_workouts_call_args = (start_date, end_date)
-        return self._planned_workouts
+        if self._planned_workouts:
+            covered_dates = {w.workout_date for w in self._planned_workouts}
+        else:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+            covered_dates = set()
+            current = start
+            while current <= end:
+                covered_dates.add(current.isoformat())
+                current += timedelta(days=1)
+        return self._planned_workouts, covered_dates
 
 
 class TestLastSuccessfulSyncDate:

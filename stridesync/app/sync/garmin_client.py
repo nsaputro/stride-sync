@@ -30,8 +30,8 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import curl_cffi.requests.exceptions as curl_exceptions
 import requests
@@ -446,12 +446,29 @@ def _normalize_vo2max(cdate: str, raw: Any) -> Vo2MaxReading:
     )
 
 
+def _iso_date_range(start_date: str, end_date: str) -> Set[str]:
+    """Every `YYYY-MM-DD` date from `start_date` to `end_date` inclusive, as a set of ISO
+    strings. Used by `GarminClient.fetch_planned_workouts` to represent "the whole requested
+    window is a confirmed-empty answer" when Garmin reports no active training plan at all —
+    small window (a few weeks at most), so materializing every date is cheap.
+    """
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    dates: Set[str] = set()
+    current = start
+    while current <= end:
+        dates.add(current.isoformat())
+        current += timedelta(days=1)
+    return dates
+
+
 def _normalize_planned_workouts(
     plan_id: str, detail: Dict[str, Any], start_date: str, end_date: str
-) -> List[PlannedWorkout]:
+) -> Tuple[List[PlannedWorkout], Set[str]]:
     """Convert one `Client.get_training_plan_by_id`/`get_adaptive_training_plan_by_id` response
     into `PlannedWorkout`s, filtered to `[start_date, end_date]` (inclusive, `YYYY-MM-DD`
-    strings).
+    strings). Also returns the set of calendar dates this response actually covers — see the
+    "only ever one week" note below.
 
     Field names below are confirmed against a live `FBT_ADAPTIVE` plan's real response (see
     PROJECT_PLAN.md milestone v0.18) — the scheduled-day list is `taskList`, each entry's date is
@@ -460,9 +477,10 @@ def _normalize_planned_workouts(
     was verified byte-for-byte against a live account: `3120` and `3000` matched that account's
     Garmin Connect app showing "52:00" and "50:00" for the same two workouts. A day entry whose
     `taskWorkout.restDay` is `true` has no real workout (`workoutName`/`sportType` are `null`) and
-    is skipped rather than stored as an empty row. The old `workouts`/`scheduledWorkouts`/`days`
-    and top-level-field guesses are kept as lower-priority `_get()` fallbacks in case a
-    non-adaptive (phased) plan's shape differs.
+    is skipped rather than stored as an empty row — but its date still counts as "covered" (see
+    below), since a rest day is a real, definitive answer from Garmin too. The old
+    `workouts`/`scheduledWorkouts`/`days` and top-level-field guesses are kept as lower-priority
+    `_get()` fallbacks in case a non-adaptive (phased) plan's shape differs.
 
     No structured pace or heart-rate-zone target field was found anywhere in the real response —
     Garmin represents that as free text in `taskWorkout.workoutDescription` instead (e.g.
@@ -470,18 +488,28 @@ def _normalize_planned_workouts(
     parsing it isn't attempted here; `planned_target_pace_sec_per_km`/
     `planned_target_hr_low`/`planned_target_hr_high` are therefore always `None` for now — a
     possible follow-up once more real examples confirm a reliable pattern.
+
+    Confirmed live (see PROJECT_PLAN.md milestone Stage 12 follow-up) that `taskList` only ever
+    contains one *week* of entries (~7 dates, all sharing one `weekId`) regardless of how wide a
+    `[start_date, end_date]` window the caller asked for — this endpoint doesn't take a date
+    range at all, so the same current week comes back every time. The returned `covered_dates`
+    set exists so the caller (`GarminClient.fetch_planned_workouts`) knows precisely which dates
+    this response actually answered for, instead of wrongly assuming the whole requested window
+    was covered.
     """
     raw_workouts = _get(detail, "taskList", "workouts", "scheduledWorkouts", "days") or []
     if not isinstance(raw_workouts, list):
-        return []
+        return [], set()
 
     result: List[PlannedWorkout] = []
+    covered_dates: Set[str] = set()
     for entry in raw_workouts:
         if not isinstance(entry, dict):
             continue
         workout_date = _get(entry, "calendarDate", "date", "workoutDate")
         if not workout_date or not (start_date <= workout_date <= end_date):
             continue
+        covered_dates.add(workout_date)
 
         task_workout = entry.get("taskWorkout")
         task_workout = task_workout if isinstance(task_workout, dict) else {}
@@ -510,7 +538,7 @@ def _normalize_planned_workouts(
                 planned_target_hr_high=None,
             )
         )
-    return result
+    return result, covered_dates
 
 
 def _normalize_hr_zones(activity_id: int, raw: Any) -> List[HrZoneTime]:
@@ -944,9 +972,14 @@ class GarminClient:
             logger.warning("Could not fetch VO2 max for %s (non-fatal): %s", cdate, exc)
             return None
 
-    def fetch_planned_workouts(self, start_date: str, end_date: str) -> List[PlannedWorkout]:
+    def fetch_planned_workouts(
+        self, start_date: str, end_date: str
+    ) -> Tuple[List[PlannedWorkout], Set[str]]:
         """Fetch scheduled workouts from every active Garmin Connect training plan, filtered to
-        `[start_date, end_date]` (see PROJECT_PLAN.md milestone v0.12).
+        `[start_date, end_date]` (see PROJECT_PLAN.md milestone v0.12). Also returns the set of
+        calendar dates this call actually got a definitive answer for — see "only ever one week"
+        below; the caller must use this, not `[start_date, end_date]`, to decide what's safe to
+        replace in the database.
 
         `get_training_plans()`'s real top-level key is `trainingPlanList` — confirmed directly
         from `python-garminconnect`'s own bundled `demo.py` (`resp.get("trainingPlanList") or
@@ -964,16 +997,30 @@ class GarminClient:
         target pace/HR fields remain `None` since the real response has no structured field for
         them.
 
+        Confirmed live that neither detail endpoint takes a date range at all — each call always
+        returns just the plan's *current* week (~7 dates), regardless of `[start_date, end_date]`.
+        A prior version of this method (and its caller in `scheduler.py`) wrongly assumed a
+        successful call meant the whole requested window was covered, and deleted+replaced that
+        entire window every sync — silently wiping out any other week's already-synced rows
+        without anything to replace them with. `covered_dates` fixes that: it's the union of only
+        the dates each plan's response actually answered for. If Garmin confirms there's no
+        active plan at all (`trainingPlanList` is a real, empty list), that *is* a complete answer
+        for the whole window, so the full `[start_date, end_date]` range counts as covered in that
+        case — clearing genuinely-stale rows for an since-removed plan. A transient failure
+        fetching the plan list, or an unrecognized response shape, returns an empty
+        `covered_dates` instead, so a temporary Garmin outage doesn't wipe out otherwise-good data.
+
         Most accounts have no active plan at all, which degrades to an empty list, not a failure.
         A failure fetching one plan's detail is isolated to that plan — it must not discard
-        workouts from sibling plans, so each detail call is wrapped individually inside the loop
-        below rather than wrapping the whole loop in one try/except.
+        workouts from sibling plans (or count that plan's dates as covered), so each detail call
+        is wrapped individually inside the loop below rather than wrapping the whole loop in one
+        try/except.
         """
         try:
             plans = self._garmin.get_training_plans()
         except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
             logger.warning("Could not fetch training plans (non-fatal): %s", exc)
-            return []
+            return [], set()
 
         plan_list = (
             _get(plans, "trainingPlanList", "trainingPlans", "plans")
@@ -981,9 +1028,15 @@ class GarminClient:
             else plans
         )
         if not isinstance(plan_list, list):
-            return []
+            return [], set()
+
+        if not plan_list:
+            # Confirmed no active plan -- a complete answer for the whole window, not a partial
+            # one, so it's safe (and desired) to clear any stale rows across the entire range.
+            return [], _iso_date_range(start_date, end_date)
 
         workouts: List[PlannedWorkout] = []
+        covered_dates: Set[str] = set()
         for plan in plan_list:
             if not isinstance(plan, dict):
                 continue
@@ -1003,10 +1056,12 @@ class GarminClient:
                     "Could not fetch training plan %s (non-fatal): %s", plan_id, exc
                 )
                 continue
-            workouts.extend(
-                _normalize_planned_workouts(str(plan_id), detail, start_date, end_date)
+            plan_workouts, plan_covered_dates = _normalize_planned_workouts(
+                str(plan_id), detail, start_date, end_date
             )
-        return workouts
+            workouts.extend(plan_workouts)
+            covered_dates |= plan_covered_dates
+        return workouts, covered_dates
 
     def fetch_diagnostic(self, check: str) -> Any:
         """Run one read-only raw Garmin Connect API call for troubleshooting, returning the

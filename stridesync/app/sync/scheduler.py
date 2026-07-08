@@ -14,7 +14,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from types import FrameType
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Set
 
 from app import db
 from app.config import Settings
@@ -238,20 +238,31 @@ _PLANNED_WORKOUT_LOOKAHEAD_DAYS = 14
 
 def _replace_planned_workouts(
     conn: sqlite3.Connection,
-    start_date: str,
-    end_date: str,
+    covered_dates: Set[str],
     workouts: Sequence[PlannedWorkout],
     synced_at: str,
 ) -> None:
-    """Delete-then-bulk-insert, scoped to `[start_date, end_date]` — not an UPSERT, since
+    """Delete-then-bulk-insert, scoped to exactly `covered_dates` — not an UPSERT, since
     Garmin's training-plan response has no confirmed stable per-workout id to key one on (see
-    `PlannedWorkout`'s docstring). Scoping the DELETE to the window (rather than the whole table)
-    means a workout outside this sync's fetch range that came from a wider historical backfill
-    isn't wiped out by a regular sync's narrower window.
+    `PlannedWorkout`'s docstring).
+
+    `covered_dates` (from `GarminClient.fetch_planned_workouts`) is the set of calendar dates
+    this sync's fetch actually got a definitive answer for — confirmed live, `taskList` only
+    ever contains one week's worth of entries no matter how wide a window was requested. An
+    earlier version of this function deleted the *entire* requested `[start_date, end_date]`
+    window regardless of how much of it Garmin actually re-answered, silently wiping out any
+    other week's already-synced rows with nothing to replace them — `covered_dates` fixes that
+    by scoping the DELETE to only the dates this call actually has fresh data for (including
+    rest-day dates, so a day that flips from "workout" to "rest day" still clears its stale row
+    even though rest days aren't stored as rows themselves). An empty `covered_dates` (e.g. a
+    transient fetch failure) is a no-op — nothing is known to be stale, so nothing is touched.
     """
+    if not covered_dates:
+        return
+    placeholders = ",".join("?" for _ in covered_dates)
     conn.execute(
-        "DELETE FROM planned_workouts WHERE workout_date >= ? AND workout_date <= ?",
-        (start_date, end_date),
+        f"DELETE FROM planned_workouts WHERE workout_date IN ({placeholders})",
+        sorted(covered_dates),
     )
     conn.executemany(
         """
@@ -370,8 +381,10 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
                 vo2max_synced += 1
         plan_start = (today - timedelta(days=_PLANNED_WORKOUT_LOOKBACK_DAYS)).isoformat()
         plan_end = (today + timedelta(days=_PLANNED_WORKOUT_LOOKAHEAD_DAYS)).isoformat()
-        planned_workouts = client.fetch_planned_workouts(plan_start, plan_end)
-        _replace_planned_workouts(conn, plan_start, plan_end, planned_workouts, synced_at)
+        planned_workouts, planned_workout_dates = client.fetch_planned_workouts(
+            plan_start, plan_end
+        )
+        _replace_planned_workouts(conn, planned_workout_dates, planned_workouts, synced_at)
         planned_workouts_synced = len(planned_workouts)
 
         for _ in _sync_activities(conn, client, activities, synced_at):
@@ -498,8 +511,10 @@ def run_backfill_sync(
 
         plan_start = (today - timedelta(days=_PLANNED_WORKOUT_LOOKBACK_DAYS)).isoformat()
         plan_end = (today + timedelta(days=_PLANNED_WORKOUT_LOOKAHEAD_DAYS)).isoformat()
-        planned_workouts = client.fetch_planned_workouts(plan_start, plan_end)
-        _replace_planned_workouts(conn, plan_start, plan_end, planned_workouts, synced_at)
+        planned_workouts, planned_workout_dates = client.fetch_planned_workouts(
+            plan_start, plan_end
+        )
+        _replace_planned_workouts(conn, planned_workout_dates, planned_workouts, synced_at)
         planned_workouts_synced = len(planned_workouts)
 
         for _ in _sync_activities(conn, client, activities, synced_at):
