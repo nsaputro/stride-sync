@@ -71,11 +71,15 @@ def _client(tmp_path) -> TestClient:
 
 
 def test_index_shows_not_logged_in_when_no_session(tmp_path):
+    # Login status/action itself now lives on the Settings tab -- the Dashboard just shows a
+    # "not connected" pointer to it.
     response = _client(tmp_path).get("/")
 
     assert response.status_code == 200
-    assert "No valid Garmin Connect session" in response.text
+    assert "Not connected to Garmin Connect" in response.text
+    assert 'href="settings"' in response.text
     assert 'action="sync"' not in response.text
+    assert 'action="start"' not in response.text
 
 
 def test_index_shows_logged_in_when_session_cached(tmp_path):
@@ -86,18 +90,40 @@ def test_index_shows_logged_in_when_session_cached(tmp_path):
     response = _client(tmp_path).get("/")
 
     assert response.status_code == 200
-    assert "Already logged in" in response.text
+    assert "Not connected to Garmin Connect" not in response.text
     assert 'action="sync"' in response.text
+    assert 'action="start"' not in response.text
+
+
+def test_settings_tab_shows_not_logged_in_when_no_session(tmp_path):
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert "No valid Garmin Connect session" in response.text
+    assert 'action="start"' in response.text
+
+
+def test_settings_tab_shows_logged_in_when_session_cached(tmp_path):
+    token_dir = tmp_path / "garmin_tokens"
+    token_dir.mkdir()
+    (token_dir / "garmin_tokens.json").write_text("{}")
+
+    response = _client(tmp_path).get("/settings")
+
+    assert response.status_code == 200
+    assert "Already logged in" in response.text
+    assert 'action="start"' in response.text
 
 
 def test_index_shows_no_sync_yet_when_db_missing(tmp_path):
     response = _client(tmp_path).get("/")
 
     assert response.status_code == 200
-    assert "Total activities synced: 0" in response.text
-    assert "Total wellness records synced: 0" in response.text
-    assert "Total VO2 max records synced: 0" in response.text
-    assert "Total planned workouts synced: 0" in response.text
+    assert '<div class="stat-value">0</div>' in response.text
+    assert "Activities synced" in response.text
+    assert "Wellness records" in response.text
+    assert "VO2 max records" in response.text
+    assert "Planned workouts" in response.text
     assert "No sync has run yet" in response.text
 
 
@@ -137,10 +163,9 @@ def test_index_shows_total_activities_and_last_sync_success(tmp_path):
     response = TestClient(mfa_web_server.create_app(settings)).get("/")
 
     assert response.status_code == 200
-    assert "Total activities synced: 3" in response.text
-    assert "Total wellness records synced: 1" in response.text
-    assert "Total VO2 max records synced: 1" in response.text
-    assert "Total planned workouts synced: 2" in response.text
+    assert '<div class="stat-value">3</div>' in response.text
+    assert response.text.count('<div class="stat-value">1</div>') == 2
+    assert '<div class="stat-value">2</div>' in response.text
     assert "Last sync: success at 2026-07-01 06:05 UTC (3 activities)" in response.text
 
 
