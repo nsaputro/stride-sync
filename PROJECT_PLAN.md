@@ -1026,6 +1026,38 @@ request — approved, then implemented.
 - ✅ Minor version bump (`0.4.0`, not a patch) — a user-facing redesign + a real information-
   architecture change (login relocated to a different tab), not a bug fix.
 
+### Stage 21 — Fix: CI always fails on `main` right after a post-release PR merges 🔄
+
+Noticed live, with a linked failing run: `main`'s CI (specifically the Lint job's
+version-ordering check) turned red on every single push immediately following a merged
+post-release PR — not occasionally, every time. Root cause: `release.yml`'s post-release PR
+bumps `stridesync/NEXT_VERSION` to the next patch but never touched
+`stridesync-dev/config.yaml`, which the check requires to always start with `NEXT_VERSION` — so
+the invariant broke the instant the post-release PR merged, and stayed broken until some later
+PR happened to bump the dev version by hand (which is exactly what had to be done manually on
+almost every PR this session).
+
+- ✅ **Confirmed non-blocking, but real noise, not just a fluke**: the failing run is a plain
+  push to `main`, not a PR — `CI Pass` only gates PRs, so nothing was actually blocked. Still,
+  worth fixing: it's a red X on every release with nothing to act on, and the "some later PR
+  bumps it" step was easy to forget (it wasn't forgotten this session only because it kept
+  getting caught by CI on the *next* PR and fixed as a drive-by).
+- ✅ `release.yml`'s post-release step now also runs
+  `sed -i 's/^version:.*/version: "${NEXT}b1"/' stridesync-dev/config.yaml` alongside the
+  existing `stridesync/config.yaml`/`NEXT_VERSION` bumps, in the same commit/PR. `b1` is always
+  safe here — `NEXT_VERSION` was just set to a value that could not have existed before, so no
+  `v{NEXT}b1` tag can already exist. `stridesync-dev/config.yaml` added to the PR's `git add` and
+  its "Changes in this PR" description.
+- ✅ Verified by simulating both the `sed` command and CI's exact version-ordering check logic
+  locally against copies of the real config files — confirmed the check now exits `0` for the
+  post-fix state (`released=0.4.0 < next=0.4.1`, `dev=0.4.1b1` matches `NEXT_VERSION=0.4.1`)
+  where it previously failed.
+- ✅ `CLAUDE.md` updated: the versioning table, the "Pre-release version must always track
+  NEXT_VERSION" section, and the Release workflow's post-release-PR bullet all previously said
+  bumping `stridesync-dev/config.yaml` was purely a PR's job — now documented as
+  release-workflow-owned-by-default, with a PR only needing to bump it further when shipping a
+  *second* pre-release before the next stable release.
+
 ---
 
 ## Getting Started (Development)
