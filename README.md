@@ -12,6 +12,8 @@ See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for architecture details, MCP connectio
 and milestones. See [`CLAUDE.md`](CLAUDE.md) for repository conventions and local development
 setup.
 
+<img src="docs/images/dashboard.png" alt="StrideSync Dashboard tab showing synced activity/wellness/VO2-max/planned-workout totals and recent activities" width="360">
+
 ---
 
 ## Features
@@ -24,11 +26,12 @@ setup.
   training baseline (lactate threshold, race predictions), per-activity HR zones, per-activity
   time-series samples (pace/HR/cadence/elevation/temperature), and last-sync status.
 - **Web UI** (Home Assistant sidebar panel, or standalone on port `8767`) with three tabs:
-  - **Dashboard** — login status, total activities synced, last-sync outcome, and your most
-    recent activities.
+  - **Dashboard** (pictured above) — last-sync status, total activities/wellness/VO2-max/planned-
+    workout records synced, a "Sync now" button, and your most recent activities.
   - **Running** — total distance per calendar week (Monday–Sunday), most recent week first.
-  - **Settings** — one-off backfill from any start date (regular syncs only fetch your most
-    recent activities), with a live progress bar for wide date ranges.
+  - **Settings** — Garmin Connect login/account status, one-off backfill from any start date
+    (regular syncs only fetch your most recent activities) with a live progress bar for wide date
+    ranges, and a Diagnostics panel for troubleshooting.
 - **One-time MFA/2FA login** via the web UI or a CLI bootstrap command — no re-entry needed on
   every scheduled sync afterward.
 - **Optional bearer-token auth** (`mcp_auth_token`) for the MCP server, so it's safe to expose
