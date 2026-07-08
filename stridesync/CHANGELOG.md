@@ -11,6 +11,20 @@
   whole-session average. `docs/skills/README.md` explains what a Skill is and how to install
   one. Purely additive documentation — no application code changed, entirely optional to use.
 
+### Fixed
+- **`planned_workouts` sync could silently wipe out already-synced future/past weeks**
+  (milestone Stage 18 follow-up): reported live with the full real `taskList` response pasted —
+  all 7 entries share one `weekId` (34). Neither `get_training_plan_by_id` nor
+  `get_adaptive_training_plan_by_id` takes a date-range argument at all; each call always
+  returns just the plan's *current* week, regardless of the sync's `±14`-day requested window.
+  `_replace_planned_workouts` used to DELETE the entire requested window every sync but only
+  ever re-INSERT the one week Garmin actually returned, silently wiping any other week's rows
+  with nothing to replace them. Fixed by scoping the DELETE to exactly the calendar dates a
+  fetch actually covered (`covered_dates`, including rest-day dates), not the full requested
+  window. A confirmed-empty plan list (no active plan) still clears the whole window, since
+  that's a complete answer; a transient fetch failure now touches nothing at all, instead of
+  wiping existing data on a network blip.
+
 ## [0.3.2] - 2026-07-07
 
 ### Fixed

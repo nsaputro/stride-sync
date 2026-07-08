@@ -13,6 +13,7 @@ from app.sync.garmin_client import (
     GarminAPIError,
     GarminAuthError,
     GarminClient,
+    _iso_date_range,
     _normalize_activity,
     _normalize_daily_wellness,
     _normalize_hr_zones,
@@ -332,7 +333,9 @@ class TestNormalizePlannedWorkouts:
             ]
         }
 
-        workouts = _normalize_planned_workouts("43075722", detail, "2026-07-01", "2026-07-10")
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-10"
+        )
 
         assert len(workouts) == 1
         w = workouts[0]
@@ -346,6 +349,7 @@ class TestNormalizePlannedWorkouts:
         assert w.planned_target_pace_sec_per_km is None
         assert w.planned_target_hr_low is None
         assert w.planned_target_hr_high is None
+        assert covered_dates == {"2026-07-10"}
 
     def test_skips_rest_days(self):
         # A day entry whose taskWorkout.restDay is true has no real workout (workoutName/
@@ -357,35 +361,49 @@ class TestNormalizePlannedWorkouts:
             ]
         }
 
-        workouts = _normalize_planned_workouts("43075722", detail, "2026-07-01", "2026-07-10")
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-10"
+        )
 
         assert len(workouts) == 1
         assert workouts[0].workout_date == "2026-07-09"
+        # The rest day still counts as "covered" -- it's a real answer from Garmin, just not a
+        # PlannedWorkout row -- so a stale row on that date still gets cleared by the caller.
+        assert covered_dates == {"2026-07-08", "2026-07-09"}
 
     def test_filters_out_workout_outside_window(self):
         detail = {"taskList": [make_task_entry(calendar_date="2026-08-01")]}
 
-        workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
+        workouts, covered_dates = _normalize_planned_workouts(
+            "plan-1", detail, "2026-07-01", "2026-07-10"
+        )
 
         assert workouts == []
+        assert covered_dates == set()
 
     def test_missing_task_list_key_returns_empty(self):
-        assert _normalize_planned_workouts("plan-1", {}, "2026-07-01", "2026-07-10") == []
+        assert _normalize_planned_workouts("plan-1", {}, "2026-07-01", "2026-07-10") == ([], set())
 
     def test_entry_missing_date_is_skipped(self):
         detail = {"taskList": [{"taskWorkout": {"workoutName": "No Date Run"}}]}
 
-        assert _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10") == []
+        assert _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10") == (
+            [],
+            set(),
+        )
 
     def test_falls_back_to_legacy_workouts_key(self):
         # Kept as a lower-priority fallback in case a non-adaptive (phased) plan's shape
         # differs from the confirmed FBT_ADAPTIVE taskList shape.
         detail = {"workouts": [{"date": "2026-07-06", "taskWorkout": {"workoutName": "Tempo"}}]}
 
-        workouts = _normalize_planned_workouts("plan-1", detail, "2026-07-01", "2026-07-10")
+        workouts, covered_dates = _normalize_planned_workouts(
+            "plan-1", detail, "2026-07-01", "2026-07-10"
+        )
 
         assert len(workouts) == 1
         assert workouts[0].workout_name == "Tempo"
+        assert covered_dates == {"2026-07-06"}
 
     def test_normalizes_the_exact_real_response_reported_live(self):
         # Trimmed but structurally faithful copy of the actual get_adaptive_training_plan_by_id
@@ -483,7 +501,9 @@ class TestNormalizePlannedWorkouts:
             "adaptivePlanPhases": [{"trainingPhase": "BUILD", "currentPhase": True}],
         }
 
-        workouts = _normalize_planned_workouts("43075722", detail, "2026-07-01", "2026-07-31")
+        workouts, covered_dates = _normalize_planned_workouts(
+            "43075722", detail, "2026-07-01", "2026-07-31"
+        )
 
         # Two rest days (Jul 8, Jul 13) excluded -- 5 real workouts remain.
         assert len(workouts) == 5
@@ -494,6 +514,17 @@ class TestNormalizePlannedWorkouts:
         assert by_date["2026-07-11"].workout_name == "Anaerobic"
         assert by_date["2026-07-11"].planned_duration_seconds == 3000  # 50:00
         assert all(w.plan_id == "43075722" for w in workouts)
+        # All 7 days (5 workouts + 2 rest days) count as covered -- this is the real live
+        # response confirming taskList only ever spans one week (weekId 34, Jul 7-13).
+        assert covered_dates == {
+            "2026-07-07",
+            "2026-07-08",
+            "2026-07-09",
+            "2026-07-10",
+            "2026-07-11",
+            "2026-07-12",
+            "2026-07-13",
+        }
 
 
 class TestNormalizeHrZones:
@@ -997,11 +1028,12 @@ class TestGarminClientFetch:
             ]
         }
 
-        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+        workouts, covered_dates = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         assert workouts[0].plan_id == "plan-1"
         assert workouts[0].workout_name == "Tempo Run"
+        assert covered_dates == {"2026-07-06"}
         client._garmin.get_training_plan_by_id.assert_called_once_with("plan-1")
 
     def test_fetch_planned_workouts_extracts_trainingplanlist_key(self):
@@ -1018,7 +1050,7 @@ class TestGarminClientFetch:
             "workouts": [{"date": "2026-07-06", "workoutName": "Tempo Run"}]
         }
 
-        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+        workouts, _covered = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         assert workouts[0].plan_id == "plan-1"
@@ -1037,7 +1069,7 @@ class TestGarminClientFetch:
             "workouts": [{"date": "2026-07-06", "workoutName": "Tempo Run"}]
         }
 
-        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+        workouts, _covered = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         assert workouts[0].plan_id == "43075722"
@@ -1059,7 +1091,7 @@ class TestGarminClientFetch:
             ]
         }
 
-        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+        workouts, _covered = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         assert workouts[0].workout_name == "Adaptive Run"
@@ -1075,23 +1107,30 @@ class TestGarminClientFetch:
             "workouts": [{"date": "2026-07-06", "workoutName": "Tempo Run"}]
         }
 
-        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+        workouts, _covered = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         client._garmin.get_training_plan_by_id.assert_called_once_with("plan-1")
         client._garmin.get_adaptive_training_plan_by_id.assert_not_called()
 
     def test_fetch_planned_workouts_returns_empty_when_no_plans(self):
+        # A confirmed-empty plan list is a complete answer, not a partial one -- the whole
+        # requested window counts as covered, so a since-removed plan's stale rows get cleared.
         client = make_client()
         client._garmin.get_training_plans.return_value = []
 
-        assert client.fetch_planned_workouts("2026-07-01", "2026-07-10") == []
+        workouts, covered_dates = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+
+        assert workouts == []
+        assert covered_dates == _iso_date_range("2026-07-01", "2026-07-10")
 
     def test_fetch_planned_workouts_returns_empty_when_plan_list_fetch_fails(self):
+        # A transient failure is *not* a confirmed answer -- covered_dates must stay empty so
+        # the caller doesn't wipe out otherwise-good existing data because of a network blip.
         client = make_client()
         client._garmin.get_training_plans.side_effect = GarminConnectConnectionError("boom")
 
-        assert client.fetch_planned_workouts("2026-07-01", "2026-07-10") == []
+        assert client.fetch_planned_workouts("2026-07-01", "2026-07-10") == ([], set())
 
     def test_fetch_planned_workouts_isolates_one_failing_plan_from_siblings(self):
         # A failure fetching one plan's detail must not discard workouts from sibling plans.
@@ -1108,10 +1147,12 @@ class TestGarminClientFetch:
 
         client._garmin.get_training_plan_by_id.side_effect = get_plan_by_id
 
-        workouts = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
+        workouts, covered_dates = client.fetch_planned_workouts("2026-07-01", "2026-07-10")
 
         assert len(workouts) == 1
         assert workouts[0].plan_id == "plan-1"
+        # Only plan-1's date is covered -- plan-2's failure must not count as a confirmed answer.
+        assert covered_dates == {"2026-07-06"}
 
     def test_fetch_activity_hr_zones_returns_normalized_result(self):
         client = make_client()

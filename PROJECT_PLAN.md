@@ -930,6 +930,22 @@ byte-for-byte against real data end-to-end, not just "no longer 400s."
 - ✅ New regression test byte-for-byte reproducing the full real `taskList` response the
   reporting user pasted (7 day-entries: 5 real workouts + 2 rest days), asserting the exact
   durations/names/dates match and rest days are correctly excluded.
+- ✅ **Confirmed and fixed a real data-loss bug: `taskList` only ever returns one week**
+  (reported live, with the full real response pasted — all 7 entries share one `weekId`, 34).
+  Neither `get_training_plan_by_id` nor `get_adaptive_training_plan_by_id` takes a date-range
+  argument at all; the sync's `±14`-day `[start_date, end_date]` window was only ever used as a
+  post-hoc filter, never something Garmin actually honored. `_replace_planned_workouts` used to
+  DELETE the *entire* requested window every sync but only ever re-INSERT the one week Garmin
+  actually returned — silently wiping any other week's already-synced rows with nothing to
+  replace them. Fixed by having `GarminClient.fetch_planned_workouts`/`_normalize_planned_workouts`
+  return the exact set of calendar dates a response actually covers (`covered_dates`, including
+  rest-day dates so a day flipping from "workout" to "rest" still clears its stale row) alongside
+  the workouts themselves; `_replace_planned_workouts` now scopes its DELETE to exactly that set
+  instead of the full requested window. A confirmed-empty `trainingPlanList` (no active plan) is
+  treated as a complete answer covering the whole window (correctly clearing stale rows for a
+  since-removed plan); a transient fetch failure returns an empty `covered_dates` instead, so a
+  network blip can no longer wipe out otherwise-good existing data either — a stricter guarantee
+  than the pre-fix behavior had for that case too.
 
 ### Stage 19 — Documented, versioned, changelog-tracked release 🔄
 
