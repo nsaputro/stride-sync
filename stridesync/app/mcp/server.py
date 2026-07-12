@@ -99,6 +99,58 @@ def list_recent_activities(conn: sqlite3.Connection, limit: int = 20) -> List[Di
     return [dict(row) for row in rows]
 
 
+def find_activities(
+    conn: sqlite3.Connection,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    activity_type: Optional[str] = None,
+    min_distance_meters: Optional[float] = None,
+    max_distance_meters: Optional[float] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """Activities matching all given filters, newest first — for locating a specific run or set
+    of runs (e.g. "my long runs over 20km in June") rather than always pulling the most recent N
+    like `recent_activities`. Every filter is optional and combines with AND; passing none of
+    them behaves exactly like `recent_activities`.
+    """
+    limit = _clamp(limit, _MIN_LIMIT, _MAX_LIMIT)
+    clauses = []
+    params: List[Any] = []
+    if start_date is not None:
+        clauses.append("date(start_time_local) >= date(?)")
+        params.append(start_date)
+    if end_date is not None:
+        clauses.append("date(start_time_local) <= date(?)")
+        params.append(end_date)
+    if activity_type is not None:
+        clauses.append("activity_type = ? COLLATE NOCASE")
+        params.append(activity_type)
+    if min_distance_meters is not None:
+        clauses.append("distance_meters >= ?")
+        params.append(min_distance_meters)
+    if max_distance_meters is not None:
+        clauses.append("distance_meters <= ?")
+        params.append(max_distance_meters)
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+    rows = conn.execute(
+        f"""
+        SELECT activity_id, activity_name, activity_type, start_time_local, duration_seconds,
+               distance_meters, average_pace_sec_per_km, average_hr, max_hr,
+               average_cadence_spm, max_cadence_spm, elevation_gain_meters, calories,
+               aerobic_training_effect, anaerobic_training_effect, training_effect_label,
+               activity_training_load
+        FROM activities
+        {where_sql}
+        ORDER BY start_time_local DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_activity_laps(conn: sqlite3.Connection, activity_id: int) -> List[Dict[str, Any]]:
     """Per-lap splits for one activity — how pace/cadence/HR varied over its course."""
     rows = conn.execute(
@@ -348,6 +400,43 @@ def create_server(settings: Settings) -> FastMCP:
         conn = _connect_readonly(settings.db_path)
         try:
             return list_recent_activities(conn, limit)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def search_activities(
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        min_distance_meters: Optional[float] = None,
+        max_distance_meters: Optional[float] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Find activities matching a date range, type, and/or distance range, newest first.
+        Use this instead of `recent_activities` when looking for a specific run or set of runs
+        (e.g. "my runs over 20km in June", "cycling activities last week") rather than just the
+        most recent N. Every filter is optional and combines with AND.
+
+        Args:
+            start_date: Only include activities on/after this calendar date (YYYY-MM-DD).
+            end_date: Only include activities on/before this calendar date (YYYY-MM-DD).
+            activity_type: Exact activity type to match (e.g. "running", "cycling"),
+                case-insensitive.
+            min_distance_meters: Only include activities at least this long.
+            max_distance_meters: Only include activities at most this long.
+            limit: Maximum number of activities to return (1-200, default 20).
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return find_activities(
+                conn,
+                start_date,
+                end_date,
+                activity_type,
+                min_distance_meters,
+                max_distance_meters,
+                limit,
+            )
         finally:
             conn.close()
 

@@ -1110,6 +1110,24 @@ series, tuned against real user feedback comparing chart output to the Garmin Co
   parity.
 - ✅ Purely additive documentation — no application code changed, entirely optional to use.
 
+### Stage 24 — New MCP tool: `search_activities` (filter by date range, type, distance) 🔄
+
+Requested directly: `recent_activities` only ever returns the most-recent-N activities, with no
+way to look up e.g. "my runs over 20km in June" or "cycling activities last week" without pulling
+a large `limit` and filtering client-side. Added a dedicated search tool instead.
+
+- ✅ New `find_activities` query function (`app/mcp/server.py`) and `search_activities` MCP tool:
+  optional `start_date`/`end_date` (inclusive calendar-date bounds), `activity_type`
+  (case-insensitive exact match), `min_distance_meters`/`max_distance_meters`, and `limit`
+  (1-200, default 20, same clamp as every other tool) — every filter is optional and combines
+  with AND; calling it with no filters behaves exactly like `recent_activities`. Results are
+  newest-first, same ordering as `recent_activities`.
+- ✅ Unit tests covering each filter individually, combined filters, the no-filter passthrough
+  case, and `limit`; full suite green (276 passed, up from 270).
+- ✅ Verified end-to-end with a real `fastmcp.Client` call (not just unit tests) against a seeded
+  DB with a running activity and a cycling activity — confirmed the type filter, distance filter,
+  and date-range filter each returned exactly the expected activity.
+
 ---
 
 ## Getting Started (Development)

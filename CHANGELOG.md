@@ -16,6 +16,11 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   dropout clipping, and two stacked charts (pace, HR) instead of one scaled single-axis overlay,
   since the chart tool has no second y-axis. Purely additive documentation — no application code
   changed.
+- **New MCP tool: `search_activities`** (milestone Stage 24): find activities by an optional
+  date range, activity type (case-insensitive), and/or distance range, newest first — combines
+  all given filters with AND, and behaves exactly like `recent_activities` with none set. Fills
+  the gap where `recent_activities`' only lever was "most recent N," with no way to look up e.g.
+  "runs over 20km in June" without pulling a large limit and filtering client-side.
 
 ## [0.4.1] - 2026-07-08
 
