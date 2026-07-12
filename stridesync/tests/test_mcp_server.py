@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from starlette.testclient import TestClient
@@ -10,6 +11,7 @@ from app.mcp.server import (
     _clamp,
     _connect_readonly,
     create_server,
+    find_activities,
     get_activity_hr_zones,
     get_activity_laps,
     get_activity_samples,
@@ -510,6 +512,105 @@ class TestQueries:
             conn.close()
 
 
+class TestFindActivities:
+    def test_no_filters_behaves_like_recent_activities(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            activities = find_activities(conn)
+            assert [a["activity_id"] for a in activities] == [1, 2]
+        finally:
+            conn.close()
+
+    def test_filters_by_date_range(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            # activity 1 is ~1 day old, activity 2 is ~100 days old.
+            activities = find_activities(conn, start_date="2000-01-01", end_date="2100-01-01")
+            assert len(activities) == 2
+
+            recent_only = find_activities(
+                conn,
+                start_date=(datetime.now(timezone.utc) - timedelta(days=5)).date().isoformat(),
+            )
+            assert [a["activity_id"] for a in recent_only] == [1]
+
+            old_only = find_activities(
+                conn,
+                end_date=(datetime.now(timezone.utc) - timedelta(days=5)).date().isoformat(),
+            )
+            assert [a["activity_id"] for a in old_only] == [2]
+        finally:
+            conn.close()
+
+    def test_filters_by_activity_type_case_insensitive(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO activities (
+                    activity_id, activity_name, activity_type, start_time_local,
+                    start_time_gmt, duration_seconds, distance_meters, synced_at
+                ) VALUES (
+                    3, 'Evening Ride', 'cycling', datetime('now'), datetime('now'),
+                    3600, 20000, datetime('now')
+                )
+                """
+            )
+            conn.commit()
+
+            activities = find_activities(conn, activity_type="CYCLING")
+            assert [a["activity_id"] for a in activities] == [3]
+        finally:
+            conn.close()
+
+    def test_filters_by_distance_range(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            # activity 1: 5000m, activity 2: 3000m.
+            activities = find_activities(conn, min_distance_meters=4000)
+            assert [a["activity_id"] for a in activities] == [1]
+
+            activities = find_activities(conn, max_distance_meters=4000)
+            assert [a["activity_id"] for a in activities] == [2]
+        finally:
+            conn.close()
+
+    def test_combines_filters_with_and(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            # activity 1 (5000m, recent) matches both; activity 2 (3000m) fails the distance
+            # filter even though it'd otherwise match a wide-open date range.
+            activities = find_activities(
+                conn,
+                start_date="2000-01-01",
+                min_distance_meters=4000,
+            )
+            assert [a["activity_id"] for a in activities] == [1]
+        finally:
+            conn.close()
+
+    def test_respects_limit(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            activities = find_activities(conn, start_date="2000-01-01", limit=1)
+            assert len(activities) == 1
+            assert activities[0]["activity_id"] == 1
+        finally:
+            conn.close()
+
+
 class TestSharedSecretVerifier:
     def test_accepts_correct_token(self):
         verifier = SharedSecretVerifier("s3cr3t")
@@ -560,6 +661,7 @@ class TestCreateServer:
 
         assert tool_names == {
             "recent_activities",
+            "search_activities",
             "activity_laps",
             "pace_cadence_hr_trend",
             "training_load_summary",
