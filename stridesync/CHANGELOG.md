@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **`running-coach` example skill: charting conventions for pace/HR over time** (milestone Stage
+  23, `docs/skills/running-coach/SKILL.md` follow-up): a new section giving concrete conventions
+  for visualizing `activity_samples` pace/HR time series — high point density, a numeric x-axis
+  extended to the run's true finish, pace in flipped min/km (faster at top, matching Garmin), GPS
+  dropout clipping, and two stacked charts (pace, HR) instead of one scaled single-axis overlay,
+  since the chart tool has no second y-axis. Purely additive documentation — no application code
+  changed.
+
 ## [0.4.1] - 2026-07-08
 
 ### Fixed

@@ -105,6 +105,37 @@ Instead, always call `activity_laps` for these sessions and split laps into segm
 
 Report the actual work-rep pace/HR (e.g. as a range across the reps) as the meaningful number, and mention the recovery jog pace/HR separately if relevant, rather than presenting a single blended average as if it represented the workout's effort.
 
+## Charting run data (pace / HR over time)
+
+When visualizing how pace and/or heart rate varied over the course of a run, follow these conventions so charts come out at full fidelity and read the way Garmin's own charts do. These were tuned against real user feedback comparing output to the Garmin Connect app.
+
+### Data source and density
+- Pull the time series from `activity_samples` with a **high `max_points` (≈200)**, not the default. Low point counts (e.g. ~70) produce a coarse chart that smooths over real pace noise and looks visibly less complete than Garmin's. ~200 points matches Garmin's density well.
+- Build the x-axis from each sample's `elapsed_seconds` converted to **minutes** (elapsed time), never from distance or km-index.
+
+### Always extend the time axis to the true end of the run
+- `activity_samples`' even sampling often stops ~15-40 s short of the real finish. Get the true activity duration (from `recent_activities` `duration` / the activity's total time) and make sure the chart's time axis runs all the way to it.
+- **Render the x-axis as a true numeric scale**: set `x_axis.min = 0` and `x_axis.max = <total duration in minutes>` (e.g. 118.2 for a 1:58:12 run), with `format: "%.0f"`. Do **not** pass a per-point `x_axis.data` label array for these charts — the renderer thins point-labels and drops the final ticks, so the axis *reads* as ending early (e.g. last tick 104.7 for a 118-min run) even though the line reaches the edge. A numeric min/max axis labels the whole run correctly.
+- If the last real sample falls short of the finish, append one final point at the true finish time carrying the closing pace/HR, and say so plainly (it's closing the last ~30 s with measured values, not inventing data).
+
+### Pace formatting
+- **Pace is always in min/km, never sec/km.** Provide values as decimal minutes (335 sec/km → 5.58). In prose, refer to paces in mm:ss form (5:35/km), not decimal.
+- **Flip the pace y-axis so faster is at the top**, matching Garmin: set `y_axis.min` to the *slower* bound and `y_axis.max` to the *faster* bound (e.g. `min: 6.4, max: 4.6`), with `format: "%.2f"` and a title like "min/km (higher = faster)".
+- **Clip GPS dropouts** so they don't blow the scale: cap displayed pace at a sane ceiling (e.g. 7.0 min/km) rather than letting a stopped/lost-signal sample (e.g. 800 sec/km) flatten the whole chart. Note the clipped spike is a GPS artifact.
+
+### Heart rate
+- Plot HR in **true bpm** on its own chart with a tight y-range (e.g. 115-165), not scaled or squashed.
+
+### Two aligned charts, not one overlay
+- The chart tool has a **single y-axis**, so pace (~5.5) and HR (~145) cannot share one axis honestly — scaling HR into the pace band pushes one line off the chart (a real failure that happened). **Render two separate charts stacked on the same 0→duration minute axis** — one pace (min/km, flipped), one HR (bpm) — so both stay in real units and fully visible. Don't attempt a scaled single-axis overlay.
+
+### Interpretation
+- After the charts, read them together: pace evenness vs drift, the HR staircase, and any finishing kick (pace rising while HR peaks near the end = negative-split signature). Keep it grounded in the actual shapes, per Step 3.
+
+### Known tool limitations to state honestly when relevant
+- No second (right-side) y-axis, so pace+HR can't be a single dual-axis chart — hence the two-chart approach.
+- No target-pace reference line overlay (Garmin's white line) and no area-fill under the curve — these are lines, not Garmin's filled shapes.
+
 ## Step 3: Compare against the plan and give feedback
 
 Compare the retrieved data against the user's known race plan and targets — target pace, target finish time, target HR zones, key upcoming workouts or benchmark races — as established in the conversation or Claude's memory of past discussions. If the plan or targets aren't known, ask rather than assuming generic marathon paces.
