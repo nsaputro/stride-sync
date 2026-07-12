@@ -1090,6 +1090,26 @@ later) there was no longer even a fresh row to replace the deleted one with.
   its row was excluded from the second sync's `covered_dates` and survived completely untouched
   (`synced_at` still pointed at the first sync).
 
+### Stage 23 — `running-coach` example skill: charting conventions for pace/HR over time 🔄
+
+Added, user-provided, following the same "example Skill, purely additive documentation" pattern
+as Stage 9's original `docs/skills/running-coach/SKILL.md`: a new "Charting run data (pace / HR
+over time)" section giving concrete conventions for visualizing `activity_samples` pace/HR time
+series, tuned against real user feedback comparing chart output to the Garmin Connect app.
+
+- ✅ New section covers: pulling `activity_samples` at a high `max_points` (≈200) for Garmin-like
+  density; building the x-axis from `elapsed_seconds` in minutes; extending the time axis to the
+  activity's true duration via a numeric `x_axis.min`/`max` (not a per-point label array, which
+  was found to visibly truncate the last ticks); formatting pace in decimal min/km with the y-axis
+  flipped so faster reads higher, matching Garmin; clipping GPS-dropout pace spikes; plotting HR
+  in true bpm on a tight range; and rendering pace and HR as two separate stacked charts on a
+  shared time axis rather than one scaled single-axis overlay, since the chart tool has no second
+  y-axis (a real failure — a scaled HR line pushed off the pace chart — motivated this rule).
+  Also documents the chart tool's known limitations (no dual y-axis, no target-pace reference
+  line, no area fill) so a coaching response states them honestly rather than pretending Garmin
+  parity.
+- ✅ Purely additive documentation — no application code changed, entirely optional to use.
+
 ---
 
 ## Getting Started (Development)
