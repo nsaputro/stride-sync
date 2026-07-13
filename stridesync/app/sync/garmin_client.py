@@ -204,6 +204,12 @@ class DailyWellness:
     the `daily_wellness` table. Always has `calendar_date` populated; every other field is
     `None` if its underlying Garmin endpoint failed or isn't supported by this account/device
     (see `GarminClient.fetch_daily_wellness`).
+
+    `acute_training_load`/`chronic_training_load`/`acute_chronic_workload_ratio` come from the
+    same `get_training_status` call already made for `training_status_label` (see Stage 26 in
+    PROJECT_PLAN.md) — no extra API call. `training_stress_balance` is derived locally
+    (`chronic_training_load - acute_training_load`, the standard CTL-ATL "form" calculation);
+    Garmin doesn't expose it directly, unlike the acute/chronic/ACWR fields.
     """
 
     calendar_date: str
@@ -219,6 +225,10 @@ class DailyWellness:
     training_status_label: Optional[str]
     training_readiness_score: Optional[int]
     resting_hr: Optional[int]
+    acute_training_load: Optional[float]
+    chronic_training_load: Optional[float]
+    training_stress_balance: Optional[float]
+    acute_chronic_workload_ratio: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -356,6 +366,22 @@ def _normalize_training_baseline(
     )
 
 
+def _training_status_device_data(training_status: Dict[str, Any]) -> Dict[str, Any]:
+    """First device's entry from `get_training_status`'s `mostRecentTrainingStatus.
+    latestTrainingStatusData` map (keyed by an unpredictable per-device id, so "take the first
+    value" is the only stable way to read it) — see `_normalize_daily_wellness`'s docstring for
+    where this path came from. Returns `{}` if the nested structure isn't present in this shape
+    (e.g. the endpoint failed, or a real response's shape differs from what's confirmed so far).
+    """
+    recent_status = training_status.get("mostRecentTrainingStatus")
+    if not isinstance(recent_status, dict):
+        return {}
+    latest_data = recent_status.get("latestTrainingStatusData")
+    if not isinstance(latest_data, dict):
+        return {}
+    return next((v for v in latest_data.values() if isinstance(v, dict)), {})
+
+
 def _normalize_daily_wellness(
     cdate: str,
     sleep: Any,
@@ -377,9 +403,22 @@ def _normalize_daily_wellness(
     `_normalize_vo2max`'s docstring for the same issue confirmed on `get_max_metrics`) — every
     argument is coerced to `{}` here if it isn't already a dict, so an unexpected shape degrades
     those fields to `None` rather than crashing `.get()`.
+
+    `training_status`'s shape (see PROJECT_PLAN.md milestone Stage 26): the original guess
+    assumed `trainingStatusFeedbackPhrase` lived at (or one level under) the top level. Sourced
+    from a second Garmin Connect MCP project built on the same `python-garminconnect` library
+    (`Taxuspt/garmin_mcp`) — not yet confirmed against a live account of this add-on's own, but
+    more authoritative than a blind guess — the real path is nested under
+    `mostRecentTrainingStatus.latestTrainingStatusData.<device id>`, extracted via
+    `_training_status_device_data()` above. Tried first; the original top-level guesses are kept
+    as a lower-priority fallback in case the nested path doesn't match this account's response.
+    `acute_training_load`/`chronic_training_load`/`acute_chronic_workload_ratio` come from that
+    same nested device entry's `acuteTrainingLoadDTO` — no extra API call beyond what
+    `training_status_label` already needed.
     """
     sleep = sleep if isinstance(sleep, dict) else {}
     hrv = hrv if isinstance(hrv, dict) else {}
+    training_status = training_status if isinstance(training_status, dict) else {}
     daily_sleep_dto = sleep.get("dailySleepDTO") or {}
     sleep_scores = daily_sleep_dto.get("sleepScores") or {}
     overall_sleep_score = (sleep_scores.get("overall") or {}).get("value")
@@ -388,13 +427,30 @@ def _normalize_daily_wellness(
     # summary fields under "hrvSummary", others return them at the top level directly.
     hrv_summary = hrv.get("hrvSummary") or hrv
 
-    training_status_label = _get(
-        training_status, "latestTrainingStatus", "trainingStatusFeedbackPhrase", "trainingStatus"
-    )
-    if isinstance(training_status_label, dict):
-        training_status_label = _get(training_status_label, "trainingStatusFeedbackPhrase")
+    device_data = _training_status_device_data(training_status)
+    acwr_data = device_data.get("acuteTrainingLoadDTO")
+    acwr_data = acwr_data if isinstance(acwr_data, dict) else {}
+
+    training_status_label = _get(device_data, "trainingStatusFeedbackPhrase")
+    if training_status_label is None:
+        training_status_label = _get(
+            training_status,
+            "latestTrainingStatus",
+            "trainingStatusFeedbackPhrase",
+            "trainingStatus",
+        )
+        if isinstance(training_status_label, dict):
+            training_status_label = _get(training_status_label, "trainingStatusFeedbackPhrase")
     if not isinstance(training_status_label, str):
         training_status_label = None
+
+    acute_training_load = _get(acwr_data, "dailyTrainingLoadAcute")
+    chronic_training_load = _get(acwr_data, "dailyTrainingLoadChronic")
+    training_stress_balance = None
+    if isinstance(chronic_training_load, (int, float)) and isinstance(
+        acute_training_load, (int, float)
+    ):
+        training_stress_balance = chronic_training_load - acute_training_load
 
     return DailyWellness(
         calendar_date=cdate,
@@ -410,6 +466,10 @@ def _normalize_daily_wellness(
         training_status_label=training_status_label,
         training_readiness_score=_get(readiness, "score"),
         resting_hr=_get(resting_hr, "restingHeartRate", "restingHR"),
+        acute_training_load=acute_training_load,
+        chronic_training_load=chronic_training_load,
+        training_stress_balance=training_stress_balance,
+        acute_chronic_workload_ratio=_get(acwr_data, "dailyAcuteChronicWorkloadRatio"),
     )
 
 
@@ -951,6 +1011,10 @@ class GarminClient:
                 training_status_label=None,
                 training_readiness_score=None,
                 resting_hr=None,
+                acute_training_load=None,
+                chronic_training_load=None,
+                training_stress_balance=None,
+                acute_chronic_workload_ratio=None,
             )
 
     def _safe_wellness_call(self, label: str, cdate: str, fn: Callable[[], Any]) -> Any:

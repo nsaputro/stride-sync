@@ -117,20 +117,28 @@ CREATE TABLE IF NOT EXISTS activity_samples (
 -- source endpoints failing independently degrades only its own column(s) to NULL rather than the
 -- whole day's row.
 CREATE TABLE IF NOT EXISTS daily_wellness (
-    calendar_date            TEXT PRIMARY KEY,
-    synced_at                TEXT NOT NULL,
-    sleep_score              INTEGER,
-    sleep_duration_seconds   REAL,
-    deep_sleep_seconds       REAL,
-    light_sleep_seconds      REAL,
-    rem_sleep_seconds        REAL,
-    awake_sleep_seconds      REAL,
-    hrv_status               TEXT,
-    hrv_weekly_avg_ms        REAL,
-    hrv_last_night_avg_ms    REAL,
-    training_status_label    TEXT,
-    training_readiness_score INTEGER,
-    resting_hr               INTEGER
+    calendar_date              TEXT PRIMARY KEY,
+    synced_at                  TEXT NOT NULL,
+    sleep_score                INTEGER,
+    sleep_duration_seconds     REAL,
+    deep_sleep_seconds         REAL,
+    light_sleep_seconds        REAL,
+    rem_sleep_seconds          REAL,
+    awake_sleep_seconds        REAL,
+    hrv_status                 TEXT,
+    hrv_weekly_avg_ms          REAL,
+    hrv_last_night_avg_ms      REAL,
+    training_status_label      TEXT,
+    training_readiness_score   INTEGER,
+    resting_hr                 INTEGER,
+    -- Added milestone Stage 26: acute/chronic training load + ACWR come from the same
+    -- get_training_status call already made for training_status_label above, at no extra API
+    -- cost. training_stress_balance is derived locally (chronic - acute); Garmin doesn't expose
+    -- it directly, unlike the other three.
+    acute_training_load        REAL,
+    chronic_training_load      REAL,
+    training_stress_balance    REAL,
+    acute_chronic_workload_ratio REAL
 );
 
 -- vo2max_history: one row per calendar date, Garmin's own VO2 max estimate (running/cycling) and

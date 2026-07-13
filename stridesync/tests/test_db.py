@@ -95,6 +95,45 @@ def test_connect_adds_temperature_column_to_an_older_database(tmp_path):
         conn.close()
 
 
+def test_connect_adds_training_load_columns_to_an_older_daily_wellness_table(tmp_path):
+    # Simulates an install that shipped before the training-load columns existed (milestone
+    # Stage 26) -- same reasoning as the temperature_celsius migration above.
+    db_path = str(tmp_path / "stridesync.db")
+    old_conn = sqlite3.connect(db_path)
+    old_conn.execute(
+        """
+        CREATE TABLE daily_wellness (
+            calendar_date TEXT PRIMARY KEY,
+            synced_at TEXT NOT NULL,
+            sleep_score INTEGER
+        )
+        """
+    )
+    old_conn.execute(
+        "INSERT INTO daily_wellness (calendar_date, synced_at, sleep_score) VALUES (?, ?, ?)",
+        ("2026-07-06", "2026-07-06T00:00:00+00:00", 82),
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    conn = db.connect(db_path)
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_wellness)")}
+        assert {
+            "acute_training_load",
+            "chronic_training_load",
+            "training_stress_balance",
+            "acute_chronic_workload_ratio",
+        } <= columns
+        # Pre-existing data must survive the migration untouched.
+        row = conn.execute(
+            "SELECT sleep_score FROM daily_wellness WHERE calendar_date = '2026-07-06'"
+        ).fetchone()
+        assert row["sleep_score"] == 82
+    finally:
+        conn.close()
+
+
 def test_readonly_reader_does_not_block_writer_in_wal_mode(tmp_path):
     """A read-only connection must not stop the write connection from committing.
 

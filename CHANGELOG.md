@@ -8,6 +8,15 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Added
+- **Real training load (CTL/ATL/TSB/ACWR) in `daily_wellness`** (milestone Stage 26): four new
+  columns — `acute_training_load`, `chronic_training_load`, `training_stress_balance` (derived
+  locally as chronic − acute), and `acute_chronic_workload_ratio` (Garmin's own value) — sourced
+  from the same `get_training_status` call `daily_wellness` already makes, no extra API cost.
+  Also fixes `training_status_label` to prefer a more authoritative nested response path
+  (confirmed via reviewing another Garmin Connect MCP project built on the same underlying
+  library), falling back to the original guess unchanged if that path isn't present.
+
 ## [0.5.0] - 2026-07-13
 
 ### Added

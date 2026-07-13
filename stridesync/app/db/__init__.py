@@ -35,6 +35,10 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA_PATH.read_text())
     conn.commit()
     _add_column_if_missing(conn, "activity_samples", "temperature_celsius", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "acute_training_load", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "chronic_training_load", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "training_stress_balance", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "acute_chronic_workload_ratio", "REAL")
     conn.commit()
 
 

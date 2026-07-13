@@ -190,6 +190,12 @@ class TestNormalizeDailyWellness:
         assert wellness.training_status_label == "PRODUCTIVE"
         assert wellness.training_readiness_score == 78
         assert wellness.resting_hr == 48
+        # No mostRecentTrainingStatus nesting in this fixture -- training load fields degrade to
+        # None rather than crashing (see the nested-path tests below for the happy path).
+        assert wellness.acute_training_load is None
+        assert wellness.chronic_training_load is None
+        assert wellness.training_stress_balance is None
+        assert wellness.acute_chronic_workload_ratio is None
 
     def test_unwraps_nested_training_status_dict(self):
         training_status = {
@@ -209,6 +215,66 @@ class TestNormalizeDailyWellness:
         assert wellness.training_status_label is None
         assert wellness.training_readiness_score is None
         assert wellness.resting_hr is None
+        assert wellness.acute_training_load is None
+        assert wellness.chronic_training_load is None
+        assert wellness.training_stress_balance is None
+        assert wellness.acute_chronic_workload_ratio is None
+
+    def test_extracts_training_load_from_nested_device_data(self):
+        # Sourced from a second Garmin Connect MCP project (Taxuspt/garmin_mcp) built on the same
+        # python-garminconnect library -- not yet confirmed against a live account of this add-on's
+        # own (see PROJECT_PLAN.md milestone Stage 26).
+        training_status = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "3421567890": {
+                        "trainingStatusFeedbackPhrase": "PRODUCTIVE_1",
+                        "acuteTrainingLoadDTO": {
+                            "dailyTrainingLoadAcute": 420.5,
+                            "dailyTrainingLoadChronic": 380.0,
+                            "dailyAcuteChronicWorkloadRatio": 1.11,
+                        },
+                    }
+                }
+            }
+        }
+
+        wellness = _normalize_daily_wellness("2026-07-06", {}, {}, training_status, {}, {})
+
+        assert wellness.training_status_label == "PRODUCTIVE_1"
+        assert wellness.acute_training_load == 420.5
+        assert wellness.chronic_training_load == 380.0
+        assert wellness.acute_chronic_workload_ratio == 1.11
+        # Derived locally -- Garmin doesn't expose training stress balance/"form" directly.
+        assert wellness.training_stress_balance == pytest.approx(380.0 - 420.5)
+
+    def test_nested_device_data_label_takes_priority_over_top_level_guess(self):
+        training_status = {
+            "latestTrainingStatus": "SHOULD_NOT_WIN",
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "device-1": {"trainingStatusFeedbackPhrase": "SHOULD_WIN"}
+                }
+            },
+        }
+
+        wellness = _normalize_daily_wellness("2026-07-06", {}, {}, training_status, {}, {})
+
+        assert wellness.training_status_label == "SHOULD_WIN"
+
+    def test_training_stress_balance_none_when_acwr_data_missing(self):
+        training_status = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {"device-1": {"trainingStatusFeedbackPhrase": "X"}}
+            }
+        }
+
+        wellness = _normalize_daily_wellness("2026-07-06", {}, {}, training_status, {}, {})
+
+        assert wellness.acute_training_load is None
+        assert wellness.chronic_training_load is None
+        assert wellness.training_stress_balance is None
+        assert wellness.acute_chronic_workload_ratio is None
 
 
 class TestNormalizeVo2Max:
@@ -1121,6 +1187,35 @@ class TestGarminClientFetch:
         assert wellness.resting_hr == 48
         client._garmin.get_sleep_data.assert_called_once_with("2026-07-06")
         client._garmin.get_rhr_day.assert_called_once_with("2026-07-06")
+
+    def test_fetch_daily_wellness_extracts_training_load(self):
+        # Confirms the nested acuteTrainingLoadDTO extraction flows through the real client call,
+        # not just the normalize function directly -- no extra API call needed, same
+        # get_training_status response fetch_daily_wellness already makes.
+        client = make_client()
+        client._garmin.get_training_status.return_value = {
+            "mostRecentTrainingStatus": {
+                "latestTrainingStatusData": {
+                    "device-1": {
+                        "trainingStatusFeedbackPhrase": "MAINTAINING",
+                        "acuteTrainingLoadDTO": {
+                            "dailyTrainingLoadAcute": 300.0,
+                            "dailyTrainingLoadChronic": 320.0,
+                            "dailyAcuteChronicWorkloadRatio": 0.94,
+                        },
+                    }
+                }
+            }
+        }
+
+        wellness = client.fetch_daily_wellness("2026-07-06")
+
+        assert wellness.training_status_label == "MAINTAINING"
+        assert wellness.acute_training_load == 300.0
+        assert wellness.chronic_training_load == 320.0
+        assert wellness.training_stress_balance == pytest.approx(20.0)
+        assert wellness.acute_chronic_workload_ratio == 0.94
+        client._garmin.get_training_status.assert_called_once_with("2026-07-06")
 
     def test_fetch_daily_wellness_isolates_one_failing_endpoint(self):
         # The key behavior this milestone deliberately differs from fetch_training_baseline for:

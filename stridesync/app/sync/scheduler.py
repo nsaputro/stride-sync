@@ -181,12 +181,14 @@ def _upsert_daily_wellness(
             calendar_date, synced_at, sleep_score, sleep_duration_seconds, deep_sleep_seconds,
             light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
             hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
-            training_readiness_score, resting_hr
+            training_readiness_score, resting_hr, acute_training_load, chronic_training_load,
+            training_stress_balance, acute_chronic_workload_ratio
         ) VALUES (
             :calendar_date, :synced_at, :sleep_score, :sleep_duration_seconds,
             :deep_sleep_seconds, :light_sleep_seconds, :rem_sleep_seconds, :awake_sleep_seconds,
             :hrv_status, :hrv_weekly_avg_ms, :hrv_last_night_avg_ms, :training_status_label,
-            :training_readiness_score, :resting_hr
+            :training_readiness_score, :resting_hr, :acute_training_load,
+            :chronic_training_load, :training_stress_balance, :acute_chronic_workload_ratio
         )
         ON CONFLICT (calendar_date) DO UPDATE SET
             synced_at = excluded.synced_at,
@@ -201,7 +203,11 @@ def _upsert_daily_wellness(
             hrv_last_night_avg_ms = excluded.hrv_last_night_avg_ms,
             training_status_label = excluded.training_status_label,
             training_readiness_score = excluded.training_readiness_score,
-            resting_hr = excluded.resting_hr
+            resting_hr = excluded.resting_hr,
+            acute_training_load = excluded.acute_training_load,
+            chronic_training_load = excluded.chronic_training_load,
+            training_stress_balance = excluded.training_stress_balance,
+            acute_chronic_workload_ratio = excluded.acute_chronic_workload_ratio
         """,
         {**wellness.__dict__, "synced_at": synced_at},
     )

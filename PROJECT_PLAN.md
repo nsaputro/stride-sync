@@ -1150,6 +1150,44 @@ marathon, marathon) instead of relying on `recent_activities` or memory of past 
   race predictions / `vo2max_trend` where available.
 - ✅ Purely additive documentation — no application code changed, entirely optional to use.
 
+### Stage 26 — Real training load (CTL/ATL/TSB/ACWR) in `daily_wellness`, sourced from a Garmin-ecosystem review 🔄
+
+Requested directly, after reviewing another open-source Garmin Connect MCP server
+(`Taxuspt/garmin_mcp`, built on the same `python-garminconnect` library) for tools/data worth
+adding to StrideSync. Its training-load tool reads acute/chronic training load and ACWR from a
+nested path in `get_training_status`'s response — the same call `fetch_daily_wellness`
+already makes for `training_status_label`, so this is genuine new signal at no extra API cost.
+
+- ✅ **Confirmed (via cross-referencing that project's tested implementation, not yet against a
+  live account of this add-on's own)**: `get_training_status`'s `trainingStatusFeedbackPhrase`
+  and acute/chronic training load actually live nested under
+  `mostRecentTrainingStatus.latestTrainingStatusData.<device id>` (device id is a dynamic,
+  per-device key — "take the first value" is the only stable way to read it), not at or near the
+  top level as originally guessed. `_normalize_daily_wellness` now tries this nested path first
+  for `training_status_label`, falling back to the original top-level guesses only if it's empty
+  — existing tests built on the old guess still pass unchanged, since the fallback behavior is
+  identical to before.
+- ✅ Three new `daily_wellness` columns, all from that same nested device entry's
+  `acuteTrainingLoadDTO`: `acute_training_load` (`dailyTrainingLoadAcute`), `chronic_training_load`
+  (`dailyTrainingLoadChronic`), `acute_chronic_workload_ratio` (`dailyAcuteChronicWorkloadRatio`,
+  Garmin's own value, not computed locally). A fourth, `training_stress_balance`, **is** computed
+  locally (`chronic - acute`, the standard CTL−ATL "form" calculation) since Garmin doesn't
+  expose it directly.
+- ✅ Migration via `_add_column_if_missing` for the three new `daily_wellness` columns (an
+  already-shipped table) — new test confirms an older on-disk database gains them without losing
+  existing rows.
+- ✅ `daily_wellness` MCP tool docstring updated to mention the new fields; `daily_wellness`
+  query function's `SELECT` extended to include them.
+- ✅ New unit tests (nested-path extraction, nested-path-takes-priority-over-top-level-guess,
+  graceful `None` degradation when the nested structure or `acuteTrainingLoadDTO` is absent) plus
+  an integration-level `fetch_daily_wellness` test; full suite green (281 passed, up from 276).
+- ✅ Verified end-to-end with a real `fastmcp.Client` call against a seeded DB — confirmed all
+  four new fields round-trip correctly through the `daily_wellness` tool.
+- ⬜ **Still unconfirmed against a live account of this add-on's own** — flagged the same way
+  every other best-effort field mapping in this codebase is, pending a live-account check (or a
+  future Diagnostics-panel addition) the way `planned_workouts`'/`vo2max_history`'s guesses
+  eventually were.
+
 ---
 
 ## Getting Started (Development)
