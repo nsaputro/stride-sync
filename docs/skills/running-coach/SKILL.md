@@ -82,6 +82,26 @@ For 5K and 10K specifically:
 - Only as a last resort, with nothing else available (no PB, no VO2 max data, no baseline predictions), estimate from the established threshold work-rep pace using the general rule of thumb that 5K pace is ~20-25 sec/km faster than threshold pace and 10K ~10-15 sec/km faster. Treat this as a weak fallback, not a confident estimate: it assumes a runner with well-developed top-end speed/anaerobic capacity relative to their aerobic threshold, which doesn't hold for a runner whose training is dominated by aerobic volume (Base, Long Run, Threshold) with little dedicated speed/VO2max work — for that kind of runner, actual 5K/10K pace can end up much closer to threshold pace than the ratio suggests, since raw speed rather than aerobic fitness is the limiter. Always caveat clearly when using this fallback that it's a rough estimate that may not hold, and prompt the user to confirm against a real time trial or race result if they have one, rather than presenting it as reliable.
 - HR for both is generally high — 10K in upper Zone 4, 5K approaching Zone 5 — since both are shorter/harder efforts than threshold work.
 
+## Comparing race-distance performance over time (10K, half marathon, marathon)
+
+When the user asks how a recent race or effort compares to previous ones at the same distance ("how does this half compare to my last one", "am I getting faster at 10K", "is my marathon fitness actually improving") — use `search_activities` to find comparable prior efforts directly, instead of scanning `recent_activities` by eye or relying on memory of past numbers.
+
+- **Distance isn't exact** — GPS/course variance means a "10K" activity is rarely stored as exactly 10000m. Use a tolerance band on `min_distance_meters`/`max_distance_meters` rather than an exact match:
+  - 10K: `min_distance_meters=9800, max_distance_meters=10500`
+  - Half marathon: `min_distance_meters=20800, max_distance_meters=21500`
+  - Marathon: `min_distance_meters=41800, max_distance_meters=42500`
+- Add `activity_type="running"` to exclude cross-training that happens to land in the same distance band, and don't set `start_date` (or set it far back) so the search covers full history, not just a recent window. Raise `limit` above the default 20 for a runner with a long history of races at that distance.
+- Results come back newest-first. Treat the most recent match as the run in question (or use the specific `activity_id` if the user already named it from `recent_activities`), and the rest as the historical comparison set, oldest to newest.
+- **Not every distance-band match is actually a race** — a training run can land in the same band by coincidence. Use `activity_name` and `training_effect_label` to distinguish, and if it's genuinely ambiguous which entries were real races, ask the user rather than assuming.
+
+For the comparison itself:
+- Line up `average_pace_sec_per_km` (and `duration_seconds`) across the matched runs oldest to newest to show the actual trend — several data points, not just the two most recent.
+- Compare `average_hr` alongside pace: pace improving at a **lower or similar** HR is genuine fitness improvement; pace improving only because HR rose to match is a harder effort on the day, not more fitness.
+- For the run(s) worth a closer look (the most recent, and/or a standout result), pull `activity_laps` to compare pacing strategy (even split vs. positive/negative split) rather than only the whole-activity average. Unlike the structured-session lap segmentation under Step 2, a race is one continuous effort, so the full set of km splits is itself the meaningful unit — not work-rep vs. recovery segmentation.
+- Cross-reference `training_baseline`'s race predictions and/or `vo2max_trend` where available — a result meaningfully faster or slower than Garmin's own prediction for that distance is itself worth calling out.
+
+Report progression plainly, grounded in the actual numbers, e.g.: "Your last three half marathons: 1:42:30 (March), 1:39:15 (June), 1:36:48 (this one) — a real ~3-minute-per-race trend, and average HR was actually 4bpm lower this time than March, so this isn't just a harder effort, it's genuine fitness gain."
+
 ## Step 2: Drill into a specific activity only when relevant
 
 Only call these when the user asks about (or the analysis specifically requires) one particular run:

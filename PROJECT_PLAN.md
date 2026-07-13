@@ -1128,6 +1128,28 @@ a large `limit` and filtering client-side. Added a dedicated search tool instead
   DB with a running activity and a cycling activity — confirmed the type filter, distance filter,
   and date-range filter each returned exactly the expected activity.
 
+### Stage 25 — `running-coach` example skill: race-distance performance comparison via `search_activities` 🔄
+
+Requested directly, as a follow-up to Stage 24's new `search_activities` tool: a new
+"Comparing race-distance performance over time" section in `docs/skills/running-coach/SKILL.md`
+so the skill can find and compare a runner's history at a specific race distance (10K, half
+marathon, marathon) instead of relying on `recent_activities` or memory of past results.
+
+- ✅ New section covers: using `min_distance_meters`/`max_distance_meters` tolerance bands (not
+  an exact match, since GPS/course variance means a "10K" is rarely stored as exactly 10000m) for
+  each of the three race distances; combining with `activity_type="running"` and a wide/omitted
+  `start_date` to search full history; treating results as newest-first with the rest as the
+  oldest-to-newest comparison set; and explicitly flagging that a distance-band match isn't
+  necessarily a race (a training run can coincidentally land in the same band) — use
+  `activity_name`/`training_effect_label` to distinguish, or ask if ambiguous.
+- ✅ Comparison guidance: line up pace **and** HR together (pace improving at lower/similar HR is
+  real fitness gain; pace improving only because HR rose is a harder effort, not more fitness),
+  pull `activity_laps` for pacing-strategy detail on standout runs (a race is one continuous
+  effort, so the full km-split set is the meaningful unit — not the work-rep/recovery
+  segmentation Step 2 uses for structured sessions), and cross-reference `training_baseline`'s
+  race predictions / `vo2max_trend` where available.
+- ✅ Purely additive documentation — no application code changed, entirely optional to use.
+
 ---
 
 ## Getting Started (Development)
