@@ -15,6 +15,12 @@
   all given filters with AND, and behaves exactly like `recent_activities` with none set. Fills
   the gap where `recent_activities`' only lever was "most recent N," with no way to look up e.g.
   "runs over 20km in June" without pulling a large limit and filtering client-side.
+- **`running-coach` example skill: race-distance performance comparison** (milestone Stage 25,
+  `search_activities` follow-up): a new section for finding and comparing a runner's history at
+  a specific race distance (10K, half marathon, marathon) using distance-band searches, comparing
+  pace alongside HR to distinguish genuine fitness gains from harder efforts, and pulling
+  `activity_laps` for pacing-strategy detail on standout results. Purely additive documentation —
+  no application code changed.
 
 ## [0.4.1] - 2026-07-08
 
