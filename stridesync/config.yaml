@@ -2,7 +2,7 @@ name: "StrideSync"
 description: >-
   Syncs Garmin Connect running data and exposes it to Claude via MCP for
   conversational analysis — cadence, pace, heart-rate trends, training load.
-version: "0.4.1"
+version: "0.5.0"
 slug: "stridesync"
 init: false
 arch:
