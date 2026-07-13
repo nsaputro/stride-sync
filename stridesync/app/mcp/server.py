@@ -232,12 +232,17 @@ def get_training_baseline(conn: sqlite3.Connection) -> Dict[str, Any]:
 
 
 def get_daily_wellness(conn: sqlite3.Connection, days: int = 14) -> List[Dict[str, Any]]:
-    """Sleep/HRV/training-status/readiness/resting-HR for the last N calendar dates, oldest
-    first — see PROJECT_PLAN.md milestone v0.12. These are the earliest signals of
+    """Sleep/HRV/training-status/readiness/resting-HR/training-load for the last N calendar
+    dates, oldest first — see PROJECT_PLAN.md milestone v0.12. These are the earliest signals of
     overreaching, ahead of it ever showing up as declining pace or rising HR at the same effort
     in `pace_cadence_hr_trend`. Any field can be `None` for a given date — see
     `GarminClient.fetch_daily_wellness`'s docstring for why (not every endpoint/device/account
     reports every field).
+
+    `acute_training_load`/`chronic_training_load`/`training_stress_balance` (chronic - acute,
+    positive = fresher, negative = more fatigued) /`acute_chronic_workload_ratio` are Garmin's
+    own fitness/fatigue framework (see PROJECT_PLAN.md milestone Stage 26) — a complementary,
+    day-by-day view alongside `training_load_summary`'s window-aggregate numbers.
     """
     days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
     rows = conn.execute(
@@ -245,7 +250,8 @@ def get_daily_wellness(conn: sqlite3.Connection, days: int = 14) -> List[Dict[st
         SELECT calendar_date, sleep_score, sleep_duration_seconds, deep_sleep_seconds,
                light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
                hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
-               training_readiness_score, resting_hr
+               training_readiness_score, resting_hr, acute_training_load, chronic_training_load,
+               training_stress_balance, acute_chronic_workload_ratio
         FROM daily_wellness
         WHERE calendar_date >= date('now', '-' || ? || ' days')
         ORDER BY calendar_date ASC
@@ -496,10 +502,11 @@ def create_server(settings: Settings) -> FastMCP:
 
     @mcp.tool()
     def daily_wellness(days: int = 14) -> List[Dict[str, Any]]:
-        """Get sleep, HRV, Garmin's own training-status label and training-readiness score, and
-        resting HR for each of the last N calendar dates, oldest first. These are the earliest
-        signals of overreaching — check this before assuming declining pace or rising HR is
-        purely a fitness issue.
+        """Get sleep, HRV, Garmin's own training-status label and training-readiness score,
+        resting HR, and day-by-day training load (acute/chronic/training-stress-balance/ACWR)
+        for each of the last N calendar dates, oldest first. These are the earliest signals of
+        overreaching — check this before assuming declining pace or rising HR is purely a
+        fitness issue.
 
         Args:
             days: Number of days to look back (1-365, default 14).
