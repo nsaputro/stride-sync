@@ -6,7 +6,8 @@ for conversational analysis — cadence, pace, heart-rate trends, training load.
 Runs continuously on your Home Assistant server. No local-only setup, no client-side install
 step — connect any MCP client (e.g. Claude Desktop) to it over the network.
 
-**Read-only**: StrideSync never writes back to Garmin Connect.
+**Almost entirely read-only**: the one exception is a small, explicitly-confirmed gear-correction
+write surface (e.g. "this run was actually in my other shoes") — every other tool only reads.
 
 See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for architecture details, MCP connection instructions,
 and milestones. See [`CLAUDE.md`](CLAUDE.md) for repository conventions and local development

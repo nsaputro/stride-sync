@@ -23,12 +23,22 @@ already anticipated.
 LAN-only setup where the HA host's own network boundary is the protection. It stops being fine
 the moment this port is reached from outside the LAN (e.g. via a Cloudflare Tunnel public
 hostname, requested directly to let Claude on mobile reach it) — this endpoint serves personal
-Garmin health/activity data, and someone finding the URL shouldn't be able to just read it. If
+Garmin health/activity data (and, since milestone Stage 29, can modify a small piece of it —
+see below), and someone finding the URL shouldn't be able to just read or change it. If
 `mcp_auth_token` is set, every request must carry `Authorization: Bearer <token>` (checked by
 `SharedSecretVerifier` below, via `fastmcp`'s standard `TokenVerifier` mechanism) or get a 401 —
 confirmed against a real ASGI request/response cycle, not just unit-tested in isolation. Left
 optional (empty = disabled) rather than required, so existing LAN-only installs keep working
 without being forced to set one.
+
+**Write-back (milestone Stage 29)**: every tool in this server is a read-only SQLite query
+except three — `activity_gear`, `add_activity_gear`, `remove_activity_gear` — which hit Garmin's
+live API directly (via a fresh `GarminClient`, not the synced database) so a user can correct
+which shoe/gear is assigned to a run. `add_activity_gear`/`remove_activity_gear` are StrideSync's
+only tools that change data in the user's actual Garmin Connect account; their docstrings say so
+explicitly and instruct the calling model to only invoke them after a human has confirmed the
+specific correction — this server has no way to enforce that itself, so it's a documented
+contract with the MCP client, not a technical guarantee.
 """
 
 from __future__ import annotations
@@ -42,6 +52,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
 
 from app.config import Settings
+from app.sync.garmin_client import GarminClient
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +85,27 @@ def _connect_readonly(db_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+def _make_garmin_client(settings: Settings) -> GarminClient:
+    """Build a fresh, already-authenticated `GarminClient` for one live gear tool call — see
+    milestone Stage 29. Unlike every other tool in this server, `activity_gear`/
+    `add_activity_gear`/`remove_activity_gear` hit Garmin's live API directly rather than the
+    synced SQLite DB, since per-activity gear assignment is mutable Garmin state this add-on
+    otherwise never fetches or stores. A fresh client per call (rather than one shared across the
+    server's lifetime) mirrors `_connect_readonly`'s per-call-connection pattern; `login()` is
+    cheap when a cached session already exists (a local file read, no network — see
+    `GarminClient.login`'s docstring), so this doesn't add a network round trip to every call.
+
+    Raises:
+        GarminAuthError: if login fails (e.g. MFA required with no cached session — same
+            failure the sync scheduler already surfaces via `sync_log`).
+    """
+    client = GarminClient(
+        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+    )
+    client.login()
+    return client
 
 
 def _clamp(value: int, low: int, high: int) -> int:
@@ -600,6 +632,52 @@ def create_server(settings: Settings) -> FastMCP:
             return get_gear_mileage(conn)
         finally:
             conn.close()
+
+    @mcp.tool()
+    def activity_gear(activity_id: int) -> List[Dict[str, Any]]:
+        """Get gear (e.g. a shoe) currently assigned to one activity in Garmin Connect — a live
+        lookup against Garmin directly, not served from the synced database. Use this to check
+        what's currently assigned before suggesting or making a correction with
+        `add_activity_gear`/`remove_activity_gear`. Returns [] if no gear is assigned, or if the
+        lookup fails — not an error either way.
+
+        Args:
+            activity_id: The activity's id, from `recent_activities`/`search_activities`.
+        """
+        client = _make_garmin_client(settings)
+        return client.fetch_activity_gear(activity_id)
+
+    @mcp.tool()
+    def add_activity_gear(activity_id: int, gear_uuid: str) -> Dict[str, Any]:
+        """Assign one piece of gear (e.g. a shoe) to one activity in Garmin Connect — a REAL,
+        immediate write to the user's Garmin Connect account, unlike every other tool in this
+        server. Only call this after the user has explicitly confirmed this specific
+        activity/gear correction in the conversation — never as part of an automatic or bulk
+        pass over multiple activities without a confirmation for each one. Check `activity_gear`
+        first to see what's currently assigned, and use `gear_mileage` to look up the correct
+        `gear_uuid`.
+
+        Args:
+            activity_id: The activity's id, from `recent_activities`/`search_activities`.
+            gear_uuid: The gear item's id, from `gear_mileage`.
+        """
+        client = _make_garmin_client(settings)
+        client.add_activity_gear(activity_id, gear_uuid)
+        return {"status": "added", "activity_id": activity_id, "gear_uuid": gear_uuid}
+
+    @mcp.tool()
+    def remove_activity_gear(activity_id: int, gear_uuid: str) -> Dict[str, Any]:
+        """Unassign one piece of gear from one activity in Garmin Connect — a REAL, immediate
+        write to the user's Garmin Connect account, same caution as `add_activity_gear`: only
+        call after the user has explicitly confirmed this specific correction.
+
+        Args:
+            activity_id: The activity's id, from `recent_activities`/`search_activities`.
+            gear_uuid: The gear item's id, from `gear_mileage` or `activity_gear`.
+        """
+        client = _make_garmin_client(settings)
+        client.remove_activity_gear(activity_id, gear_uuid)
+        return {"status": "removed", "activity_id": activity_id, "gear_uuid": gear_uuid}
 
     @mcp.tool()
     def activity_hr_zones(activity_id: int) -> List[Dict[str, Any]]:

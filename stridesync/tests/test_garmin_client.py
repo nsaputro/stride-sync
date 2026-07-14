@@ -1662,6 +1662,79 @@ class TestGarminClientFetch:
         assert by_uuid["gear-1"].total_distance_meters == 100000.0
         assert by_uuid["gear-2"].total_distance_meters is None
 
+    def test_fetch_activity_gear_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_activity_gear.return_value = [
+            {"uuid": "gear-1", "displayName": "Nike Pegasus 40", "gearTypeName": "Shoes"}
+        ]
+
+        items = client.fetch_activity_gear(123)
+
+        assert items == [
+            {"gear_uuid": "gear-1", "display_name": "Nike Pegasus 40", "gear_type": "Shoes"}
+        ]
+        client._garmin.get_activity_gear.assert_called_once_with("123")
+
+    def test_fetch_activity_gear_handles_dict_wrapped_list(self):
+        client = make_client()
+        client._garmin.get_activity_gear.return_value = {
+            "gearList": [{"uuid": "gear-1", "displayName": "Nike Pegasus 40"}]
+        }
+
+        items = client.fetch_activity_gear(123)
+
+        assert items == [
+            {"gear_uuid": "gear-1", "display_name": "Nike Pegasus 40", "gear_type": None}
+        ]
+
+    def test_fetch_activity_gear_returns_empty_on_failure(self):
+        client = make_client()
+        client._garmin.get_activity_gear.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_activity_gear(123) == []
+
+    def test_fetch_activity_gear_returns_empty_for_unrecognized_shape(self):
+        client = make_client()
+        client._garmin.get_activity_gear.return_value = "not a list or dict"
+
+        assert client.fetch_activity_gear(123) == []
+
+    def test_fetch_activity_gear_skips_entries_without_a_uuid(self):
+        client = make_client()
+        client._garmin.get_activity_gear.return_value = [{"displayName": "No UUID"}]
+
+        assert client.fetch_activity_gear(123) == []
+
+    def test_add_activity_gear_calls_underlying_method(self):
+        client = make_client()
+
+        client.add_activity_gear(123, "gear-1")
+
+        client._garmin.add_gear_to_activity.assert_called_once_with("gear-1", "123")
+
+    def test_add_activity_gear_raises_garmin_api_error_on_failure(self):
+        client = make_client()
+        client._garmin.add_gear_to_activity.side_effect = GarminConnectConnectionError("boom")
+
+        with pytest.raises(GarminAPIError):
+            client.add_activity_gear(123, "gear-1")
+
+    def test_remove_activity_gear_calls_underlying_method(self):
+        client = make_client()
+
+        client.remove_activity_gear(123, "gear-1")
+
+        client._garmin.remove_gear_from_activity.assert_called_once_with("gear-1", "123")
+
+    def test_remove_activity_gear_raises_garmin_api_error_on_failure(self):
+        client = make_client()
+        client._garmin.remove_gear_from_activity.side_effect = GarminConnectConnectionError(
+            "boom"
+        )
+
+        with pytest.raises(GarminAPIError):
+            client.remove_activity_gear(123, "gear-1")
+
     def test_fetch_activity_hr_zones_returns_normalized_result(self):
         client = make_client()
         client._garmin.get_activity_hr_in_timezones.return_value = [

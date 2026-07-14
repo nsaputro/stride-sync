@@ -4,7 +4,8 @@ Syncs your Garmin Connect running activities into a local database and exposes t
 any MCP client) over the network — cadence, pace, heart-rate trends, training load — without
 opening a dashboard.
 
-**Read-only.** StrideSync never writes back to Garmin Connect.
+**Almost entirely read-only.** The one exception is a small, explicitly-confirmed gear-correction
+write tool (e.g. fixing which shoe a run was logged against) — every other tool only reads.
 
 ## Installation
 
@@ -154,12 +155,26 @@ make sure at least one sync has run first:
 - "My 10K race is in 6 weeks — what training paces should I be running now, and how should they
   change as race day gets closer?"
 
+**Correcting gear assignment**
+
+The only tools here that change anything in your actual Garmin Connect account — Claude will
+always propose the specific correction and wait for you to confirm before making it, never a
+bulk pass across multiple runs without confirming each one.
+
+- "Check my shoe mileage — which pairs am I close to retiring?"
+- "I switched to my racing flats for yesterday's tempo run but Garmin still shows my daily
+  trainers — can you fix that?"
+- "Look at my runs from this week and flag any where the shoe assignment looks wrong based on
+  the workout type, so I can review and confirm."
+
 **Sync health**
 - "Has my Garmin sync run recently, or is my data stale?"
 
-Claude answers these by calling StrideSync's MCP tools directly (recent activities, lap splits,
-pace/cadence/HR trend, training load, training baseline, HR zones, per-activity samples,
-last-sync status) — no need to open Garmin Connect or the StrideSync web UI yourself.
+Claude answers most of these by calling StrideSync's MCP tools directly (recent activities, lap
+splits, pace/cadence/HR trend, training load, training baseline, HR zones, per-activity samples,
+last-sync status, gear mileage) — no need to open Garmin Connect or the StrideSync web UI
+yourself. Gear correction is the one case where Claude reaches out to Garmin live, rather than
+answering purely from synced data.
 
 ### Want more structured coaching? Try a Claude Skill
 

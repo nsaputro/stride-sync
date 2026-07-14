@@ -25,6 +25,14 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   tool — cumulative distance/activity counts per tracked gear item (shoes, bikes, etc.), most-used
   first, for replacement-timing tracking. Returns `[]` for an account with no gear configured,
   not an error. A genuinely new running-specific capability, not present in any form before.
+- **Write-back gear correction** (milestone Stage 29): new `activity_gear` (read),
+  `add_activity_gear`, and `remove_activity_gear` (write) MCP tools, letting a user correct
+  which shoe/gear is assigned to a run directly in Garmin Connect. This is StrideSync's
+  **first-ever write-back to Garmin** — every prior tool only ever reads. The two write tools
+  require the calling model to have gotten explicit user confirmation for each specific
+  correction before calling them; StrideSync itself was, until now, entirely read-only, and that
+  claim throughout the repo's docs (`README.md`, `stridesync/DOCS.md`, `PROJECT_PLAN.md`) has
+  been updated to reflect the new, narrow exception.
 
 ## [0.5.0] - 2026-07-13
 
