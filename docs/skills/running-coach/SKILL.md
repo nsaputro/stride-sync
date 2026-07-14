@@ -11,11 +11,17 @@ Give feedback grounded in the user's actual Garmin data, not just general traini
 
 The user's upcoming race (name, date, target finish time/pace, and any tune-up races) is tracked in Claude's memory. Always use it to compute weeks-to-race and to judge whether current training load and long-run distances make sense for where they are in the training cycle (base/build/peak/taper). If memory doesn't have a race target, or it looks out of date (e.g. the date has already passed), ask the user rather than assuming.
 
+## Syncing fresh data before answering about a just-finished run
+
+StrideSync's scheduled sync runs on an interval (default every 6h), so a run finished minutes ago may not be in the database yet. When the user's question is specifically about a run that may have *just* happened — "how was my run today", "look at the run I just did", "what was my pace on that last run" asked shortly after finishing — call `sync_now` first, before `recent_activities`/`last_sync_status`, so the answer reflects that run rather than missing it entirely or reporting stale data. `sync_now` blocks until the sync finishes and returns the same shape as `last_sync_status`; check its `status` field the same way (a `"failed"` result means answer from whatever was already synced and say so, not silently retry).
+
+Don't call `sync_now` for every question — it's a real Garmin sync (slower than a plain read), not a cached lookup. Skip it for questions about trends, older activities, or training progress over time, where the existing periodic sync is already more than current enough; only reach for it when recency of a specific, likely-very-recent run is actually in question.
+
 ## Step 1: Always pull the broad picture first
 
 Every time this skill triggers, call these StrideSync tools to establish current status:
 
-1. `last_sync_status` — check this first. If the last sync failed or is stale, say so explicitly and note that any analysis is based on data as of that sync, rather than presenting it as fully current.
+1. `last_sync_status` — check this first (skip if `sync_now` was already called above — its return value is the same thing). If the last sync failed or is stale, say so explicitly and note that any analysis is based on data as of that sync, rather than presenting it as fully current.
 2. `training_baseline` — the athlete's current lactate threshold HR/pace and Garmin's own race-time predictions. This is the reference point for translating raw numbers (e.g. "avg HR 150") into effort levels (easy/threshold/hard).
 3. `recent_activities` — list of recent runs. Use a limit that comfortably covers the relevant window (e.g. last few weeks) for the question being asked. For progression questions (see below), pull enough to span several weeks — e.g. limit 40-60 rather than the default.
 4. `pace_cadence_hr_trend` — pace/cadence/HR across activities over a window (default 30 days, adjust `days` to match the question — e.g. widen it for "how has my training gone this cycle" questions).

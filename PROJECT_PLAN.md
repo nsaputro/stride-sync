@@ -1333,6 +1333,46 @@ docs since Stage 1 and is updated everywhere it was stated as an absolute, not j
   should just fail cleanly against Garmin's API, not corrupt anything), but still unverified
   against a real account end-to-end.
 
+### Stage 30 — On-demand sync: `sync_now` MCP tool + `running-coach` skill guidance 🔄
+
+Requested directly: the scheduled sync (default every 6h) means a run finished minutes ago might
+not be in the database yet when the user asks about it. Added a way for the MCP client to
+trigger a fresh sync on demand, so "how was my run today" can be answered accurately right after
+finishing rather than waiting for the next scheduled sync window.
+
+- ✅ New `run_sync_now(settings)` function (`app/mcp/server.py`) + `sync_now` MCP tool: builds a
+  fresh `GarminClient` (same pattern as the Stage 29 gear write-back tools' `_make_garmin_client`)
+  and calls `app.sync.scheduler.run_sync_once` directly, in-process — the exact same function the
+  sync-scheduler service's own timer loop calls, so the behavior (incremental fetch since the
+  last successful sync, same DB writes) is identical to a scheduled sync, just triggered
+  on-demand instead of waiting for the interval.
+- ✅ **The MCP server itself never opens a write connection to the sync DB** — `run_sync_once`
+  already opens and closes its own write connection internally (it's the one piece of code in
+  this codebase whose entire job is writing that database), so `sync_now` doesn't introduce a
+  new write path in `app/mcp/server.py`, only a new way to *trigger* the existing one. This keeps
+  the "MCP server's own DB connection is always read-only" invariant intact in spirit, even
+  though the server can now cause a write to happen via a different module's code.
+  `app/sync/scheduler.py` isn't otherwise changed — `run_sync_once` didn't need to know or care
+  that a caller other than its own `run_forever` loop might invoke it.
+- ✅ **Never raises, always returns a status**: `run_sync_now` catches
+  `GarminAuthError`/`GarminAPIError` from `run_sync_once` rather than letting them propagate as
+  an MCP tool error — `run_sync_once` already records a `'failed'` `sync_log` entry (with
+  `error_message`) before re-raising, so `run_sync_now` just reads that back via
+  `get_last_sync_status` and returns it, giving the caller a clear status either way from a
+  single tool call.
+- ✅ `docs/skills/running-coach/SKILL.md` updated: a new section before Step 1 instructing the
+  model to call `sync_now` before `recent_activities`/`last_sync_status` specifically when the
+  question is about a run that may have *just* finished — and explicitly *not* to call it for
+  trend/historical questions, since it's a real (slower) Garmin sync, not a cached lookup.
+- ✅ New unit tests: `run_sync_now`'s success and failure paths (via monkeypatching
+  `app.sync.scheduler.run_sync_once` itself, not `GarminClient` — `run_sync_now` never calls a
+  method on the client it constructs, `run_sync_once` is the only thing that does) plus an
+  MCP-tool-level test confirming the `sync_now` tool delegates to `run_sync_now` and returns its
+  result unchanged. Full suite green (317 passed, up from 314).
+- ✅ Verified end-to-end with a real `fastmcp.Client` call against a seeded DB (with
+  `run_sync_once` swapped for a fake in-process) — confirmed `sync_now` returns the expected
+  post-sync status shape.
+
 ---
 
 ## Getting Started (Development)

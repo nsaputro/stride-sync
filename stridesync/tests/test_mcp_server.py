@@ -26,8 +26,10 @@ from app.mcp.server import (
     get_training_load_summary,
     get_vo2max_trend,
     list_recent_activities,
+    run_sync_now,
 )
 from app.config import Settings
+from app.sync.garmin_client import GarminAPIError
 
 
 def make_settings(tmp_path) -> Settings:
@@ -575,6 +577,60 @@ class TestQueries:
             conn.close()
 
 
+class TestRunSyncNow:
+    """run_sync_now builds a real GarminClient but delegates the actual sync to
+    app.sync.scheduler.run_sync_once -- monkeypatching that (not GarminClient itself) is enough
+    to test this without a real Garmin login/network call, since run_sync_now never calls any
+    method on the client it constructs itself (run_sync_once is the only thing that does).
+    """
+
+    def test_returns_status_after_successful_sync(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        db.connect(settings.db_path).close()  # schema only
+
+        def fake_run_sync_once(settings_arg, client_arg):
+            conn = db.connect(settings_arg.db_path)
+            conn.execute(
+                """
+                INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
+                VALUES ('2026-07-14T00:00:00+00:00', '2026-07-14T00:00:05+00:00', 'success', 3, NULL)
+                """
+            )
+            conn.commit()
+            conn.close()
+            return 3
+
+        monkeypatch.setattr(mcp_server_module, "run_sync_once", fake_run_sync_once)
+
+        status = run_sync_now(settings)
+
+        assert status["status"] == "success"
+        assert status["activities_synced"] == 3
+
+    def test_returns_failed_status_without_raising(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        db.connect(settings.db_path).close()  # schema only
+
+        def fake_run_sync_once(settings_arg, client_arg):
+            conn = db.connect(settings_arg.db_path)
+            conn.execute(
+                """
+                INSERT INTO sync_log (started_at, finished_at, status, activities_synced, error_message)
+                VALUES ('2026-07-14T00:00:00+00:00', '2026-07-14T00:00:01+00:00', 'failed', 0, 'boom')
+                """
+            )
+            conn.commit()
+            conn.close()
+            raise GarminAPIError("boom")
+
+        monkeypatch.setattr(mcp_server_module, "run_sync_once", fake_run_sync_once)
+
+        status = run_sync_now(settings)  # must not raise -- see docstring
+
+        assert status["status"] == "failed"
+        assert status["error_message"] == "boom"
+
+
 class TestFindActivities:
     def test_no_filters_behaves_like_recent_activities(self, tmp_path):
         settings = make_settings(tmp_path)
@@ -740,6 +796,7 @@ class TestCreateServer:
             "activity_gear",
             "add_activity_gear",
             "remove_activity_gear",
+            "sync_now",
         }
 
     def test_tool_reads_from_configured_db(self, tmp_path):
@@ -826,6 +883,20 @@ class TestGearWriteTools:
 
         assert fake_client.remove_calls == [(1, "gear-1")]
         assert payload == {"status": "removed", "activity_id": 1, "gear_uuid": "gear-1"}
+
+
+class TestSyncNowTool:
+    def test_sync_now_tool_delegates_to_run_sync_now(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        fake_status = {"status": "success", "activities_synced": 5}
+        monkeypatch.setattr(mcp_server_module, "run_sync_now", lambda s: fake_status)
+        mcp = create_server(settings)
+
+        result = asyncio.run(mcp.call_tool("sync_now", {}))
+        payload = result.structured_content or result.data
+
+        assert payload == fake_status
 
 
 class TestHttpAuthEnforcement:

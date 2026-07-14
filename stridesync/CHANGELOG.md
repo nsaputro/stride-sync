@@ -27,6 +27,12 @@
   correction before calling them; StrideSync itself was, until now, entirely read-only, and that
   claim throughout the repo's docs (`README.md`, `stridesync/DOCS.md`, `PROJECT_PLAN.md`) has
   been updated to reflect the new, narrow exception.
+- **On-demand sync: `sync_now` MCP tool** (milestone Stage 30): triggers a fresh sync
+  immediately (the same `run_sync_once` the scheduled sync-scheduler service's timer calls) and
+  returns the resulting sync status, so a question about a run that may have just finished can be
+  answered accurately without waiting for the next scheduled sync window (default every 6h).
+  `docs/skills/running-coach/SKILL.md` updated with guidance on when to call it (a likely-just-
+  finished run) versus when not to (trend/historical questions, where it's unnecessary overhead).
 
 ## [0.5.0] - 2026-07-13
 
