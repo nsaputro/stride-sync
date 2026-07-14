@@ -22,10 +22,8 @@ setup.
 - **Automatic syncing** — polls Garmin Connect on a configurable interval (default every 6h) and
   writes activities, laps, HR-zone breakdowns, per-activity sample series, and training-load
   data to a local SQLite database in the add-on's `/data` volume.
-- **MCP server** (Streamable HTTP, port `8765`) exposing 8 tools to any MCP client — recent
-  activities, per-lap splits, pace/cadence/HR trend over N days, aggregate training load,
-  training baseline (lactate threshold, race predictions), per-activity HR zones, per-activity
-  time-series samples (pace/HR/cadence/elevation/temperature), and last-sync status.
+- **MCP server** (Streamable HTTP, port `8765`) exposing 18 tools to any MCP client — activities,
+  trends, recovery/wellness, training plan, gear, and sync — see [MCP Tools](#mcp-tools) below.
 - **Web UI** (Home Assistant sidebar panel, or standalone on port `8767`) with three tabs:
   - **Dashboard** (pictured above) — last-sync status, total activities/wellness/VO2-max/planned-
     workout records synced, a "Sync now" button, and your most recent activities.
@@ -37,6 +35,60 @@ setup.
   every scheduled sync afterward.
 - **Optional bearer-token auth** (`mcp_auth_token`) for the MCP server, so it's safe to expose
   beyond your LAN (e.g. through a Cloudflare Tunnel) without leaking personal health data.
+
+## MCP Tools
+
+Every tool below is read-only except the two marked ✍️, which write to your actual Garmin
+Connect account — StrideSync only ever calls those after you've confirmed the specific change in
+conversation.
+
+**Activities**
+
+| Tool | What it does |
+|---|---|
+| `recent_activities` | Most recent activities, newest first |
+| `search_activities` | Find activities by date range, type, and/or distance |
+| `activity_laps` | Per-lap splits for one activity |
+| `activity_hr_zones` | Time spent in each heart-rate zone for one activity |
+| `activity_samples` | Fine-grained pace/HR/cadence/elevation time series for one activity |
+
+**Trends & training load**
+
+| Tool | What it does |
+|---|---|
+| `pace_cadence_hr_trend` | Pace/cadence/HR across activities over the last N days |
+| `training_load_summary` | Aggregate training load and training effect over the last N days |
+| `training_baseline` | Lactate threshold HR/pace and Garmin's own race-time predictions |
+| `vo2max_trend` | VO2 max (running/cycling) and fitness age over the last N days |
+| `resting_hr_trend` | Resting heart rate over the last N days |
+
+**Recovery & wellness**
+
+| Tool | What it does |
+|---|---|
+| `daily_wellness` | Sleep, HRV, training status/readiness, day-by-day training load, Body Battery, stress, respiration, and resting HR, per calendar date |
+
+**Training plan**
+
+| Tool | What it does |
+|---|---|
+| `planned_vs_actual` | Planned workouts from an active Garmin Connect training plan vs. what was actually logged |
+
+**Gear**
+
+| Tool | What it does |
+|---|---|
+| `gear_mileage` | Cumulative distance/activity count per tracked gear item, most-used first |
+| `activity_gear` | Gear currently assigned to one activity |
+| `add_activity_gear` ✍️ | Assign a gear item to an activity |
+| `remove_activity_gear` ✍️ | Unassign a gear item from an activity |
+
+**Sync**
+
+| Tool | What it does |
+|---|---|
+| `last_sync_status` | Outcome of the most recent sync attempt |
+| `sync_now` | Trigger a fresh sync immediately and wait for it to finish |
 
 ## Why run this as a Home Assistant add-on?
 
