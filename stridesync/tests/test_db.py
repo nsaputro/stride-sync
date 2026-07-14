@@ -14,7 +14,7 @@ def test_connect_creates_schema(tmp_path):
         }
         assert {
             "activities", "activity_metrics", "sync_log", "daily_wellness", "vo2max_history",
-            "planned_workouts"
+            "planned_workouts", "gear"
         } <= tables
     finally:
         conn.close()

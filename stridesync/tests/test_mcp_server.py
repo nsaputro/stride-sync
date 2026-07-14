@@ -16,6 +16,7 @@ from app.mcp.server import (
     get_activity_laps,
     get_activity_samples,
     get_daily_wellness,
+    get_gear_mileage,
     get_last_sync_status,
     get_pace_cadence_hr_trend,
     get_planned_vs_actual,
@@ -196,6 +197,28 @@ def seed_db(db_path: str) -> None:
             ) VALUES (
                 'plan-1', date('now', '-100 days'), 'Old Plan Run', 'tempo', 8000.0, 2400.0,
                 300.0, 150, 165, datetime('now')
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO gear (
+                gear_uuid, synced_at, display_name, gear_type, gear_status, date_begin,
+                date_end, max_distance_meters, total_distance_meters, total_activities
+            ) VALUES (
+                'gear-1', datetime('now'), 'Nike Pegasus 40', 'Shoes', 'active', '2026-01-01',
+                NULL, 800000.0, 250000.0, 42
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO gear (
+                gear_uuid, synced_at, display_name, gear_type, gear_status, date_begin,
+                date_end, max_distance_meters, total_distance_meters, total_activities
+            ) VALUES (
+                'gear-2', datetime('now'), 'Retired Trainers', 'Shoes', 'retired', '2025-01-01',
+                '2025-12-01', 700000.0, 690000.0, 120
             )
             """
         )
@@ -476,6 +499,27 @@ class TestQueries:
         finally:
             conn.close()
 
+    def test_gear_mileage_orders_most_used_first(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        conn = db.connect(settings.db_path)
+        try:
+            rows = get_gear_mileage(conn)
+            assert [r["gear_uuid"] for r in rows] == ["gear-2", "gear-1"]
+            assert rows[0]["display_name"] == "Retired Trainers"
+            assert rows[0]["total_activities"] == 120
+        finally:
+            conn.close()
+
+    def test_gear_mileage_empty_table_returns_empty_list(self, tmp_path):
+        settings = make_settings(tmp_path)
+        db.connect(settings.db_path).close()  # schema only, no gear rows
+        conn = db.connect(settings.db_path)
+        try:
+            assert get_gear_mileage(conn) == []
+        finally:
+            conn.close()
+
     def test_get_activity_hr_zones(self, tmp_path):
         settings = make_settings(tmp_path)
         seed_db(settings.db_path)
@@ -691,6 +735,7 @@ class TestCreateServer:
             "resting_hr_trend",
             "vo2max_trend",
             "planned_vs_actual",
+            "gear_mileage",
         }
 
     def test_tool_reads_from_configured_db(self, tmp_path):

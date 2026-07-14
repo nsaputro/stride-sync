@@ -183,3 +183,21 @@ CREATE TABLE IF NOT EXISTS planned_workouts (
     synced_at                      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_planned_workouts_workout_date ON planned_workouts (workout_date);
+
+-- gear: tracked equipment (shoes, bikes, etc.) with cumulative usage — see PROJECT_PLAN.md
+-- milestone Stage 28. One row per gear item, keyed by Garmin's own gear_uuid and upserted like
+-- `activities` (a stable per-item id exists here, unlike `planned_workouts`) rather than
+-- delete-then-replace. A transient fetch failure or an account with no gear configured both
+-- leave/produce an empty table, not deleted rows — nothing is ever known to be stale here.
+CREATE TABLE IF NOT EXISTS gear (
+    gear_uuid              TEXT PRIMARY KEY,
+    synced_at              TEXT NOT NULL,
+    display_name           TEXT,
+    gear_type               TEXT,
+    gear_status              TEXT,
+    date_begin               TEXT,
+    date_end                 TEXT,
+    max_distance_meters      REAL,
+    total_distance_meters    REAL,
+    total_activities         INTEGER
+);

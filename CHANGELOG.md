@@ -21,6 +21,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   `respiration_waking_avg`/`respiration_sleep_avg` — three more independently-fetched recovery
   signals alongside the existing sleep/HRV/readiness/resting-HR fields. Body Battery's headline
   0-100 level isn't included yet; only `charged`/`drained` are confirmed field names.
+- **Shoe/gear mileage tracking** (milestone Stage 28): new `gear` table + `gear_mileage` MCP
+  tool — cumulative distance/activity counts per tracked gear item (shoes, bikes, etc.), most-used
+  first, for replacement-timing tracking. Returns `[]` for an account with no gear configured,
+  not an error. A genuinely new running-specific capability, not present in any form before.
 
 ## [0.5.0] - 2026-07-13
 

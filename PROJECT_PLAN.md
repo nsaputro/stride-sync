@@ -1223,6 +1223,45 @@ tested implementation, not yet confirmed against a live account of this add-on's
   new fields round-trip correctly through the `daily_wellness` tool.
 - ⬜ **Still unconfirmed against a live account of this add-on's own** — same caveat as Stage 26.
 
+### Stage 28 — Shoe/gear mileage tracking, third follow-up from the Garmin-ecosystem review 🔄
+
+Third and final follow-up from reviewing `Taxuspt/garmin_mcp` (Stage 26 was training load,
+Stage 27 was Body Battery/stress/respiration). A genuinely new, running-specific capability
+StrideSync had nothing like before: tracking a runner's shoe (or other gear) mileage for
+replacement timing, entirely absent from the schema until this stage.
+
+- ✅ New `GarminClient.fetch_gear()`: looks up `userProfileNumber` via `get_device_last_used()`
+  (nothing else in this client already has that value), calls `get_gear(profile_number)` for the
+  gear list, then `get_gear_stats(gear_uuid)` per item for cumulative distance/activity counts.
+  Field names sourced from `Taxuspt/garmin_mcp`'s tested implementation, same confidence level as
+  Stage 26/27 — not yet confirmed against a live account of this add-on's own.
+- ✅ Best-effort and non-fatal throughout, same reasoning as `fetch_training_baseline`: an
+  account with no gear configured, a failed device/gear-list lookup, and one item's stats call
+  failing (isolated from sibling items, same pattern as `fetch_planned_workouts`'s per-plan
+  isolation) all degrade gracefully rather than failing the sync.
+- ✅ New brand-new `gear` table, keyed by Garmin's own `gear_uuid` — unlike `planned_workouts`,
+  gear has a stable per-item id, so it's a singleton UPSERT (`_upsert_gear`, same shape as
+  `_upsert_activity`) rather than delete-then-replace. No migration needed (brand-new table,
+  `CREATE TABLE IF NOT EXISTS` is sufficient).
+- ✅ New `gear_mileage` MCP tool (`get_gear_mileage` query function): all tracked gear, most-used
+  first. Returns `[]` for an account with no gear configured, not an error — same contract as
+  `planned_vs_actual`.
+- ✅ Wired into both `run_sync_once` and `run_backfill_sync` — like `planned_workouts`, gear
+  isn't a historical concept (it's current equipment state), so both call `fetch_gear()` the same
+  way regardless of `start_date`; `gear_synced` count added to both entry points' `sync_log`
+  success/failure log lines alongside the existing four record-type counts.
+- ✅ New unit tests (`_normalize_gear_item` merging entry+stats and degrading gracefully,
+  `fetch_gear`'s full chain including device-lookup failure, no-profile-number, gear-list-fetch
+  failure, unrecognized response shape, missing-uuid entries skipped, and per-item stats-failure
+  isolation from siblings) plus scheduler-level write/upsert/backfill tests and an MCP
+  query-function test; full suite green (302 passed, up from 287).
+- ✅ Verified end-to-end with a real `fastmcp.Client` call against a seeded DB — confirmed
+  `gear_mileage` returns the expected fields.
+- ⬜ **Still unconfirmed against a live account of this add-on's own** — same caveat as Stage
+  26/27; the least-certain part is `userProfileNumber`'s lookup path
+  (`get_device_last_used().userProfileNumber`), since nothing else in this codebase has needed
+  that value before.
+
 ---
 
 ## Getting Started (Development)
