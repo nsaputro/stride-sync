@@ -84,10 +84,17 @@ them locally.
 - Runs as its own **s6 service** (`rootfs/etc/services.d/mcp-server/run`) on a **configurable
   port** (default `8765`), reading the sync scheduler's SQLite DB over a **read-only** connection
   (`sqlite3.connect("file:...?mode=ro", uri=True)`) — the MCP server must never be able to write
-  to the sync scheduler's database.
-- **Read-only**: exposes tools/resources for querying activities, trends, and summaries. No
-  write-back to Garmin is planned initially (see Milestones — a future write-back milestone would
-  need explicit user confirmation flows and is out of scope for Stage 19).
+  to the sync scheduler's *own* database (separate from the Garmin write-back below, which never
+  touches this SQLite file at all).
+- **Almost entirely read-only**: nearly every tool queries the synced SQLite DB (activities,
+  trends, summaries) and can never write to Garmin. **Since milestone Stage 29**, three tools —
+  `activity_gear`/`add_activity_gear`/`remove_activity_gear` — are the sole exception: they hit
+  Garmin's live API directly (a fresh `GarminClient`, not the DB) so a user can correct which
+  shoe/gear is assigned to a run. `add_activity_gear`/`remove_activity_gear` are the *only* calls
+  in this entire codebase that modify the user's actual Garmin Connect account; their docstrings
+  require the calling model to only invoke them after a human has explicitly confirmed the
+  specific correction — enforced as a documented contract with the MCP client, not something this
+  server can verify on its own.
 
 ### HA add-on configuration (`config.yaml` `options:` / `schema:`)
 
@@ -244,8 +251,10 @@ MFA case above, which fails *during* login).
 
 ## 2. MCP Connection
 
-StrideSync's MCP server is **read-only** — no write-back to Garmin Connect is planned for any
-milestone below. Point an MCP client at the add-on's Streamable HTTP endpoint:
+StrideSync's MCP server is **almost entirely read-only** — the sole exception, since milestone
+Stage 29, is a small gear-correction write surface (`add_activity_gear`/`remove_activity_gear`),
+gated on explicit per-correction user confirmation in the conversation. Point an MCP client at
+the add-on's Streamable HTTP endpoint:
 
 ```
 http://homeassistant.local:8765/mcp
@@ -1261,6 +1270,68 @@ replacement timing, entirely absent from the schema until this stage.
   26/27; the least-certain part is `userProfileNumber`'s lookup path
   (`get_device_last_used().userProfileNumber`), since nothing else in this codebase has needed
   that value before.
+
+### Stage 29 — Write-back gear correction: StrideSync's first-ever change to Garmin Connect 🔄
+
+Requested directly: the user changes shoes based on run type and often ends up needing to
+correct the gear Garmin auto-assigned. Asked for Claude to review recent runs, suggest
+corrections, and — once the user confirms — actually fix the assignment in Garmin Connect. This
+is a genuine architectural first: every prior design decision in this project (§1, §2, `README.md`,
+`DOCS.md`) held the line at **read-only, no write-back**. That line has been in this repo's own
+docs since Stage 1 and is updated everywhere it was stated as an absolute, not just noted here.
+
+- ✅ Confirmed Garmin's write API exists and is exactly what's needed, via direct introspection
+  of the installed `python-garminconnect`: `get_activity_gear(activity_id)` (read),
+  `add_gear_to_activity(gearUUID, activity_id)` / `remove_gear_from_activity(gearUUID,
+  activity_id)` (write).
+- ✅ Three new `GarminClient` methods: `fetch_activity_gear` (best-effort/non-fatal, same
+  reasoning as `fetch_activity_hr_zones` — degrades to `[]` on failure, returns lightweight dicts
+  since per-activity gear has no cumulative-stats fields to normalize into a full `GearItem`) and
+  `add_activity_gear`/`remove_activity_gear` (the opposite policy: **fail loud**, raising
+  `GarminAPIError` rather than swallowing a failure — a write must never be reported, or
+  silently treated, as having succeeded when it didn't).
+- ✅ Three new MCP tools — `activity_gear`, `add_activity_gear`, `remove_activity_gear` — the
+  first in this server to bypass the synced SQLite DB entirely and hit Garmin's live API via a
+  fresh `GarminClient` built from `Settings`' existing credentials, since per-activity gear
+  assignment is mutable Garmin state this add-on never syncs or stores. A fresh client per call
+  mirrors `_connect_readonly`'s per-call-connection pattern; `login()` is cheap when a cached
+  session exists (a local file read, no network).
+- ✅ **Confirmation is a documented contract with the calling model, not a technical
+  guarantee**: `add_activity_gear`/`remove_activity_gear`'s docstrings explicitly instruct the
+  model to only call them after the user has confirmed the specific correction in conversation —
+  never as an automatic/bulk pass over multiple activities. This server has no mechanism to
+  enforce that itself (an MCP tool call is just a function call); the safety boundary lives in
+  the docstring contract plus this session's own design discussion with the user before writing
+  any code, mirroring how every other risky-action guidance in this environment works.
+  `activity_gear` (read) is provided specifically so the correction workflow can check current
+  assignment before proposing anything.
+- ✅ Every prior "read-only, no write-back" claim in the repo's own docs updated to reflect this:
+  `PROJECT_PLAN.md` §1's MCP-server architecture bullet and §2's MCP Connection intro,
+  `README.md`, `stridesync/DOCS.md` (plus a new "Correcting gear assignment" example-prompts
+  section there), and the `DIAGNOSTIC_CHECKS` comment in `garmin_client.py` (which now
+  distinguishes "the Diagnostics panel itself stays read-only" from "this codebase as a whole").
+- ✅ Bearer-token auth module docstring (`app/mcp/server.py`) updated to note the port now
+  protects write access to the user's Garmin account, not just read access to personal data —
+  raises the stakes of ever exposing this port beyond the LAN without `mcp_auth_token` set.
+- ✅ New unit tests: `fetch_activity_gear` (happy path, dict-wrapped-list shape, failure
+  degrades to `[]`, unrecognized shape, missing-uuid entries skipped) and
+  `add_activity_gear`/`remove_activity_gear` (call the correct underlying method with correct
+  argument order, raise `GarminAPIError` on failure) at the `GarminClient` level; a fake-client
+  monkeypatch of `_make_garmin_client` at the MCP-tool level (avoids a real Garmin login/network
+  call in tests, same as every other test in this codebase) confirming each tool wires arguments
+  through correctly and returns the expected confirmation shape. Full suite green (314 passed,
+  up from 302).
+- ✅ Verified end-to-end with a real `fastmcp.Client` call against a seeded DB (with
+  `_make_garmin_client` swapped for a fake in-process) — confirmed all three tools round-trip
+  correctly, including that `add_activity_gear`/`remove_activity_gear` actually call through to
+  the fake client's write methods with the right arguments.
+- ⬜ **Still unconfirmed against a live account of this add-on's own** — same caveat as Stage
+  26/27/28; `get_activity_gear`'s response shape in particular has no example anywhere in the
+  wider Garmin Connect tooling ecosystem consulted so far (unlike `get_gear`'s, which Stage 28
+  already exercises), so this is the least-certain read in the new trio. The two write calls
+  themselves are lower-risk to get wrong in a *dangerous* way (a bad `gearUUID`/`activity_id`
+  should just fail cleanly against Garmin's API, not corrupt anything), but still unverified
+  against a real account end-to-end.
 
 ---
 

@@ -6,6 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from app import db
+from app.mcp import server as mcp_server_module
 from app.mcp.server import (
     SharedSecretVerifier,
     _clamp,
@@ -736,6 +737,9 @@ class TestCreateServer:
             "vo2max_trend",
             "planned_vs_actual",
             "gear_mileage",
+            "activity_gear",
+            "add_activity_gear",
+            "remove_activity_gear",
         }
 
     def test_tool_reads_from_configured_db(self, tmp_path):
@@ -747,6 +751,81 @@ class TestCreateServer:
         # FastMCP wraps tool results; unwrap to the structured content dict.
         payload = result.structured_content or result.data
         assert payload["status"] == "success"
+
+
+class _FakeGearGarminClient:
+    """Stand-in for GarminClient used by the gear write-tool tests below -- avoids a real login/
+    network call, and records calls so tests can assert the tool wired the right arguments
+    through."""
+
+    def __init__(self):
+        self.activity_gear_calls = []
+        self.add_calls = []
+        self.remove_calls = []
+        self._activity_gear_result = [{"gear_uuid": "gear-1", "display_name": "Old Shoe"}]
+
+    def fetch_activity_gear(self, activity_id):
+        self.activity_gear_calls.append(activity_id)
+        return self._activity_gear_result
+
+    def add_activity_gear(self, activity_id, gear_uuid):
+        self.add_calls.append((activity_id, gear_uuid))
+
+    def remove_activity_gear(self, activity_id, gear_uuid):
+        self.remove_calls.append((activity_id, gear_uuid))
+
+
+class TestGearWriteTools:
+    """These three tools hit Garmin's live API via a fresh GarminClient rather than the synced
+    DB (see PROJECT_PLAN.md milestone Stage 29) -- _make_garmin_client is monkeypatched here to
+    avoid a real network call/login, same as every other test in this file avoids needing a real
+    Garmin account.
+    """
+
+    def test_activity_gear_returns_client_result(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        fake_client = _FakeGearGarminClient()
+        monkeypatch.setattr(mcp_server_module, "_make_garmin_client", lambda s: fake_client)
+        mcp = create_server(settings)
+
+        result = asyncio.run(mcp.call_tool("activity_gear", {"activity_id": 1}))
+
+        # FastMCP wraps a bare-list tool result as {"result": [...]} in structured_content.
+        assert result.structured_content["result"] == [
+            {"gear_uuid": "gear-1", "display_name": "Old Shoe"}
+        ]
+        assert fake_client.activity_gear_calls == [1]
+
+    def test_add_activity_gear_calls_client_and_confirms(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        fake_client = _FakeGearGarminClient()
+        monkeypatch.setattr(mcp_server_module, "_make_garmin_client", lambda s: fake_client)
+        mcp = create_server(settings)
+
+        result = asyncio.run(
+            mcp.call_tool("add_activity_gear", {"activity_id": 1, "gear_uuid": "gear-2"})
+        )
+        payload = result.structured_content or result.data
+
+        assert fake_client.add_calls == [(1, "gear-2")]
+        assert payload == {"status": "added", "activity_id": 1, "gear_uuid": "gear-2"}
+
+    def test_remove_activity_gear_calls_client_and_confirms(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        fake_client = _FakeGearGarminClient()
+        monkeypatch.setattr(mcp_server_module, "_make_garmin_client", lambda s: fake_client)
+        mcp = create_server(settings)
+
+        result = asyncio.run(
+            mcp.call_tool("remove_activity_gear", {"activity_id": 1, "gear_uuid": "gear-1"})
+        )
+        payload = result.structured_content or result.data
+
+        assert fake_client.remove_calls == [(1, "gear-1")]
+        assert payload == {"status": "removed", "activity_id": 1, "gear_uuid": "gear-1"}
 
 
 class TestHttpAuthEnforcement:

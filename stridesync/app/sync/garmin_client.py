@@ -804,7 +804,10 @@ def _normalize_samples(activity_id: int, raw: Dict[str, Any]) -> List[ActivitySa
 # id -> human label, so the Settings tab's Diagnostics panel can build its dropdown straight from
 # this dict rather than duplicating the check list. Only ever calls known GET-shaped
 # python-garminconnect methods; never one of its write operations (schedule_workout,
-# upload_workout, etc.) -- StrideSync never writes back to Garmin (see CLAUDE.md/README).
+# upload_workout, add_gear_to_activity, etc.) -- the Diagnostics panel itself stays strictly
+# read-only even though this add-on's MCP server now exposes a small, explicitly-confirmed
+# write surface elsewhere (see PROJECT_PLAN.md milestone Stage 29,
+# GarminClient.add_activity_gear/remove_activity_gear).
 DIAGNOSTIC_CHECKS: Dict[str, str] = {
     "training_plans": "Training plans (get_training_plans)",
     "training_plan_detail": (
@@ -1320,6 +1323,88 @@ class GarminClient:
                 stats = {}
             items.append(_normalize_gear_item(entry, stats if isinstance(stats, dict) else {}))
         return items
+
+    def fetch_activity_gear(self, activity_id: int) -> List[Dict[str, Any]]:
+        """Fetch gear (e.g. shoes) currently assigned to one activity in Garmin Connect (see
+        PROJECT_PLAN.md milestone Stage 29) — a live lookup, not served from the synced
+        database, since per-activity gear assignment is mutable Garmin state this add-on
+        otherwise never fetches or stores.
+
+        Best-effort and non-fatal, same reasoning as `fetch_activity_hr_zones`: not every
+        activity has gear assigned, and a failure here shouldn't be treated as a hard error.
+        `get_activity_gear`'s response shape is unconfirmed (unlike `get_gear`'s, which
+        `fetch_gear` already exercises) — defended the same way, tolerating either a bare list
+        or a dict wrapping one, and returning lightweight dicts (not a full `GearItem`, since
+        the per-gear cumulative stats fields don't apply to a single-activity lookup) rather
+        than raising on an unrecognized shape.
+        """
+        try:
+            raw = self._garmin.get_activity_gear(str(activity_id))
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning(
+                "Could not fetch gear for activity %s (non-fatal): %s", activity_id, exc
+            )
+            return []
+        gear_list = (
+            raw
+            if isinstance(raw, list)
+            else _get(raw, "gearList", "gear")
+            if isinstance(raw, dict)
+            else None
+        )
+        if not isinstance(gear_list, list):
+            return []
+
+        items: List[Dict[str, Any]] = []
+        for entry in gear_list:
+            if not isinstance(entry, dict):
+                continue
+            gear_uuid = _get(entry, "uuid", "gearUuid", "gearPk")
+            if gear_uuid is None:
+                continue
+            items.append(
+                {
+                    "gear_uuid": str(gear_uuid),
+                    "display_name": _get(entry, "displayName", "customMakeModel"),
+                    "gear_type": _get(entry, "gearTypeName", "gearMakeName"),
+                }
+            )
+        return items
+
+    def add_activity_gear(self, activity_id: int, gear_uuid: str) -> None:
+        """Assign a gear item to an activity in Garmin Connect — see PROJECT_PLAN.md milestone
+        Stage 29. StrideSync's first-ever write-back to Garmin; every other method on this class
+        is read-only. Fails loud (raises `GarminAPIError`) rather than swallowing a failed write
+        the way this class's best-effort `fetch_*` methods do — a write must never be reported
+        (or silently treated) as having succeeded when it didn't.
+        """
+        try:
+            self._garmin.add_gear_to_activity(str(gear_uuid), str(activity_id))
+        except (GarminConnectConnectionError, GarminConnectTooManyRequestsError) as exc:
+            raise GarminAPIError(
+                f"Failed to add gear {gear_uuid} to activity {activity_id}: {exc}"
+            ) from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to add gear {gear_uuid} to activity "
+                f"{activity_id}: {describe_transport_error(exc)}"
+            ) from exc
+
+    def remove_activity_gear(self, activity_id: int, gear_uuid: str) -> None:
+        """Unassign a gear item from an activity in Garmin Connect — see `add_activity_gear`,
+        which this mirrors exactly (same fail-loud reasoning).
+        """
+        try:
+            self._garmin.remove_gear_from_activity(str(gear_uuid), str(activity_id))
+        except (GarminConnectConnectionError, GarminConnectTooManyRequestsError) as exc:
+            raise GarminAPIError(
+                f"Failed to remove gear {gear_uuid} from activity {activity_id}: {exc}"
+            ) from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to remove gear {gear_uuid} from activity "
+                f"{activity_id}: {describe_transport_error(exc)}"
+            ) from exc
 
     def fetch_diagnostic(self, check: str) -> Any:
         """Run one read-only raw Garmin Connect API call for troubleshooting, returning the
