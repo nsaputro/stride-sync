@@ -122,10 +122,13 @@ def seed_db(db_path: str) -> None:
                 light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
                 hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
                 training_readiness_score, resting_hr, acute_training_load, chronic_training_load,
-                training_stress_balance, acute_chronic_workload_ratio
+                training_stress_balance, acute_chronic_workload_ratio, body_battery_charged,
+                body_battery_drained, stress_avg, stress_max, respiration_waking_avg,
+                respiration_sleep_avg
             ) VALUES (
                 date('now', '-1 days'), datetime('now'), 82, 27000.0, 5400.0, 14400.0, 6300.0,
-                900.0, 'BALANCED', 55.0, 53.0, 'PRODUCTIVE', 78, 48, 420.5, 380.0, -40.5, 1.11
+                900.0, 'BALANCED', 55.0, 53.0, 'PRODUCTIVE', 78, 48, 420.5, 380.0, -40.5, 1.11,
+                45.0, 60.0, 32, 68, 15.5, 13.2
             )
             """
         )
@@ -136,10 +139,13 @@ def seed_db(db_path: str) -> None:
                 light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
                 hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
                 training_readiness_score, resting_hr, acute_training_load, chronic_training_load,
-                training_stress_balance, acute_chronic_workload_ratio
+                training_stress_balance, acute_chronic_workload_ratio, body_battery_charged,
+                body_battery_drained, stress_avg, stress_max, respiration_waking_avg,
+                respiration_sleep_avg
             ) VALUES (
                 date('now', '-100 days'), datetime('now'), 70, 24000.0, 4000.0, 13000.0, 5000.0,
-                1200.0, 'LOW', 40.0, 38.0, 'RECOVERY', 60, 52, 300.0, 320.0, 20.0, 0.94
+                1200.0, 'LOW', 40.0, 38.0, 'RECOVERY', 60, 52, 300.0, 320.0, 20.0, 0.94,
+                30.0, 55.0, 25, 50, 14.0, 12.0
             )
             """
         )
@@ -366,6 +372,12 @@ class TestQueries:
             assert wellness[0]["chronic_training_load"] == 380.0
             assert wellness[0]["training_stress_balance"] == -40.5
             assert wellness[0]["acute_chronic_workload_ratio"] == 1.11
+            assert wellness[0]["body_battery_charged"] == 45.0
+            assert wellness[0]["body_battery_drained"] == 60.0
+            assert wellness[0]["stress_avg"] == 32
+            assert wellness[0]["stress_max"] == 68
+            assert wellness[0]["respiration_waking_avg"] == 15.5
+            assert wellness[0]["respiration_sleep_avg"] == 13.2
         finally:
             conn.close()
 

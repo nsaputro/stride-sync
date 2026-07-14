@@ -182,13 +182,17 @@ def _upsert_daily_wellness(
             light_sleep_seconds, rem_sleep_seconds, awake_sleep_seconds, hrv_status,
             hrv_weekly_avg_ms, hrv_last_night_avg_ms, training_status_label,
             training_readiness_score, resting_hr, acute_training_load, chronic_training_load,
-            training_stress_balance, acute_chronic_workload_ratio
+            training_stress_balance, acute_chronic_workload_ratio, body_battery_charged,
+            body_battery_drained, stress_avg, stress_max, respiration_waking_avg,
+            respiration_sleep_avg
         ) VALUES (
             :calendar_date, :synced_at, :sleep_score, :sleep_duration_seconds,
             :deep_sleep_seconds, :light_sleep_seconds, :rem_sleep_seconds, :awake_sleep_seconds,
             :hrv_status, :hrv_weekly_avg_ms, :hrv_last_night_avg_ms, :training_status_label,
             :training_readiness_score, :resting_hr, :acute_training_load,
-            :chronic_training_load, :training_stress_balance, :acute_chronic_workload_ratio
+            :chronic_training_load, :training_stress_balance, :acute_chronic_workload_ratio,
+            :body_battery_charged, :body_battery_drained, :stress_avg, :stress_max,
+            :respiration_waking_avg, :respiration_sleep_avg
         )
         ON CONFLICT (calendar_date) DO UPDATE SET
             synced_at = excluded.synced_at,
@@ -207,7 +211,13 @@ def _upsert_daily_wellness(
             acute_training_load = excluded.acute_training_load,
             chronic_training_load = excluded.chronic_training_load,
             training_stress_balance = excluded.training_stress_balance,
-            acute_chronic_workload_ratio = excluded.acute_chronic_workload_ratio
+            acute_chronic_workload_ratio = excluded.acute_chronic_workload_ratio,
+            body_battery_charged = excluded.body_battery_charged,
+            body_battery_drained = excluded.body_battery_drained,
+            stress_avg = excluded.stress_avg,
+            stress_max = excluded.stress_max,
+            respiration_waking_avg = excluded.respiration_waking_avg,
+            respiration_sleep_avg = excluded.respiration_sleep_avg
         """,
         {**wellness.__dict__, "synced_at": synced_at},
     )

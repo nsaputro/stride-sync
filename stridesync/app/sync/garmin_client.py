@@ -210,6 +210,14 @@ class DailyWellness:
     PROJECT_PLAN.md) — no extra API call. `training_stress_balance` is derived locally
     (`chronic_training_load - acute_training_load`, the standard CTL-ATL "form" calculation);
     Garmin doesn't expose it directly, unlike the acute/chronic/ACWR fields.
+
+    `body_battery_charged`/`body_battery_drained`/`stress_avg`/`stress_max`/
+    `respiration_waking_avg`/`respiration_sleep_avg` (see Stage 27) are three more
+    independently-fetched best-effort sub-calls, same pattern as the original five. Body
+    Battery's per-day *level* (the headline 0-100 number Garmin's own app shows) isn't included —
+    only `charged`/`drained` are confirmed field names; the level appears to live in a
+    `bodyBatteryValuesArray` time series whose exact shape isn't confirmed, so it's deliberately
+    not guessed at yet.
     """
 
     calendar_date: str
@@ -229,6 +237,12 @@ class DailyWellness:
     chronic_training_load: Optional[float]
     training_stress_balance: Optional[float]
     acute_chronic_workload_ratio: Optional[float]
+    body_battery_charged: Optional[float]
+    body_battery_drained: Optional[float]
+    stress_avg: Optional[int]
+    stress_max: Optional[int]
+    respiration_waking_avg: Optional[float]
+    respiration_sleep_avg: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -382,6 +396,17 @@ def _training_status_device_data(training_status: Dict[str, Any]) -> Dict[str, A
     return next((v for v in latest_data.values() if isinstance(v, dict)), {})
 
 
+def _first_dict(raw: Any) -> Dict[str, Any]:
+    """`get_body_battery`'s per-day list, or any similarly-shaped response — return the first
+    dict-shaped element (the routine "successful response is a one-item list" shape, same as
+    `get_max_metrics` — see `_normalize_vo2max`'s docstring). A bare dict is returned as-is;
+    anything else degrades to `{}`.
+    """
+    if isinstance(raw, list):
+        return next((item for item in raw if isinstance(item, dict)), {})
+    return raw if isinstance(raw, dict) else {}
+
+
 def _normalize_daily_wellness(
     cdate: str,
     sleep: Any,
@@ -389,15 +414,18 @@ def _normalize_daily_wellness(
     training_status: Any,
     readiness: Any,
     resting_hr: Any,
+    body_battery: Any = None,
+    stress: Any = None,
+    respiration: Any = None,
 ) -> DailyWellness:
-    """Merge the five raw responses `GarminClient.fetch_daily_wellness` collects into one
+    """Merge the raw responses `GarminClient.fetch_daily_wellness` collects into one
     `DailyWellness` (see PROJECT_PLAN.md milestone v0.12).
 
     Field names below are inferred from the wider Garmin Connect tooling ecosystem for each of
-    five independently-fetched endpoints — not yet confirmed against a live account. `_get()`'s
+    the independently-fetched endpoints — not yet confirmed against a live account. `_get()`'s
     multi-candidate lookup means a wrong guess degrades a field to `None`, not a crash. Every
-    argument defaults to `{}` upstream when that particular sub-fetch failed or isn't supported
-    by this account/device — see `GarminClient.fetch_daily_wellness` for why each of the five is
+    argument defaults to `{}`/`None` upstream when that particular sub-fetch failed or isn't
+    supported by this account/device — see `GarminClient.fetch_daily_wellness` for why each is
     wrapped independently rather than sharing one try/except. A live account has been observed
     returning a list rather than a dict from at least one of these endpoints (see
     `_normalize_vo2max`'s docstring for the same issue confirmed on `get_max_metrics`) — every
@@ -415,10 +443,24 @@ def _normalize_daily_wellness(
     `acute_training_load`/`chronic_training_load`/`acute_chronic_workload_ratio` come from that
     same nested device entry's `acuteTrainingLoadDTO` — no extra API call beyond what
     `training_status_label` already needed.
+
+    `body_battery`/`stress`/`respiration` (see PROJECT_PLAN.md milestone Stage 27): field names
+    also sourced from `Taxuspt/garmin_mcp`'s tested implementation, same confidence level as the
+    training-status path above. `get_body_battery`'s response is a *list* of per-day entries
+    (unlike `stress`/`respiration`'s bare dicts, since it's the one sub-call in
+    `fetch_daily_wellness` whose underlying method takes a date *range* rather than a single
+    date) — `_first_dict()` unwraps that the same way `_normalize_vo2max` unwraps
+    `get_max_metrics`'s list. Body Battery's headline 0-100 *level* isn't extracted — only
+    `charged`/`drained` are confirmed field names; the level appears to live in a
+    `bodyBatteryValuesArray` time series whose exact shape isn't confirmed, so it's deliberately
+    not guessed at yet (see `DailyWellness`'s docstring).
     """
     sleep = sleep if isinstance(sleep, dict) else {}
     hrv = hrv if isinstance(hrv, dict) else {}
     training_status = training_status if isinstance(training_status, dict) else {}
+    stress = stress if isinstance(stress, dict) else {}
+    respiration = respiration if isinstance(respiration, dict) else {}
+    body_battery_entry = _first_dict(body_battery)
     daily_sleep_dto = sleep.get("dailySleepDTO") or {}
     sleep_scores = daily_sleep_dto.get("sleepScores") or {}
     overall_sleep_score = (sleep_scores.get("overall") or {}).get("value")
@@ -468,6 +510,12 @@ def _normalize_daily_wellness(
         resting_hr=_get(resting_hr, "restingHeartRate", "restingHR"),
         acute_training_load=acute_training_load,
         chronic_training_load=chronic_training_load,
+        body_battery_charged=_get(body_battery_entry, "charged"),
+        body_battery_drained=_get(body_battery_entry, "drained"),
+        stress_avg=_get(stress, "avgStressLevel"),
+        stress_max=_get(stress, "maxStressLevel"),
+        respiration_waking_avg=_get(respiration, "avgWakingRespirationValue"),
+        respiration_sleep_avg=_get(respiration, "avgSleepRespirationValue"),
         training_stress_balance=training_stress_balance,
         acute_chronic_workload_ratio=_get(acwr_data, "dailyAcuteChronicWorkloadRatio"),
     )
@@ -953,21 +1001,27 @@ class GarminClient:
         return _normalize_training_baseline(threshold, predictions)
 
     def fetch_daily_wellness(self, cdate: str) -> DailyWellness:
-        """Fetch sleep, HRV, training status, training readiness, and resting HR for one
-        calendar date (see PROJECT_PLAN.md milestone v0.12).
+        """Fetch sleep, HRV, training status (+ training load), training readiness, resting HR,
+        Body Battery, stress, and respiration for one calendar date (see PROJECT_PLAN.md
+        milestones v0.12 and Stage 27).
 
-        Unlike `fetch_training_baseline`, each of the five underlying calls is wrapped
-        *individually* rather than sharing one try/except: HRV, sleep-score, and
-        training-readiness support vary independently across Garmin device models, so one
-        failing endpoint (e.g. a non-HRV-capable watch) must not discard data that successfully
-        came back from the other four. Always returns a `DailyWellness` (never `None`) since
-        `calendar_date` is already known by the caller — any individual field that failed to
-        fetch is simply `None`. The final merge step is also wrapped: a live account has been
-        observed returning an unexpected shape from one of these endpoints (see
-        `_normalize_vo2max`'s docstring for the confirmed `get_max_metrics` case), so any
+        Unlike `fetch_training_baseline`, each of the eight underlying calls is wrapped
+        *individually* rather than sharing one try/except: HRV, sleep-score, training-readiness,
+        Body Battery, stress, and respiration support all vary independently across Garmin
+        device models, so one failing endpoint (e.g. a non-HRV-capable watch) must not discard
+        data that successfully came back from the others. Always returns a `DailyWellness`
+        (never `None`) since `calendar_date` is already known by the caller — any individual
+        field that failed to fetch is simply `None`. The final merge step is also wrapped: a
+        live account has been observed returning an unexpected shape from one of these endpoints
+        (see `_normalize_vo2max`'s docstring for the confirmed `get_max_metrics` case), so any
         unforeseen normalization failure degrades to an all-`None` `DailyWellness` rather than
         crashing the sync — this was a real bug (an unguarded merge call let one bad response
         crash the whole `run_sync_once`, bypassing its `sync_log` failure recording entirely).
+
+        `get_body_battery` is the one sub-call here whose underlying `python-garminconnect`
+        method takes a date *range* (`startdate`, `enddate`), not a single date — called with
+        `cdate` as both bounds to get just this one day's entry, same effect as every other
+        sub-call here.
         """
         sleep = self._safe_wellness_call(
             "sleep data", cdate, lambda: self._garmin.get_sleep_data(cdate)
@@ -984,6 +1038,15 @@ class GarminClient:
         resting_hr = self._safe_wellness_call(
             "resting HR", cdate, lambda: self._garmin.get_rhr_day(cdate)
         )
+        body_battery = self._safe_wellness_call(
+            "Body Battery", cdate, lambda: self._garmin.get_body_battery(cdate, cdate)
+        )
+        stress = self._safe_wellness_call(
+            "stress data", cdate, lambda: self._garmin.get_stress_data(cdate)
+        )
+        respiration = self._safe_wellness_call(
+            "respiration data", cdate, lambda: self._garmin.get_respiration_data(cdate)
+        )
         try:
             return _normalize_daily_wellness(
                 cdate,
@@ -992,6 +1055,9 @@ class GarminClient:
                 training_status or {},
                 readiness or {},
                 resting_hr or {},
+                body_battery,
+                stress or {},
+                respiration or {},
             )
         except Exception as exc:  # noqa: BLE001 - see docstring: must never crash the sync
             logger.warning(
@@ -1015,12 +1081,17 @@ class GarminClient:
                 chronic_training_load=None,
                 training_stress_balance=None,
                 acute_chronic_workload_ratio=None,
+                body_battery_charged=None,
+                body_battery_drained=None,
+                stress_avg=None,
+                stress_max=None,
+                respiration_waking_avg=None,
+                respiration_sleep_avg=None,
             )
 
     def _safe_wellness_call(self, label: str, cdate: str, fn: Callable[[], Any]) -> Any:
-        """Run one of `fetch_daily_wellness`'s five sub-fetches, logging + swallowing any
-        failure so the other four aren't affected. Shared instead of duplicating the same
-        try/except five times.
+        """Run one of `fetch_daily_wellness`'s sub-fetches, logging + swallowing any failure so
+        the others aren't affected. Shared instead of duplicating the same try/except each time.
         """
         try:
             return fn()
