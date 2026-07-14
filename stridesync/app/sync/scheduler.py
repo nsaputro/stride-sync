@@ -26,6 +26,7 @@ from app.sync.garmin_client import (
     GarminAuthError,
     GarminClient,
     GarminLap,
+    GearItem,
     HrZoneTime,
     PlannedWorkout,
     TrainingBaseline,
@@ -300,6 +301,34 @@ def _replace_planned_workouts(
     )
 
 
+def _upsert_gear(conn: sqlite3.Connection, item: GearItem, synced_at: str) -> None:
+    """Singleton UPSERT keyed by `gear_uuid` — unlike `planned_workouts`, gear has a stable
+    Garmin-assigned id, so this follows `_upsert_activity`'s shape rather than
+    delete-then-replace."""
+    conn.execute(
+        """
+        INSERT INTO gear (
+            gear_uuid, synced_at, display_name, gear_type, gear_status, date_begin, date_end,
+            max_distance_meters, total_distance_meters, total_activities
+        ) VALUES (
+            :gear_uuid, :synced_at, :display_name, :gear_type, :gear_status, :date_begin,
+            :date_end, :max_distance_meters, :total_distance_meters, :total_activities
+        )
+        ON CONFLICT (gear_uuid) DO UPDATE SET
+            synced_at = excluded.synced_at,
+            display_name = excluded.display_name,
+            gear_type = excluded.gear_type,
+            gear_status = excluded.gear_status,
+            date_begin = excluded.date_begin,
+            date_end = excluded.date_end,
+            max_distance_meters = excluded.max_distance_meters,
+            total_distance_meters = excluded.total_distance_meters,
+            total_activities = excluded.total_activities
+        """,
+        {**item.__dict__, "synced_at": synced_at},
+    )
+
+
 def _sync_activities(
     conn: sqlite3.Connection,
     client: GarminClient,
@@ -310,7 +339,7 @@ def _sync_activities(
     shared by `run_sync_once` and `run_backfill_sync`, which only differ in which date range the
     activity list itself was fetched for (since the last successful sync vs. an explicit
     caller-given start date) and whether `training_baseline`/`daily_wellness`/`vo2max_history`/
-    `planned_workouts` get refreshed.
+    `planned_workouts`/`gear` get refreshed.
 
     A generator (yields once per completed activity) rather than returning a final count, so a
     caller iterating it still knows how many completed even if a later activity's fetch raises
@@ -363,9 +392,9 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
 
     Records the outcome in `sync_log` regardless of success or failure (CLAUDE.md: "Fail loud,
     not silent" — a broken sync must never leave the database looking current without a trace).
-    Every record type's count (activities, daily_wellness, vo2max_history, planned_workouts) is
-    logged on both the success and failure path, so an add-on log line alone is enough to confirm
-    what actually got synced without needing to query the database directly.
+    Every record type's count (activities, daily_wellness, vo2max_history, planned_workouts,
+    gear) is logged on both the success and failure path, so an add-on log line alone is enough
+    to confirm what actually got synced without needing to query the database directly.
 
     Returns:
         Number of activities synced.
@@ -380,6 +409,7 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
     wellness_synced = 0
     vo2max_synced = 0
     planned_workouts_synced = 0
+    gear_synced = 0
 
     try:
         client.login()
@@ -407,6 +437,11 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
         _replace_planned_workouts(conn, planned_workout_dates, planned_workouts, synced_at)
         planned_workouts_synced = len(planned_workouts)
 
+        gear_items = client.fetch_gear()
+        for item in gear_items:
+            _upsert_gear(conn, item, synced_at)
+        gear_synced = len(gear_items)
+
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
         conn.commit()
@@ -421,12 +456,13 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
         conn.commit()
         logger.error(
             "StrideSync sync failed: %s (partial progress before failure: %d activities, "
-            "%d wellness records, %d vo2max records, %d planned workouts)",
+            "%d wellness records, %d vo2max records, %d planned workouts, %d gear items)",
             exc,
             activities_synced,
             wellness_synced,
             vo2max_synced,
             planned_workouts_synced,
+            gear_synced,
         )
         raise
     else:
@@ -440,11 +476,12 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
         conn.commit()
         logger.info(
             "StrideSync sync succeeded: %d activities, %d wellness records, %d vo2max records, "
-            "%d planned workouts",
+            "%d planned workouts, %d gear items",
             activities_synced,
             wellness_synced,
             vo2max_synced,
             planned_workouts_synced,
+            gear_synced,
         )
     finally:
         conn.close()
@@ -465,17 +502,18 @@ def run_backfill_sync(
     successful sync" range (see milestone v0.13), and so can cover far more activities in one
     call.
 
-    Also refreshes `training_baseline`, `daily_wellness`, `vo2max_history`, and
-    `planned_workouts` — same as `run_sync_once`, just anchored to `start_date` instead of "since
-    the last successful sync" (see milestone v0.14): `daily_wellness`/`vo2max_history` are
-    fetched for every date from `start_date` through today (not `run_sync_once`'s fixed
+    Also refreshes `training_baseline`, `daily_wellness`, `vo2max_history`, `planned_workouts`,
+    and `gear` — same as `run_sync_once`, just anchored to `start_date` instead of "since the
+    last successful sync" (see milestone v0.14): `daily_wellness`/`vo2max_history` are fetched
+    for every date from `start_date` through today (not `run_sync_once`'s fixed
     `_WELLNESS_WINDOW_DAYS`-day rolling window), since backfilling a wide historical range is the
-    entire point of this entry point. `planned_workouts` isn't itself a historical concept (it's
-    a forward-looking training plan), so it still uses the same fixed
-    `[-_PLANNED_WORKOUT_LOOKBACK_DAYS, +_PLANNED_WORKOUT_LOOKAHEAD_DAYS]`-from-today window as
-    `run_sync_once`, regardless of `start_date`. A wide date range means many extra Garmin API
-    calls beyond the activities themselves (5 wellness/vo2max calls per day in range) — expect a
-    multi-year backfill to take noticeably longer than before this milestone.
+    entire point of this entry point. `planned_workouts` and `gear` aren't historical concepts
+    (a forward-looking training plan and current equipment state, respectively), so both still
+    use the same fixed current-state fetch as `run_sync_once` — `planned_workouts` its
+    `[-_PLANNED_WORKOUT_LOOKBACK_DAYS, +_PLANNED_WORKOUT_LOOKAHEAD_DAYS]`-from-today window,
+    `gear` a plain `fetch_gear()` call — regardless of `start_date`. A wide date range means many
+    extra Garmin API calls beyond the activities themselves (5 wellness/vo2max calls per day in
+    range) — expect a multi-year backfill to take noticeably longer than before this milestone.
 
     Args:
         progress_callback: If given, called as `progress_callback(completed, total)` — once
@@ -504,6 +542,7 @@ def run_backfill_sync(
     wellness_synced = 0
     vo2max_synced = 0
     planned_workouts_synced = 0
+    gear_synced = 0
 
     try:
         client.login()
@@ -537,6 +576,11 @@ def run_backfill_sync(
         _replace_planned_workouts(conn, planned_workout_dates, planned_workouts, synced_at)
         planned_workouts_synced = len(planned_workouts)
 
+        gear_items = client.fetch_gear()
+        for item in gear_items:
+            _upsert_gear(conn, item, synced_at)
+        gear_synced = len(gear_items)
+
         for _ in _sync_activities(conn, client, activities, synced_at):
             activities_synced += 1
             if progress_callback:
@@ -558,13 +602,15 @@ def run_backfill_sync(
         conn.commit()
         logger.error(
             "StrideSync backfill since %s failed: %s (partial progress before failure: "
-            "%d activities, %d wellness records, %d vo2max records, %d planned workouts)",
+            "%d activities, %d wellness records, %d vo2max records, %d planned workouts, "
+            "%d gear items)",
             start_date,
             exc,
             activities_synced,
             wellness_synced,
             vo2max_synced,
             planned_workouts_synced,
+            gear_synced,
         )
         raise
     else:
@@ -578,12 +624,13 @@ def run_backfill_sync(
         conn.commit()
         logger.info(
             "StrideSync backfill since %s succeeded: %d activities, %d wellness records, "
-            "%d vo2max records, %d planned workouts",
+            "%d vo2max records, %d planned workouts, %d gear items",
             start_date,
             activities_synced,
             wellness_synced,
             vo2max_synced,
             planned_workouts_synced,
+            gear_synced,
         )
     finally:
         conn.close()

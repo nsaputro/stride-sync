@@ -333,6 +333,23 @@ def get_planned_vs_actual(conn: sqlite3.Connection, days: int = 14) -> List[Dict
     return [dict(row) for row in rows]
 
 
+def get_gear_mileage(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
+    """All tracked gear (shoes, bikes, etc.) with cumulative distance/activity counts, most-used
+    first — see PROJECT_PLAN.md milestone Stage 28. Useful for shoe-rotation/replacement
+    tracking (e.g. flagging a pair approaching its `max_distance_meters`, if the account has one
+    set). Empty list if this account has no gear configured, not an error.
+    """
+    rows = conn.execute(
+        """
+        SELECT gear_uuid, display_name, gear_type, gear_status, date_begin, date_end,
+               max_distance_meters, total_distance_meters, total_activities
+        FROM gear
+        ORDER BY total_distance_meters DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_activity_hr_zones(conn: sqlite3.Connection, activity_id: int) -> List[Dict[str, Any]]:
     """Seconds spent in each heart-rate zone for one activity — the actual effort distribution
     of a run (e.g. 80% Zone 2, 20% Zone 4), not just its single average HR number."""
@@ -569,6 +586,18 @@ def create_server(settings: Settings) -> FastMCP:
         conn = _connect_readonly(settings.db_path)
         try:
             return get_planned_vs_actual(conn, days)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def gear_mileage() -> List[Dict[str, Any]]:
+        """Get all tracked gear (shoes, bikes, etc.) with cumulative distance/activity counts,
+        most-used first. Useful for shoe-rotation/replacement tracking. Returns [] if this
+        account has no gear configured — that's expected, not an error.
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return get_gear_mileage(conn)
         finally:
             conn.close()
 

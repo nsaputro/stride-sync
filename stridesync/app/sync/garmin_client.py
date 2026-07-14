@@ -278,6 +278,26 @@ class PlannedWorkout:
     planned_target_hr_high: Optional[int]
 
 
+@dataclass(frozen=True)
+class GearItem:
+    """One piece of tracked gear (shoes, bikes, etc.) with cumulative usage — see
+    PROJECT_PLAN.md milestone Stage 28 and the `gear` table. Third follow-up from reviewing
+    `Taxuspt/garmin_mcp` (Stage 26/27 were the first two). Field names sourced from that
+    project's tested implementation — not yet confirmed against a live account of this add-on's
+    own. `gear_uuid` is Garmin's own stable per-item identifier, unlike `PlannedWorkout`.
+    """
+
+    gear_uuid: str
+    display_name: Optional[str]
+    gear_type: Optional[str]
+    gear_status: Optional[str]
+    date_begin: Optional[str]
+    date_end: Optional[str]
+    max_distance_meters: Optional[float]
+    total_distance_meters: Optional[float]
+    total_activities: Optional[int]
+
+
 def _pace_sec_per_km(speed_mps: Optional[float]) -> Optional[float]:
     """Convert average speed (m/s) to pace (seconds per km). None if speed is missing/zero."""
     if not speed_mps:
@@ -664,6 +684,27 @@ def _normalize_planned_workouts(
             )
         )
     return result, covered_dates
+
+
+def _normalize_gear_item(entry: Dict[str, Any], stats: Dict[str, Any]) -> GearItem:
+    """Convert one `Client.get_gear()` list entry plus its matching `Client.get_gear_stats()`
+    response into a `GearItem` (see PROJECT_PLAN.md milestone Stage 28).
+
+    Field names sourced from `Taxuspt/garmin_mcp`'s tested implementation, same confidence level
+    as Stage 26/27's field mappings — not yet confirmed against a live account of this add-on's
+    own. `_get()`'s multi-candidate lookup means a wrong guess degrades a field to `None`.
+    """
+    return GearItem(
+        gear_uuid=str(_get(entry, "uuid", "gearUuid", "gearPk")),
+        display_name=_get(entry, "displayName", "customMakeModel"),
+        gear_type=_get(entry, "gearTypeName", "gearMakeName"),
+        gear_status=_get(entry, "gearStatusName"),
+        date_begin=_get(entry, "dateBegin"),
+        date_end=_get(entry, "dateEnd"),
+        max_distance_meters=_get(entry, "maximumMeters"),
+        total_distance_meters=_get(stats, "totalDistance"),
+        total_activities=_get(stats, "totalActivities"),
+    )
 
 
 def _normalize_hr_zones(activity_id: int, raw: Any) -> List[HrZoneTime]:
@@ -1218,6 +1259,67 @@ class GarminClient:
             workouts.extend(plan_workouts)
             covered_dates |= plan_covered_dates
         return workouts, covered_dates
+
+    def fetch_gear(self) -> List[GearItem]:
+        """Fetch all tracked gear (shoes, bikes, etc.) with cumulative distance/activity counts
+        (see PROJECT_PLAN.md milestone Stage 28) — third follow-up from reviewing
+        `Taxuspt/garmin_mcp` (Stage 26/27 were the first two).
+
+        Best-effort and non-fatal throughout, same reasoning as `fetch_training_baseline`: many
+        accounts have no gear configured at all, and that must never fail the sync. Unlike
+        `get_gear()`'s own signature, this method takes no `userProfileNumber` argument — nothing
+        else in this client already has that value, so it's looked up first via
+        `get_device_last_used()`'s `userProfileNumber` field (confirmed via `Taxuspt/garmin_mcp`'s
+        tested implementation, same confidence level as every other Stage 26-28 field mapping).
+
+        Each item's `get_gear_stats()` call is wrapped individually — like
+        `fetch_planned_workouts`'s per-plan isolation — so one item's stats failing doesn't
+        discard sibling items. (`get_gear_stats` already treats a 404, e.g. retired/removed gear,
+        as `{}` internally rather than raising — this wrapper only needs to catch genuine
+        transport/auth failures.)
+        """
+        try:
+            device = self._garmin.get_device_last_used()
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning(
+                "Could not fetch device-last-used for gear lookup (non-fatal): %s", exc
+            )
+            return []
+        profile_number = _get(device if isinstance(device, dict) else {}, "userProfileNumber")
+        if profile_number is None:
+            return []
+
+        try:
+            raw_gear = self._garmin.get_gear(str(profile_number))
+        except Exception as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+            logger.warning("Could not fetch gear list (non-fatal): %s", exc)
+            return []
+        gear_list = (
+            raw_gear
+            if isinstance(raw_gear, list)
+            else _get(raw_gear, "gearList", "gear")
+            if isinstance(raw_gear, dict)
+            else None
+        )
+        if not isinstance(gear_list, list):
+            return []
+
+        items: List[GearItem] = []
+        for entry in gear_list:
+            if not isinstance(entry, dict):
+                continue
+            gear_uuid = _get(entry, "uuid", "gearUuid", "gearPk")
+            if gear_uuid is None:
+                continue
+            try:
+                stats = self._garmin.get_gear_stats(str(gear_uuid)) or {}
+            except Exception as exc:  # noqa: BLE001 - isolate one item's failure from siblings
+                logger.warning(
+                    "Could not fetch gear stats for %s (non-fatal): %s", gear_uuid, exc
+                )
+                stats = {}
+            items.append(_normalize_gear_item(entry, stats if isinstance(stats, dict) else {}))
+        return items
 
     def fetch_diagnostic(self, check: str) -> Any:
         """Run one read-only raw Garmin Connect API call for troubleshooting, returning the

@@ -16,6 +16,7 @@ from app.sync.garmin_client import (
     _iso_date_range,
     _normalize_activity,
     _normalize_daily_wellness,
+    _normalize_gear_item,
     _normalize_hr_zones,
     _normalize_lap,
     _normalize_planned_workouts,
@@ -849,6 +850,50 @@ class TestNormalizePlannedWorkouts:
         assert "2026-07-07" not in covered_dates
 
 
+class TestNormalizeGearItem:
+    def test_merges_entry_and_stats(self):
+        entry = {
+            "uuid": "gear-1",
+            "displayName": "Nike Pegasus 40",
+            "gearTypeName": "Shoes",
+            "gearStatusName": "active",
+            "dateBegin": "2026-01-01",
+            "dateEnd": None,
+            "maximumMeters": 800000.0,
+        }
+        stats = {"totalDistance": 250000.0, "totalActivities": 42}
+
+        item = _normalize_gear_item(entry, stats)
+
+        assert item.gear_uuid == "gear-1"
+        assert item.display_name == "Nike Pegasus 40"
+        assert item.gear_type == "Shoes"
+        assert item.gear_status == "active"
+        assert item.date_begin == "2026-01-01"
+        assert item.date_end is None
+        assert item.max_distance_meters == 800000.0
+        assert item.total_distance_meters == 250000.0
+        assert item.total_activities == 42
+
+    def test_missing_stats_degrades_to_none(self):
+        entry = {"uuid": "gear-1", "displayName": "Retired Shoes"}
+
+        item = _normalize_gear_item(entry, {})
+
+        assert item.gear_uuid == "gear-1"
+        assert item.display_name == "Retired Shoes"
+        assert item.total_distance_meters is None
+        assert item.total_activities is None
+
+    def test_falls_back_to_alternate_uuid_and_name_keys(self):
+        entry = {"gearUuid": "gear-2", "customMakeModel": "Custom Shoe Model"}
+
+        item = _normalize_gear_item(entry, {})
+
+        assert item.gear_uuid == "gear-2"
+        assert item.display_name == "Custom Shoe Model"
+
+
 class TestNormalizeHrZones:
     def test_normalizes_zone_list(self):
         raw = [
@@ -1537,6 +1582,85 @@ class TestGarminClientFetch:
         assert workouts[0].plan_id == "plan-1"
         # Only plan-1's date is covered -- plan-2's failure must not count as a confirmed answer.
         assert covered_dates == {"2026-07-06"}
+
+    def test_fetch_gear_returns_normalized_result(self):
+        client = make_client()
+        client._garmin.get_device_last_used.return_value = {"userProfileNumber": 12345}
+        client._garmin.get_gear.return_value = [
+            {"uuid": "gear-1", "displayName": "Nike Pegasus 40", "gearTypeName": "Shoes"}
+        ]
+        client._garmin.get_gear_stats.return_value = {
+            "totalDistance": 250000.0,
+            "totalActivities": 42,
+        }
+
+        items = client.fetch_gear()
+
+        assert len(items) == 1
+        assert items[0].gear_uuid == "gear-1"
+        assert items[0].display_name == "Nike Pegasus 40"
+        assert items[0].total_distance_meters == 250000.0
+        client._garmin.get_gear.assert_called_once_with("12345")
+        client._garmin.get_gear_stats.assert_called_once_with("gear-1")
+
+    def test_fetch_gear_returns_empty_when_device_lookup_fails(self):
+        client = make_client()
+        client._garmin.get_device_last_used.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_gear() == []
+        client._garmin.get_gear.assert_not_called()
+
+    def test_fetch_gear_returns_empty_when_no_profile_number(self):
+        client = make_client()
+        client._garmin.get_device_last_used.return_value = {}
+
+        assert client.fetch_gear() == []
+        client._garmin.get_gear.assert_not_called()
+
+    def test_fetch_gear_returns_empty_when_gear_list_fetch_fails(self):
+        client = make_client()
+        client._garmin.get_device_last_used.return_value = {"userProfileNumber": 12345}
+        client._garmin.get_gear.side_effect = GarminConnectConnectionError("boom")
+
+        assert client.fetch_gear() == []
+
+    def test_fetch_gear_returns_empty_for_unrecognized_shape(self):
+        client = make_client()
+        client._garmin.get_device_last_used.return_value = {"userProfileNumber": 12345}
+        client._garmin.get_gear.return_value = {"unexpected": "shape"}
+
+        assert client.fetch_gear() == []
+
+    def test_fetch_gear_skips_entries_without_a_uuid(self):
+        client = make_client()
+        client._garmin.get_device_last_used.return_value = {"userProfileNumber": 12345}
+        client._garmin.get_gear.return_value = [{"displayName": "No UUID Shoe"}]
+
+        assert client.fetch_gear() == []
+        client._garmin.get_gear_stats.assert_not_called()
+
+    def test_fetch_gear_isolates_one_failing_stats_call_from_siblings(self):
+        # A failure fetching one item's stats must not discard sibling items.
+        client = make_client()
+        client._garmin.get_device_last_used.return_value = {"userProfileNumber": 12345}
+        client._garmin.get_gear.return_value = [
+            {"uuid": "gear-1", "displayName": "Shoe One"},
+            {"uuid": "gear-2", "displayName": "Shoe Two"},
+        ]
+
+        def get_stats(gear_uuid):
+            if gear_uuid == "gear-1":
+                return {"totalDistance": 100000.0, "totalActivities": 10}
+            raise GarminConnectConnectionError("boom")
+
+        client._garmin.get_gear_stats.side_effect = get_stats
+
+        items = client.fetch_gear()
+
+        assert len(items) == 2
+        by_uuid = {item.gear_uuid: item for item in items}
+        assert by_uuid["gear-1"].total_distance_meters == 100000.0
+        assert by_uuid["gear-2"].total_distance_meters is None
 
     def test_fetch_activity_hr_zones_returns_normalized_result(self):
         client = make_client()
