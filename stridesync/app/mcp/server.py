@@ -52,7 +52,8 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
 
 from app.config import Settings
-from app.sync.garmin_client import GarminClient
+from app.sync.garmin_client import GarminAPIError, GarminAuthError, GarminClient
+from app.sync.scheduler import run_sync_once
 
 logger = logging.getLogger(__name__)
 
@@ -441,6 +442,39 @@ def get_last_sync_status(conn: sqlite3.Connection) -> Dict[str, Any]:
     return dict(row)
 
 
+def run_sync_now(settings: Settings) -> Dict[str, Any]:
+    """Trigger an on-demand sync right now, then return the resulting `last_sync_status` row —
+    see PROJECT_PLAN.md milestone Stage 30. Useful right before answering a question about a
+    run that may have only just finished, since the scheduled sync (default every 6h) might not
+    have picked it up yet.
+
+    This calls the exact same `run_sync_once` the scheduled sync-scheduler service calls on its
+    own timer — same incremental behavior (only fetches what's changed since the last successful
+    sync, so a typical call is fast; a long-untouched install's first on-demand sync can take
+    longer) and the same self-contained DB write connection (`run_sync_once` opens and closes its
+    own — this function never touches the DB for writing itself). Building a fresh `GarminClient`
+    per call mirrors the gear write-back tools' `_make_garmin_client` (Stage 29) rather than
+    reusing any state from the sync-scheduler service, which is a separate process.
+
+    Whether the sync succeeds or fails, this always returns the resulting `last_sync_status`
+    row rather than raising — `run_sync_once` already records a `'failed'` `sync_log` entry
+    (with `error_message`) before re-raising on `GarminAuthError`/`GarminAPIError`, so the
+    caller gets a clear status either way without needing its own try/except.
+    """
+    client = GarminClient(
+        settings.garmin_username, settings.garmin_password, token_dir=settings.garmin_token_dir
+    )
+    try:
+        run_sync_once(settings, client)
+    except (GarminAuthError, GarminAPIError):
+        pass  # already recorded in sync_log -- surfaced via last_sync_status below
+    conn = _connect_readonly(settings.db_path)
+    try:
+        return get_last_sync_status(conn)
+    finally:
+        conn.close()
+
+
 def create_server(settings: Settings) -> FastMCP:
     """Build the FastMCP server, wiring each tool to a fresh read-only connection per call."""
     auth = SharedSecretVerifier(settings.mcp_auth_token) if settings.mcp_auth_token else None
@@ -722,6 +756,18 @@ def create_server(settings: Settings) -> FastMCP:
             return get_last_sync_status(conn)
         finally:
             conn.close()
+
+    @mcp.tool()
+    def sync_now() -> Dict[str, Any]:
+        """Trigger a Garmin sync right now and wait for it to finish, then return the resulting
+        sync status (same shape as `last_sync_status`). Call this before answering a question
+        about a run that may have only just finished (e.g. "how was my run today", "look at the
+        run I just did") — the scheduled sync (default every 6h) might not have picked it up
+        yet. Not needed for questions about older activities or trends, where the data is
+        already current enough; only use it when recency actually matters, since it's slower
+        than a plain read (a real Garmin sync, not a cached lookup).
+        """
+        return run_sync_now(settings)
 
     return mcp
 
