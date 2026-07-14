@@ -16,6 +16,11 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   Also fixes `training_status_label` to prefer a more authoritative nested response path
   (confirmed via reviewing another Garmin Connect MCP project built on the same underlying
   library), falling back to the original guess unchanged if that path isn't present.
+- **Body Battery, stress, and respiration in `daily_wellness`** (milestone Stage 27): six new
+  columns — `body_battery_charged`/`body_battery_drained`, `stress_avg`/`stress_max`,
+  `respiration_waking_avg`/`respiration_sleep_avg` — three more independently-fetched recovery
+  signals alongside the existing sleep/HRV/readiness/resting-HR fields. Body Battery's headline
+  0-100 level isn't included yet; only `charged`/`drained` are confirmed field names.
 
 ## [0.5.0] - 2026-07-13
 

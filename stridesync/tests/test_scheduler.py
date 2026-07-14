@@ -114,6 +114,12 @@ def make_daily_wellness(calendar_date="2026-07-06") -> DailyWellness:
         chronic_training_load=380.0,
         training_stress_balance=-40.5,
         acute_chronic_workload_ratio=1.11,
+        body_battery_charged=45.0,
+        body_battery_drained=60.0,
+        stress_avg=32,
+        stress_max=68,
+        respiration_waking_avg=15.5,
+        respiration_sleep_avg=13.2,
     )
 
 
@@ -241,6 +247,12 @@ class FakeGarminClient:
                 chronic_training_load=None,
                 training_stress_balance=None,
                 acute_chronic_workload_ratio=None,
+                body_battery_charged=None,
+                body_battery_drained=None,
+                stress_avg=None,
+                stress_max=None,
+                respiration_waking_avg=None,
+                respiration_sleep_avg=None,
             ),
         )
 
@@ -492,6 +504,12 @@ def test_run_sync_once_writes_daily_wellness(tmp_path):
         assert today_row["chronic_training_load"] == 380.0
         assert today_row["training_stress_balance"] == -40.5
         assert today_row["acute_chronic_workload_ratio"] == 1.11
+        assert today_row["body_battery_charged"] == 45.0
+        assert today_row["body_battery_drained"] == 60.0
+        assert today_row["stress_avg"] == 32
+        assert today_row["stress_max"] == 68
+        assert today_row["respiration_waking_avg"] == 15.5
+        assert today_row["respiration_sleep_avg"] == 13.2
         assert yesterday_row["hrv_status"] == "BALANCED"
     finally:
         conn.close()

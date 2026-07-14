@@ -276,6 +276,58 @@ class TestNormalizeDailyWellness:
         assert wellness.training_stress_balance is None
         assert wellness.acute_chronic_workload_ratio is None
 
+    def test_merges_body_battery_stress_and_respiration(self):
+        # Field names sourced from Taxuspt/garmin_mcp's tested implementation (see
+        # PROJECT_PLAN.md milestone Stage 27) -- not yet confirmed against a live account of
+        # this add-on's own. get_body_battery's response is a list of per-day entries (the one
+        # sub-call whose underlying method takes a date range), stress/respiration are bare dicts.
+        body_battery = [{"date": "2026-07-06", "charged": 45.0, "drained": 60.0}]
+        stress = {"calendarDate": "2026-07-06", "avgStressLevel": 32, "maxStressLevel": 68}
+        respiration = {
+            "calendarDate": "2026-07-06",
+            "avgWakingRespirationValue": 15.5,
+            "avgSleepRespirationValue": 13.2,
+        }
+
+        wellness = _normalize_daily_wellness(
+            "2026-07-06", {}, {}, {}, {}, {}, body_battery, stress, respiration
+        )
+
+        assert wellness.body_battery_charged == 45.0
+        assert wellness.body_battery_drained == 60.0
+        assert wellness.stress_avg == 32
+        assert wellness.stress_max == 68
+        assert wellness.respiration_waking_avg == 15.5
+        assert wellness.respiration_sleep_avg == 13.2
+
+    def test_body_battery_stress_respiration_default_to_none(self):
+        # Confirms the three new sub-fetches are genuinely optional args (fetch_daily_wellness's
+        # older tests, which don't pass them, must keep working unchanged).
+        wellness = _normalize_daily_wellness("2026-07-06", {}, {}, {}, {}, {})
+
+        assert wellness.body_battery_charged is None
+        assert wellness.body_battery_drained is None
+        assert wellness.stress_avg is None
+        assert wellness.stress_max is None
+        assert wellness.respiration_waking_avg is None
+        assert wellness.respiration_sleep_avg is None
+
+    def test_body_battery_empty_list_does_not_crash(self):
+        wellness = _normalize_daily_wellness(
+            "2026-07-06", {}, {}, {}, {}, {}, body_battery=[]
+        )
+
+        assert wellness.body_battery_charged is None
+        assert wellness.body_battery_drained is None
+
+    def test_body_battery_non_dict_list_element_does_not_crash(self):
+        wellness = _normalize_daily_wellness(
+            "2026-07-06", {}, {}, {}, {}, {}, body_battery=["not-a-dict"]
+        )
+
+        assert wellness.body_battery_charged is None
+        assert wellness.body_battery_drained is None
+
 
 class TestNormalizeVo2Max:
     def test_merges_running_and_cycling(self):
@@ -1217,6 +1269,33 @@ class TestGarminClientFetch:
         assert wellness.acute_chronic_workload_ratio == 0.94
         client._garmin.get_training_status.assert_called_once_with("2026-07-06")
 
+    def test_fetch_daily_wellness_extracts_body_battery_stress_respiration(self):
+        client = make_client()
+        client._garmin.get_body_battery.return_value = [
+            {"date": "2026-07-06", "charged": 45.0, "drained": 60.0}
+        ]
+        client._garmin.get_stress_data.return_value = {
+            "avgStressLevel": 32,
+            "maxStressLevel": 68,
+        }
+        client._garmin.get_respiration_data.return_value = {
+            "avgWakingRespirationValue": 15.5,
+            "avgSleepRespirationValue": 13.2,
+        }
+
+        wellness = client.fetch_daily_wellness("2026-07-06")
+
+        assert wellness.body_battery_charged == 45.0
+        assert wellness.body_battery_drained == 60.0
+        assert wellness.stress_avg == 32
+        assert wellness.stress_max == 68
+        assert wellness.respiration_waking_avg == 15.5
+        assert wellness.respiration_sleep_avg == 13.2
+        # get_body_battery takes a date range -- called with cdate as both bounds.
+        client._garmin.get_body_battery.assert_called_once_with("2026-07-06", "2026-07-06")
+        client._garmin.get_stress_data.assert_called_once_with("2026-07-06")
+        client._garmin.get_respiration_data.assert_called_once_with("2026-07-06")
+
     def test_fetch_daily_wellness_isolates_one_failing_endpoint(self):
         # The key behavior this milestone deliberately differs from fetch_training_baseline for:
         # one endpoint failing (HRV, here) must not discard data from the other four.
@@ -1248,6 +1327,9 @@ class TestGarminClientFetch:
             "boom"
         )
         client._garmin.get_rhr_day.side_effect = GarminConnectConnectionError("boom")
+        client._garmin.get_body_battery.side_effect = GarminConnectConnectionError("boom")
+        client._garmin.get_stress_data.side_effect = GarminConnectConnectionError("boom")
+        client._garmin.get_respiration_data.side_effect = GarminConnectConnectionError("boom")
 
         wellness = client.fetch_daily_wellness("2026-07-06")
 
@@ -1257,6 +1339,9 @@ class TestGarminClientFetch:
         assert wellness.training_status_label is None
         assert wellness.training_readiness_score is None
         assert wellness.resting_hr is None
+        assert wellness.body_battery_charged is None
+        assert wellness.stress_avg is None
+        assert wellness.respiration_waking_avg is None
 
     def test_fetch_daily_wellness_handles_unexpected_list_shape_from_one_endpoint(self):
         # Same class of bug as fetch_vo2max's list-response regression test -- a sub-fetch

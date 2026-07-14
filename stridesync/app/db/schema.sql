@@ -138,7 +138,17 @@ CREATE TABLE IF NOT EXISTS daily_wellness (
     acute_training_load        REAL,
     chronic_training_load      REAL,
     training_stress_balance    REAL,
-    acute_chronic_workload_ratio REAL
+    acute_chronic_workload_ratio REAL,
+    -- Added milestone Stage 27: Body Battery, stress, and respiration -- three more
+    -- independently-fetched best-effort sub-calls, same non-fatal-per-field pattern as above.
+    -- Body Battery's headline 0-100 level isn't included (unconfirmed field/shape) -- only
+    -- charged/drained are confirmed field names.
+    body_battery_charged       REAL,
+    body_battery_drained       REAL,
+    stress_avg                 INTEGER,
+    stress_max                 INTEGER,
+    respiration_waking_avg     REAL,
+    respiration_sleep_avg      REAL
 );
 
 -- vo2max_history: one row per calendar date, Garmin's own VO2 max estimate (running/cycling) and

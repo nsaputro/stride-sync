@@ -1188,6 +1188,41 @@ already makes for `training_status_label`, so this is genuine new signal at no e
   future Diagnostics-panel addition) the way `planned_workouts`'/`vo2max_history`'s guesses
   eventually were.
 
+### Stage 27 — Body Battery, stress, and respiration in `daily_wellness`, second follow-up from the Garmin-ecosystem review 🔄
+
+Second of three follow-ups from reviewing `Taxuspt/garmin_mcp` (Stage 26 was the first, shoe/gear
+mileage tracking — Stage 28 — is the third). Three more independently-fetched recovery signals,
+same field-name confidence level as Stage 26's training-load fix (sourced from that project's
+tested implementation, not yet confirmed against a live account of this add-on's own).
+
+- ✅ Three new best-effort sub-fetches added to `fetch_daily_wellness`, each wrapped
+  individually like the original five: `get_body_battery(cdate, cdate)` (the one sub-call whose
+  underlying method takes a date *range*, not a single date — called with `cdate` as both
+  bounds), `get_stress_data(cdate)`, `get_respiration_data(cdate)`.
+- ✅ Six new `daily_wellness` columns: `body_battery_charged`/`body_battery_drained` (Body
+  Battery's `charged`/`drained` fields — its headline 0-100 *level* is deliberately **not**
+  included, since only `charged`/`drained` are confirmed field names; the level appears to live
+  in a `bodyBatteryValuesArray` time series whose exact shape isn't confirmed, so it's not
+  guessed at), `stress_avg`/`stress_max` (`avgStressLevel`/`maxStressLevel`),
+  `respiration_waking_avg`/`respiration_sleep_avg` (`avgWakingRespirationValue`/
+  `avgSleepRespirationValue`).
+- ✅ `get_body_battery`'s real response is a *list* of per-day entries (like `get_max_metrics` —
+  see `_normalize_vo2max`'s docstring) — a new shared `_first_dict()` helper unwraps that the
+  same way, reused for future list-shaped responses too.
+- ✅ Migration via `_add_column_if_missing` for all six new `daily_wellness` columns (an
+  already-shipped table) — new test confirms an older on-disk database gains them without losing
+  existing rows.
+- ✅ `daily_wellness` MCP tool docstring updated; `daily_wellness` query function's `SELECT`
+  extended to include the six new fields.
+- ✅ New unit tests (merges all three new sources, defaults to `None` when the new args aren't
+  passed at all — confirms they're genuinely optional so older call sites keep working, empty-list
+  and non-dict-list-element degradation for `get_body_battery`) plus an integration-level
+  `fetch_daily_wellness` test and an "everything fails" test extended to cover the three new
+  endpoints; full suite green (287 passed, up from 281).
+- ✅ Verified end-to-end with a real `fastmcp.Client` call against a seeded DB — confirmed all six
+  new fields round-trip correctly through the `daily_wellness` tool.
+- ⬜ **Still unconfirmed against a live account of this add-on's own** — same caveat as Stage 26.
+
 ---
 
 ## Getting Started (Development)

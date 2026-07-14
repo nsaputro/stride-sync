@@ -39,6 +39,12 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "daily_wellness", "chronic_training_load", "REAL")
     _add_column_if_missing(conn, "daily_wellness", "training_stress_balance", "REAL")
     _add_column_if_missing(conn, "daily_wellness", "acute_chronic_workload_ratio", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "body_battery_charged", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "body_battery_drained", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "stress_avg", "INTEGER")
+    _add_column_if_missing(conn, "daily_wellness", "stress_max", "INTEGER")
+    _add_column_if_missing(conn, "daily_wellness", "respiration_waking_avg", "REAL")
+    _add_column_if_missing(conn, "daily_wellness", "respiration_sleep_avg", "REAL")
     conn.commit()
 
 
