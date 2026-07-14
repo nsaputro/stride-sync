@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-14
+
 ### Added
 - **Real training load (CTL/ATL/TSB/ACWR) in `daily_wellness`** (milestone Stage 26): four new
   columns — `acute_training_load`, `chronic_training_load`, `training_stress_balance` (derived
@@ -545,7 +547,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/nsaputro/stride-sync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/nsaputro/stride-sync/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/nsaputro/stride-sync/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/nsaputro/stride-sync/compare/v0.3.3...v0.4.0
