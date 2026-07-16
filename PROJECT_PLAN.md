@@ -1373,6 +1373,37 @@ finishing rather than waiting for the next scheduled sync window.
   `run_sync_once` swapped for a fake in-process) — confirmed `sync_now` returns the expected
   post-sync status shape.
 
+### Stage 31 — `/health` endpoint: confirm tools are actually loaded, not just that the process is up 🔄
+
+Requested directly after a live report that Claude's MCP connection to StrideSync "isn't
+responding," with no corresponding error in the add-on's own logs — leaving no way to tell from
+outside whether the server process itself was unhealthy (e.g. a broken tool registry) or the
+problem was somewhere else entirely in the connection chain (network, `mcp-proxy`, a Cloudflare
+Tunnel, or the client).
+
+- ✅ New `GET /health` route on the same ASGI app as the `/mcp` protocol endpoint, registered via
+  `fastmcp.FastMCP.custom_route` inside `create_server()` — the mechanism `fastmcp`'s own
+  docstring uses as its canonical example for exactly this kind of plain-HTTP auxiliary endpoint.
+- ✅ **Deliberately not gated by `mcp_auth_token`** — confirmed experimentally (not assumed)
+  via a `TestClient` + hand-built `FastMCP(auth=Verifier(...))` instance that `custom_route`
+  paths bypass the bearer-token `TokenVerifier` gate entirely, while `/mcp` on the same app still
+  correctly returns `401` without a token. A tool-name list isn't personal Garmin data, and
+  leaving this endpoint unauthenticated is what lets external monitoring/uptime tooling and a
+  Cloudflare Tunnel both probe liveness without needing the bearer token.
+- ✅ Contract: calls `mcp.list_tools()` — `200` with `{"status": "ok", "tools": [...sorted
+  names...], "tool_count": N}` if it succeeds and returns at least one tool; `503` with
+  `{"status": "error", "error": ...}` if it raises or comes back empty (an empty tool list is
+  just as much a "not actually healthy" signal as an exception would be — both mean a client
+  connecting right now would see no tools).
+- ✅ New `TestHealthCheck` test class (`tests/test_mcp_server.py`), built the same way as the
+  existing `TestHttpAuthEnforcement` class — real ASGI requests via `TestClient` against
+  `mcp.http_app(path="/mcp")`, not a mocked route function: 200-with-tool-list happy path,
+  not-gated-by-bearer-token even when `mcp_auth_token` is set, 503 when `list_tools()` raises,
+  503 when it returns empty. Full suite green (321 passed, up from 317).
+- ✅ `stridesync/DOCS.md` updated with troubleshooting guidance pointing at `/health` directly
+  above the client-connection instructions — explains the unauthenticated `curl`/browser check
+  and how to read a `200` vs. `503`/connection-refused/timeout result.
+
 ---
 
 ## Getting Started (Development)
