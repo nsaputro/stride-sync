@@ -36,6 +36,15 @@ http://homeassistant.local:8765/mcp
 you changed it). How you connect a Claude client to that URL differs depending on whether the
 client is on your LAN or reaching it remotely — see the two setups below.
 
+**If Claude reports the connection isn't responding**, check the health endpoint directly —
+`http://homeassistant.local:8765/health` — before assuming the issue is with the add-on itself.
+Unlike `/mcp`, it's a plain unauthenticated HTTP GET (no bearer token needed, even if
+`mcp_auth_token` is set), so you can hit it from a browser or `curl`. A `200` with a JSON list of
+tool names means the add-on's MCP server itself is healthy and the problem is elsewhere in the
+connection chain (network, `mcp-proxy`, a Cloudflare Tunnel, or the client). A `503`, connection
+refused, or timeout means the add-on itself needs attention — check its log in the HA add-on
+page.
+
 ### Claude Desktop — direct connection (same network as Home Assistant)
 
 Claude Desktop's built-in MCP config (`claude_desktop_config.json`) launches local processes over
