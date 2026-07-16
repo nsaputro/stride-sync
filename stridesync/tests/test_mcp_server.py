@@ -950,3 +950,70 @@ class TestHttpAuthEnforcement:
         # Not 401: the request got past auth into actual MCP protocol handling (a 400 here is
         # the MCP session-handshake requirement, unrelated to auth — see PR description/commit).
         assert response.status_code != 401
+
+
+class TestHealthCheck:
+    """Confirms /health over a real ASGI request/response cycle -- see PROJECT_PLAN.md milestone
+    Stage 31, added after a live "the MCP connection isn't responding" report that left nothing
+    in this add-on's own logs.
+    """
+
+    def _server_and_app(self, tmp_path, mcp_auth_token=""):
+        settings = make_settings(tmp_path)
+        if mcp_auth_token:
+            settings = Settings(**{**settings.__dict__, "mcp_auth_token": mcp_auth_token})
+        seed_db(settings.db_path)
+        mcp = create_server(settings)
+        return mcp, mcp.http_app(path="/mcp")
+
+    def test_returns_200_with_registered_tool_list(self, tmp_path):
+        _, app = self._server_and_app(tmp_path)
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert "sync_now" in payload["tools"]
+        assert "recent_activities" in payload["tools"]
+        assert payload["tool_count"] == len(payload["tools"])
+
+    def test_not_gated_by_bearer_token_auth(self, tmp_path):
+        # Unlike /mcp, /health must work with no Authorization header at all, even when
+        # mcp_auth_token is configured -- it's the one deliberately unauthenticated endpoint.
+        _, app = self._server_and_app(tmp_path, mcp_auth_token="s3cr3t")
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+    def test_returns_503_when_list_tools_raises(self, tmp_path, monkeypatch):
+        mcp, app = self._server_and_app(tmp_path)
+
+        async def broken_list_tools():
+            raise RuntimeError("tool registry broken")
+
+        monkeypatch.setattr(mcp, "list_tools", broken_list_tools)
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+        assert response.status_code == 503
+        assert response.json()["status"] == "error"
+
+    def test_returns_503_when_no_tools_registered(self, tmp_path, monkeypatch):
+        mcp, app = self._server_and_app(tmp_path)
+
+        async def empty_list_tools():
+            return []
+
+        monkeypatch.setattr(mcp, "list_tools", empty_list_tools)
+
+        with TestClient(app) as client:
+            response = client.get("/health")
+
+        assert response.status_code == 503
+        assert response.json()["error"] == "no tools registered"

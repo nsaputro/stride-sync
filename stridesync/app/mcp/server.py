@@ -39,6 +39,13 @@ only tools that change data in the user's actual Garmin Connect account; their d
 explicitly and instruct the calling model to only invoke them after a human has confirmed the
 specific correction — this server has no way to enforce that itself, so it's a documented
 contract with the MCP client, not a technical guarantee.
+
+**Health check (milestone Stage 31)**: `/health` (plain HTTP GET, not the `/mcp` MCP protocol
+path) is the one endpoint on this server deliberately *not* gated by `mcp_auth_token` — added
+after a live "the MCP connection isn't responding" report that left nothing in this add-on's own
+logs, making it impossible to tell from outside whether the process itself was healthy. Returns
+200 with the registered tool names if `list_tools()` succeeds and is non-empty, 503 otherwise —
+see `health_check` below.
 """
 
 from __future__ import annotations
@@ -50,6 +57,8 @@ from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app.config import Settings
 from app.sync.garmin_client import GarminAPIError, GarminAuthError, GarminClient
@@ -485,6 +494,36 @@ def create_server(settings: Settings) -> FastMCP:
             "Cloudflare Tunnel), since it serves personal Garmin activity/health data."
         )
     mcp: FastMCP = FastMCP("StrideSync", auth=auth)
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_check(request: Request) -> JSONResponse:
+        """Plain HTTP health check, separate from the `/mcp` protocol endpoint (see
+        PROJECT_PLAN.md milestone Stage 31) — added after a live report of "the MCP connection
+        isn't responding" that turned out to leave no trace in this add-on's own logs, making it
+        hard to tell from the outside whether the server process was actually healthy or the
+        problem was somewhere else in the connection chain (network, `mcp-proxy`, the client
+        itself). A bare TCP/HTTP ping to `/mcp` isn't a strong enough signal either — the server
+        could be listening but have somehow ended up with zero tools registered (e.g. a
+        `create_server` regression) and still accept the connection.
+
+        Confirms tools are actually registered, not just that the process is up: 200 with the
+        sorted list of registered tool names if `list_tools()` succeeds and returns at least
+        one; 503 with an error message if it raises or comes back empty. Deliberately **not**
+        gated by `mcp_auth_token` (confirmed via a real ASGI request against `custom_route`'s
+        actual auth behavior, not assumed) — a tool-name list isn't personal Garmin data, and an
+        unauthenticated health check is what lets external monitoring/uptime tooling and a
+        Cloudflare Tunnel both probe liveness without needing the bearer token.
+        """
+        try:
+            tools = await mcp.list_tools()
+        except Exception as exc:  # noqa: BLE001 - a broken tool registry is what this endpoint exists to catch
+            return JSONResponse({"status": "error", "error": str(exc)}, status_code=503)
+        tool_names = sorted(tool.name for tool in tools)
+        if not tool_names:
+            return JSONResponse(
+                {"status": "error", "error": "no tools registered"}, status_code=503
+            )
+        return JSONResponse({"status": "ok", "tools": tool_names, "tool_count": len(tool_names)})
 
     @mcp.tool()
     def recent_activities(limit: int = 20) -> List[Dict[str, Any]]:
