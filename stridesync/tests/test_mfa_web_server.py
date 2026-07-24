@@ -918,6 +918,119 @@ def test_format_distance_handles_missing_value():
     assert mfa_web_server._format_distance(0) == "—"
 
 
+def test_format_zone_duration_under_an_hour_omits_hours():
+    assert mfa_web_server._format_zone_duration(300.0) == "5m"
+
+
+def test_format_zone_duration_over_an_hour_shows_hours_and_minutes():
+    assert mfa_web_server._format_zone_duration(5400.0) == "1h 30m"
+
+
+def test_format_zone_duration_handles_missing_value():
+    assert mfa_web_server._format_zone_duration(None) == "0m"
+
+
+def test_hr_zone_summary_returns_empty_when_db_missing(tmp_path):
+    assert mfa_web_server._hr_zone_summary(str(tmp_path / "no_such.db")) == []
+
+
+def test_hr_zone_summary_sums_seconds_per_zone_within_window(tmp_path):
+    from app import db
+
+    db_path = str(tmp_path / "stridesync.db")
+    conn = db.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES
+            (1, 'Recent run', 'running', datetime('now', '-1 days'), 'x', 5000.0,
+             datetime('now')),
+            (2, 'Recent run 2', 'running', datetime('now', '-2 days'), 'x', 5000.0,
+             datetime('now')),
+            (3, 'Old run', 'running', datetime('now', '-100 days'), 'x', 5000.0,
+             datetime('now'))
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO activity_hr_zones (activity_id, zone_number, zone_low_boundary_hr, seconds_in_zone)
+        VALUES
+            (1, 1, 100, 600.0),
+            (1, 2, 130, 1200.0),
+            (2, 1, 100, 300.0),
+            (3, 1, 100, 9999.0)
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    zones = mfa_web_server._hr_zone_summary(db_path)
+
+    # The activity outside the 12-week window is excluded from the totals.
+    by_zone = {zone["zone_number"]: zone for zone in zones}
+    assert by_zone[1]["total_seconds"] == 900.0
+    assert by_zone[1]["zone_low_boundary_hr"] == 100
+    assert by_zone[2]["total_seconds"] == 1200.0
+
+
+def test_running_page_shows_hr_zone_summary_before_weekly_distance(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES
+            (1, 'Recent run', 'running', datetime('now', '-1 days'), 'x', 5000.0, datetime('now'))
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO activity_hr_zones (activity_id, zone_number, zone_low_boundary_hr, seconds_in_zone)
+        VALUES (1, 1, 100, 600.0), (1, 2, 130, 300.0)
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/running")
+
+    assert response.status_code == 200
+    assert "Heart rate zones" in response.text
+    assert "Weekly total distance" in response.text
+    # The zone summary is positioned before the weekly mileage list, per the requested layout.
+    assert response.text.index("Heart rate zones") < response.text.index("Weekly total distance")
+
+
+def test_running_page_omits_hr_zone_section_when_no_zone_data(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES
+            (1, 'Recent run', 'running', datetime('now', '-1 days'), 'x', 5000.0, datetime('now'))
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/running")
+
+    assert response.status_code == 200
+    assert "Heart rate zones" not in response.text
+    assert "Weekly total distance" in response.text
+
+
 def test_weekly_distance_returns_empty_when_db_missing(tmp_path):
     assert mfa_web_server._weekly_distance(str(tmp_path / "no_such.db")) == []
 
