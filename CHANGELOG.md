@@ -16,10 +16,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   there was no way to tell from outside whether the server process itself was healthy. Not gated
   by `mcp_auth_token`, so it works from a browser/`curl`/external monitoring even when a bearer
   token is required for `/mcp`.
-- **Heart rate zone summary on the "Running" tab** (milestone Stage 32): the web UI's `/running`
-  route now shows a time-in-zone breakdown (Zone 1-5, % of time, low-boundary bpm) for the last 12
-  weeks, positioned above the existing weekly mileage list — the same `activity_hr_zones` data the
-  MCP server's `activity_hr_zones` tool already exposed, now surfaced on the web UI too.
+- **Heart rate zone ranges on the "Running" tab** (milestone Stage 32): the web UI's `/running`
+  route now lists each of Garmin's 5 HR zones with its bpm range (e.g. "Zone 2 · 130–149 bpm"),
+  positioned above the existing weekly mileage list, read from the most recently synced activity's
+  `activity_hr_zones` data.
 
 ## [0.6.0] - 2026-07-14
 

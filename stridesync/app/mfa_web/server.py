@@ -113,15 +113,6 @@ _STYLE = """
     text-align: right;
   }
   .row-value.muted { color: var(--muted); font-weight: 500; font-size: 0.85rem; }
-  .zone-list { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.3rem; }
-  .zone-row-head {
-    display: flex; justify-content: space-between; align-items: baseline; font-size: 0.85rem;
-    margin-bottom: 0.3rem;
-  }
-  .zone-row-title { font-weight: 600; }
-  .zone-row-value { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.8rem; }
-  .zone-row-track { background: var(--tile); border-radius: 999px; height: 0.5rem; overflow: hidden; }
-  .zone-row-fill { height: 100%; background: var(--primary); border-radius: 999px; }
   .card {
     background: var(--card); border: 1px solid var(--border-soft); border-radius: 0.85rem;
     padding: 1rem 1.05rem; margin-bottom: 0.9rem;
@@ -422,20 +413,17 @@ def _recent_activities_html(settings: Settings) -> str:
     return f'<div class="eyebrow">Recent activities</div><div class="row-list">{items}</div>'
 
 
-def _format_zone_duration(seconds: Optional[float]) -> str:
-    total_minutes = round((seconds or 0.0) / 60)
-    hours, minutes = divmod(total_minutes, 60)
-    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+def _hr_zone_ranges(db_path: str) -> List[Dict[str, Any]]:
+    """The athlete's current Garmin HR zone (1-5) bpm ranges, from the most recently synced
+    activity that has `activity_hr_zones` rows.
 
-
-def _hr_zone_summary(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
-    """Total time spent in each Garmin HR zone (1-5) across activities in the last `weeks` weeks.
-
-    Same window as `_weekly_distance` below it on the Running tab, so both sections describe the
-    same recent stretch of training. `zone_low_boundary_hr` is taken as the max seen for that zone
-    number across the window rather than joined to one specific activity -- it's effectively
-    constant per athlete (derived from the same lactate-threshold baseline `activity_hr_zones` is
-    computed from at sync time), so this is a display convenience, not a real aggregation.
+    `activity_hr_zones` only ever stores each zone's *low* boundary (Garmin doesn't give us the
+    high one directly), so a zone's upper bound is inferred as "one less than the next zone's low
+    boundary" -- the top zone is left open-ended ("175+ bpm"), since there's no higher zone to
+    derive a ceiling from. These boundaries are effectively a static per-athlete setting (derived
+    from the same lactate-threshold baseline at sync time), not something that varies run to run,
+    so reading them off the single latest activity is representative rather than a real
+    aggregation across many rows.
     """
     if not os.path.exists(db_path):
         return []
@@ -444,48 +432,43 @@ def _hr_zone_summary(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
     try:
         rows = conn.execute(
             """
-            SELECT
-                z.zone_number,
-                MAX(z.zone_low_boundary_hr) AS zone_low_boundary_hr,
-                SUM(z.seconds_in_zone) AS total_seconds
+            SELECT z.zone_number, z.zone_low_boundary_hr
             FROM activity_hr_zones z
-            JOIN activities a ON a.activity_id = z.activity_id
-            WHERE a.start_time_local >= datetime('now', '-' || ? || ' days')
-            GROUP BY z.zone_number
+            WHERE z.activity_id = (
+                SELECT a.activity_id
+                FROM activities a
+                JOIN activity_hr_zones za ON za.activity_id = a.activity_id
+                ORDER BY a.start_time_local DESC
+                LIMIT 1
+            )
             ORDER BY z.zone_number ASC
-            """,
-            (weeks * 7,),
+            """
         ).fetchall()
     finally:
         conn.close()
     return [dict(row) for row in rows]
 
 
-def _hr_zone_summary_html(settings: Settings) -> str:
-    zones = _hr_zone_summary(settings.db_path)
-    total_seconds = sum(zone["total_seconds"] or 0.0 for zone in zones)
-    if not zones or total_seconds <= 0:
+def _format_zone_range(low: Optional[int], next_low: Optional[int]) -> str:
+    if low is None:
+        return "—"
+    return f"{low}+ bpm" if next_low is None else f"{low}–{next_low - 1} bpm"
+
+
+def _hr_zone_ranges_html(settings: Settings) -> str:
+    zones = _hr_zone_ranges(settings.db_path)
+    if not zones:
         return ""
 
     items = "".join(
-        '<div class="zone-row">'
-        '<div class="zone-row-head">'
-        f'<span class="zone-row-title">Zone {zone["zone_number"]}'
-        + (
-            f" · ≥{zone['zone_low_boundary_hr']} bpm"
-            if zone["zone_low_boundary_hr"]
-            else ""
-        )
-        + "</span>"
-        f'<span class="zone-row-value">{_format_zone_duration(zone["total_seconds"])} · '
-        f'{(zone["total_seconds"] or 0.0) / total_seconds * 100:.0f}%</span>'
-        "</div>"
-        '<div class="zone-row-track"><div class="zone-row-fill" style="width:'
-        f'{(zone["total_seconds"] or 0.0) / total_seconds * 100:.1f}%"></div></div>'
-        "</div>"
-        for zone in zones
+        '<div class="row-card">'
+        f'<div class="row-title">Zone {zone["zone_number"]}</div>'
+        f'<div class="row-value">'
+        f'{_format_zone_range(zone["zone_low_boundary_hr"], zones[i + 1]["zone_low_boundary_hr"] if i + 1 < len(zones) else None)}'
+        "</div></div>"
+        for i, zone in enumerate(zones)
     )
-    return f'<div class="eyebrow">Heart rate zones (last 12 weeks)</div><div class="zone-list">{items}</div>'
+    return f'<div class="eyebrow">Heart rate zones</div><div class="row-list">{items}</div>'
 
 
 def _weekly_distance(db_path: str, weeks: int = 12) -> List[Dict[str, Any]]:
@@ -543,7 +526,7 @@ def _weekly_distance_html(settings: Settings) -> str:
 
 async def running(request: Request) -> HTMLResponse:
     settings: Settings = request.app.state.settings
-    body = _hr_zone_summary_html(settings) + _weekly_distance_html(settings)
+    body = _hr_zone_ranges_html(settings) + _weekly_distance_html(settings)
     return _page("Running", body, active_tab="running")
 
 
