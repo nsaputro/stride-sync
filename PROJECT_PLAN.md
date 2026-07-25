@@ -1404,34 +1404,37 @@ Tunnel, or the client).
   above the client-connection instructions — explains the unauthenticated `curl`/browser check
   and how to read a `200` vs. `503`/connection-refused/timeout result.
 
-### Stage 32 — "Running" tab: heart rate zone time distribution, above weekly mileage 🔄
+### Stage 32 — "Running" tab: heart rate zone ranges, above weekly mileage 🔄
 
-Requested directly: the `/running` route (Stage 7) only ever showed weekly distance — no view of
-*how* those weeks were run (easy vs. hard effort), even though `activity_hr_zones` (Stage 5,
-seconds spent in each of Garmin's 5 HR zones per activity) has been synced and available to the
-MCP server's `activity_hr_zones` tool the whole time, just never surfaced on the web UI itself.
+Requested directly: the `/running` route (Stage 7) only ever showed weekly distance, with no
+reference for what each of Garmin's 5 HR zones (`activity_hr_zones`, Stage 5) actually *means* in
+bpm terms — that mapping was previously only inspectable indirectly, via the MCP server's
+`activity_hr_zones` tool on a specific activity. An initial version of this stage showed a
+time-in-zone/percentage breakdown instead of plain ranges; corrected mid-implementation to match
+what was actually requested — just the bpm range per zone, not a distribution.
 
-- ✅ New `_hr_zone_summary(db_path, weeks=12)` (`app/mfa_web/server.py`): sums
-  `activity_hr_zones.seconds_in_zone` per zone number, joined against `activities` and filtered to
-  the same 12-week window `_weekly_distance` already uses below it, so both sections on the page
-  describe the same stretch of training. `zone_low_boundary_hr` (shown per zone as "≥N bpm") is
-  taken as `MAX(...)` across the window rather than tied to one activity — a display convenience,
-  since it's effectively constant per athlete, not a real aggregation.
-- ✅ `_hr_zone_summary_html`: renders each zone as a labeled percentage bar (reusing this module's
-  existing single-accent-color style, no per-zone rainbow coding) — zone number, low-boundary bpm,
-  total time (`_format_zone_duration`, "1h 30m" / "5m"), and % of the window's total zone time.
-  Returns `""` (renders nothing) if there's no zone data yet, same graceful-degradation pattern as
-  every other section in this module — the page still works, it just skips straight to weekly
-  mileage.
+- ✅ New `_hr_zone_ranges(db_path)` (`app/mfa_web/server.py`): reads `zone_low_boundary_hr` for
+  all 5 zones off the single most-recently-synced activity that has `activity_hr_zones` rows
+  (`activity_hr_zones` only ever stores each zone's *low* boundary, so it's the most direct source
+  available). These boundaries are effectively a static per-athlete setting rather than something
+  that varies run to run, so one representative activity is sufficient — no aggregation needed.
+- ✅ `_format_zone_range(low, next_low)`: a zone's upper bound is inferred as "one less than the
+  next zone's low boundary" (e.g. zone 1 at 100 bpm, zone 2 at 130 bpm → "100–129 bpm"); the top
+  zone is left open-ended ("175+ bpm") since there's no higher zone to derive a ceiling from.
+- ✅ `_hr_zone_ranges_html`: renders each zone as a plain `row-card`/`row-list` entry (Zone number
+  → bpm range), reusing the exact same list styling as the weekly-mileage section below it rather
+  than introducing new CSS. Returns `""` (renders nothing) if there's no zone data yet, same
+  graceful-degradation pattern as every other section in this module.
 - ✅ Positioned **before** `_weekly_distance_html` in the `/running` route body, per the request.
-- ✅ New tests: `_format_zone_duration` (under/over an hour, missing value), `_hr_zone_summary`
-  (missing DB, per-zone sums with an out-of-window activity correctly excluded), and two
-  route-level tests — the zone section appears and precedes "Weekly total distance" in the
-  rendered HTML when zone data exists, and is omitted entirely (falls through to just the weekly
-  list) when activities exist but no HR zone rows do. Full suite green (328 passed, up from 321).
+- ✅ New tests: `_format_zone_range` (open-ended top zone, bounded by next zone, missing value),
+  `_hr_zone_ranges` (missing DB, boundaries read from the most recently synced activity rather
+  than a stale older one), and two route-level tests — the zone-range section appears with the
+  correct bpm text and precedes "Weekly total distance" in the rendered HTML when zone data
+  exists, and is omitted entirely (falls through to just the weekly list) when activities exist
+  but no HR zone rows do. Full suite green (328 passed).
 - ✅ Manually rendered the `/running` route against a seeded DB and inspected the HTML output to
-  confirm bar widths/percentages and section ordering look correct, not just that the test
-  assertions pass.
+  confirm the range text and section ordering look correct, not just that the test assertions
+  pass.
 
 ---
 
