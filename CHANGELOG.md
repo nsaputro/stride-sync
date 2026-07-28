@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-28
+
 ### Added
 - **`/health` endpoint** (milestone Stage 31): plain, unauthenticated `GET /health` alongside the
   `/mcp` protocol endpoint — returns `200` with the sorted list of registered MCP tool names if
@@ -560,7 +562,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/nsaputro/stride-sync/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nsaputro/stride-sync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/nsaputro/stride-sync/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/nsaputro/stride-sync/compare/v0.4.0...v0.4.1
