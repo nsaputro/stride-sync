@@ -19,6 +19,12 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 # Docker build test only builds the image, it never runs it (see .github/workflows/ci.yml).
 COPY app/ ./app/
 
+# icon.png (this add-on's HA store icon) also serves as the MCP server's own connector icon,
+# embedded as a data: URI by app/mcp/server.py's _load_server_icon (see PROJECT_PLAN.md
+# milestone Stage 33) — needs to land at /app/icon.png, matching where that code looks for it
+# relative to app/mcp/server.py's own location inside the image.
+COPY icon.png ./icon.png
+
 # s6-overlay services + init scripts
 COPY rootfs /
 
