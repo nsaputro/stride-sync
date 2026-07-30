@@ -46,17 +46,24 @@ after a live "the MCP connection isn't responding" report that left nothing in t
 logs, making it impossible to tell from outside whether the process itself was healthy. Returns
 200 with the registered tool names if `list_tools()` succeeds and is non-empty, 503 otherwise —
 see `health_check` below.
+
+**Server icon (milestone Stage 33)**: the server declares its `Implementation.icons` field (via
+`_load_server_icon`) as a base64 `data:` URI built from the add-on's existing `icon.png`, so MCP
+clients that render a connector icon show StrideSync's own icon instead of a generic fallback.
 """
 
 from __future__ import annotations
 
+import base64
 import hmac
 import logging
 import sqlite3
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
+from mcp.types import Icon
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -65,6 +72,10 @@ from app.sync.garmin_client import GarminAPIError, GarminAuthError, GarminClient
 from app.sync.scheduler import run_sync_once
 
 logger = logging.getLogger(__name__)
+
+# The add-on's existing 128x128 store icon (stridesync/icon.png) -- three levels up from this
+# file (app/mcp/server.py -> app/mcp -> app -> stridesync).
+_ICON_PATH = Path(__file__).resolve().parents[2] / "icon.png"
 
 
 class SharedSecretVerifier(TokenVerifier):
@@ -484,6 +495,26 @@ def run_sync_now(settings: Settings) -> Dict[str, Any]:
         conn.close()
 
 
+def _load_server_icon() -> Optional[Icon]:
+    """Base64-embed `icon.png` (the add-on's existing 128x128 store icon) as a `data:` URI for
+    the MCP server's `Implementation.icons` field (milestone Stage 33) -- without this, MCP
+    clients that render a connector icon (e.g. Claude's mobile app) have nothing to show and fall
+    back to a generic default of their own, unrelated to StrideSync. A data URI is used rather
+    than a hosted URL so this doesn't depend on StrideSync knowing its own externally-reachable
+    hostname, which varies per install (LAN-only vs. a Cloudflare Tunnel public hostname).
+
+    Returns `None` (server just has no icon, not a startup failure) if the file can't be read --
+    this is packaging metadata, not something a sync/tool call should ever fail over.
+    """
+    try:
+        data = _ICON_PATH.read_bytes()
+    except OSError as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
+        logger.warning("Could not load server icon %s (non-fatal): %s", _ICON_PATH, exc)
+        return None
+    encoded = base64.b64encode(data).decode("ascii")
+    return Icon(src=f"data:image/png;base64,{encoded}", mimeType="image/png", sizes=["128x128"])
+
+
 def create_server(settings: Settings) -> FastMCP:
     """Build the FastMCP server, wiring each tool to a fresh read-only connection per call."""
     auth = SharedSecretVerifier(settings.mcp_auth_token) if settings.mcp_auth_token else None
@@ -493,7 +524,8 @@ def create_server(settings: Settings) -> FastMCP:
             "access; set mcp_auth_token before exposing this port beyond your LAN (e.g. via a "
             "Cloudflare Tunnel), since it serves personal Garmin activity/health data."
         )
-    mcp: FastMCP = FastMCP("StrideSync", auth=auth)
+    icon = _load_server_icon()
+    mcp: FastMCP = FastMCP("StrideSync", auth=auth, icons=[icon] if icon else None)
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health_check(request: Request) -> JSONResponse:

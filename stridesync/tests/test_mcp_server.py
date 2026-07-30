@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastmcp import Client
 from starlette.testclient import TestClient
 
 from app import db
@@ -11,6 +12,7 @@ from app.mcp.server import (
     SharedSecretVerifier,
     _clamp,
     _connect_readonly,
+    _load_server_icon,
     create_server,
     find_activities,
     get_activity_hr_zones,
@@ -1017,3 +1019,50 @@ class TestHealthCheck:
 
         assert response.status_code == 503
         assert response.json()["error"] == "no tools registered"
+
+
+class TestServerIcon:
+    """Confirms the server declares its own icon rather than leaving MCP clients to fall back to
+    a generic default -- see PROJECT_PLAN.md milestone Stage 33, prompted by a live screenshot
+    showing Claude's mobile connector UI rendering an unrelated icon for StrideSync.
+    """
+
+    def test_load_server_icon_embeds_png_as_data_uri(self):
+        icon = _load_server_icon()
+
+        assert icon is not None
+        assert icon.mimeType == "image/png"
+        assert icon.sizes == ["128x128"]
+        assert icon.src.startswith("data:image/png;base64,")
+
+    def test_load_server_icon_returns_none_when_file_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(mcp_server_module, "_ICON_PATH", tmp_path / "no_such_icon.png")
+
+        assert _load_server_icon() is None
+
+    def test_create_server_passes_icon_through_real_initialize_handshake(self, tmp_path):
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+        mcp = create_server(settings)
+
+        async def get_server_icons():
+            async with Client(mcp) as client:
+                return client.initialize_result.serverInfo.icons
+
+        icons = asyncio.run(get_server_icons())
+
+        assert icons is not None
+        assert icons[0].src.startswith("data:image/png;base64,")
+
+    def test_create_server_still_starts_when_icon_file_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mcp_server_module, "_ICON_PATH", tmp_path / "no_such_icon.png")
+        settings = make_settings(tmp_path)
+        seed_db(settings.db_path)
+
+        mcp = create_server(settings)
+
+        async def get_server_icons():
+            async with Client(mcp) as client:
+                return client.initialize_result.serverInfo.icons
+
+        assert asyncio.run(get_server_icons()) is None

@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **MCP server icon** (milestone Stage 33): the server now declares its own icon (via MCP's
+  `Implementation.icons` field, embedded as a base64 `data:` URI from the add-on's existing
+  `icon.png`), so MCP clients that render a connector icon — like Claude's mobile app — show
+  StrideSync's own icon instead of a generic fallback.
+
+### Fixed
+- **Dockerfile never actually shipped `icon.png` inside the container image** — only `app/` and
+  `rootfs/` were copied in, so any code reading `icon.png` at runtime (the new server-icon feature
+  above) would have silently found nothing on a real install despite working in local
+  dev/tests. Added `COPY icon.png ./icon.png`.
+
 ## [0.7.0] - 2026-07-28
 
 ### Added

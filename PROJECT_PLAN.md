@@ -1436,6 +1436,45 @@ what was actually requested — just the bpm range per zone, not a distribution.
   confirm the range text and section ordering look correct, not just that the test assertions
   pass.
 
+### Stage 33 — MCP server declares its own icon, instead of a client fallback 🔄
+
+Requested directly after a live screenshot showed Claude's mobile connector UI rendering an
+unrelated orange "B" icon next to StrideSync's `add_activity_gear`/`remove_activity_gear` tool
+calls — the MCP spec's `Implementation.icons` field lets a server declare its own icon, but
+`create_server()` never set it, so MCP clients that render a connector icon (like Claude's mobile
+app) had nothing to show and substituted their own generic default.
+
+- ✅ New `_load_server_icon()` (`app/mcp/server.py`): base64-embeds the add-on's existing 128x128
+  `icon.png` (already shipped for the HA add-on store) as a `data:image/png;base64,...` URI,
+  returned as an `mcp.types.Icon`. A data URI is used rather than a hosted URL specifically so
+  this doesn't depend on StrideSync knowing its own externally-reachable hostname, which varies
+  per install (LAN-only vs. a Cloudflare Tunnel public hostname) — confirmed `FastMCP.__init__`
+  accepts `icons: list[mcp.types.Icon] | None` directly and threads it through to the
+  `Implementation` sent during the MCP `initialize` handshake (verified by inspecting
+  `fastmcp`/`mcp` source, not assumed).
+- ✅ Returns `None` (server just has no icon, not a startup failure) if `icon.png` can't be read —
+  packaging metadata degrading gracefully, not a sync/tool-call concern.
+- ✅ **Dockerfile fix, found while implementing this**: `icon.png` lives at the `stridesync/`
+  repo root, but the Dockerfile only ever `COPY`s `app/` and `rootfs/` into the image — `icon.png`
+  was never actually shipped inside the container, so `_load_server_icon()` would have silently
+  found nothing at runtime on a real install even though it worked in local dev/tests (where the
+  working directory happens to match the repo layout). Added `COPY icon.png ./icon.png` to land
+  it at `/app/icon.png`, matching where `_load_server_icon`'s path arithmetic
+  (`Path(__file__).resolve().parents[2]` from `/app/app/mcp/server.py`) looks for it inside the
+  image. Confirmed via a standalone Docker build reproducing just the two `COPY` layers and
+  running the exact same path-resolution code (a full build against the real
+  `ghcr.io/hassio-addons/base` image wasn't reachable from this sandbox — its registry host is
+  blocked by this environment's egress policy — so this relies on CI's existing "Docker build +
+  smoke test" job, which does build against the real base image with full network access, to
+  catch any regression here).
+- ✅ New tests (`tests/test_mcp_server.py`, `TestServerIcon`): `_load_server_icon` returns a
+  well-formed `data:image/png;base64,...` `Icon` for the real `icon.png`, and `None` when the
+  file is missing (monkeypatched `_ICON_PATH`); an end-to-end test using a real `fastmcp.Client`
+  in-memory `initialize` handshake confirms `create_server()`'s icon actually reaches
+  `serverInfo.icons` (not just an internal attribute check), plus confirms the server still
+  starts normally (no icon, not a crash) when the icon file is missing. Full suite green (332
+  passed, up from 328).
+
 ---
 
 ## Getting Started (Development)
