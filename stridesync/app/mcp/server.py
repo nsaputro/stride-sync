@@ -47,9 +47,10 @@ logs, making it impossible to tell from outside whether the process itself was h
 200 with the registered tool names if `list_tools()` succeeds and is non-empty, 503 otherwise —
 see `health_check` below.
 
-**Server icon (milestone Stage 33)**: the server declares its `Implementation.icons` field (via
-`_load_server_icon`) as a base64 `data:` URI built from the add-on's existing `icon.png`, so MCP
-clients that render a connector icon show StrideSync's own icon instead of a generic fallback.
+**Server icon (milestones Stage 33/35)**: the server declares its `Implementation.icons` field
+(via `_load_server_icon`) as a base64 `data:` URI built from the add-on's existing `icon.png` —
+but a real client turned out to fetch `/favicon.ico` directly instead of reading that field (see
+`favicon` below), so both are served from the same `icon.png` via `_load_icon_bytes`.
 """
 
 from __future__ import annotations
@@ -65,7 +66,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from mcp.types import Icon
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from app.config import Settings
 from app.sync.garmin_client import GarminAPIError, GarminAuthError, GarminClient
@@ -495,21 +496,35 @@ def run_sync_now(settings: Settings) -> Dict[str, Any]:
         conn.close()
 
 
-def _load_server_icon() -> Optional[Icon]:
-    """Base64-embed `icon.png` (the add-on's existing 128x128 store icon) as a `data:` URI for
-    the MCP server's `Implementation.icons` field (milestone Stage 33) -- without this, MCP
-    clients that render a connector icon (e.g. Claude's mobile app) have nothing to show and fall
-    back to a generic default of their own, unrelated to StrideSync. A data URI is used rather
-    than a hosted URL so this doesn't depend on StrideSync knowing its own externally-reachable
-    hostname, which varies per install (LAN-only vs. a Cloudflare Tunnel public hostname).
+def _load_icon_bytes() -> Optional[bytes]:
+    """Read `icon.png` (the add-on's existing 128x128 store icon), shared by both places this
+    server offers it to a client: the MCP `Implementation.icons` field and the plain
+    `/favicon.ico` route (see `_load_server_icon` and `favicon` below, milestones Stage 33/35).
 
-    Returns `None` (server just has no icon, not a startup failure) if the file can't be read --
-    this is packaging metadata, not something a sync/tool call should ever fail over.
+    Returns `None` (caller degrades gracefully, not a startup failure) if the file can't be read
+    -- this is packaging metadata, not something a sync/tool call should ever fail over.
     """
     try:
-        data = _ICON_PATH.read_bytes()
+        return _ICON_PATH.read_bytes()
     except OSError as exc:  # noqa: BLE001 - see docstring: deliberately non-fatal
         logger.warning("Could not load server icon %s (non-fatal): %s", _ICON_PATH, exc)
+        return None
+
+
+def _load_server_icon() -> Optional[Icon]:
+    """Base64-embed `icon.png` as a `data:` URI for the MCP server's `Implementation.icons`
+    field (milestone Stage 33) -- part of declaring the server's icon per the MCP spec. A data
+    URI is used rather than a hosted URL so this doesn't depend on StrideSync knowing its own
+    externally-reachable hostname, which varies per install (LAN-only vs. a Cloudflare Tunnel
+    public hostname).
+
+    Confirmed (via a live add-on log line, milestone Stage 35) that this field alone isn't what
+    MCP clients actually use to render a connector icon -- see `favicon` below for the fetch that
+    turned out to matter. Kept anyway since it's still correct per the MCP spec and cheap to keep
+    declaring, in case (or once) client rendering catches up to it.
+    """
+    data = _load_icon_bytes()
+    if data is None:
         return None
     encoded = base64.b64encode(data).decode("ascii")
     return Icon(src=f"data:image/png;base64,{encoded}", mimeType="image/png", sizes=["128x128"])
@@ -556,6 +571,25 @@ def create_server(settings: Settings) -> FastMCP:
                 {"status": "error", "error": "no tools registered"}, status_code=503
             )
         return JSONResponse({"status": "ok", "tools": tool_names, "tool_count": len(tool_names)})
+
+    @mcp.custom_route("/favicon.ico", methods=["GET"])
+    async def favicon(request: Request) -> Response:
+        """Plain `GET /favicon.ico`, alongside `/health` and `/mcp` (milestone Stage 35).
+
+        Added after declaring the server's icon via MCP's `Implementation.icons` field (Stage 33)
+        turned out to have no visible effect in a real client -- a live add-on log line
+        (`GET /favicon.ico HTTP/1.1 404 Not Found`) caught the client actually fetching this
+        classic browser convention directly, not reading the MCP handshake's icon field at all.
+        Without a route here that request 404s and the client falls back to its own generic
+        icon, unrelated to StrideSync. Serves the same `icon.png` bytes as `_load_server_icon`
+        (not gated by `mcp_auth_token`, same reasoning as `/health` — an icon isn't personal
+        Garmin data, and a client fetching it typically hasn't authenticated yet anyway); 404s in
+        the same non-fatal way if the file can't be read.
+        """
+        data = _load_icon_bytes()
+        if data is None:
+            return Response(status_code=404)
+        return Response(content=data, media_type="image/png")
 
     @mcp.tool()
     def recent_activities(limit: int = 20) -> List[Dict[str, Any]]:

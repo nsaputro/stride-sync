@@ -1066,3 +1066,49 @@ class TestServerIcon:
                 return client.initialize_result.serverInfo.icons
 
         assert asyncio.run(get_server_icons()) is None
+
+
+class TestFavicon:
+    """Confirms `GET /favicon.ico` over a real ASGI request/response cycle -- see
+    PROJECT_PLAN.md milestone Stage 35, added after a live add-on log line
+    (`GET /favicon.ico HTTP/1.1 404 Not Found`) showed a real MCP client fetching this directly
+    rather than reading the `Implementation.icons` field from Stage 33.
+    """
+
+    def _server_and_app(self, tmp_path, mcp_auth_token=""):
+        settings = make_settings(tmp_path)
+        if mcp_auth_token:
+            settings = Settings(**{**settings.__dict__, "mcp_auth_token": mcp_auth_token})
+        seed_db(settings.db_path)
+        mcp = create_server(settings)
+        return mcp, mcp.http_app(path="/mcp")
+
+    def test_returns_200_with_icon_bytes(self, tmp_path):
+        _, app = self._server_and_app(tmp_path)
+        expected = mcp_server_module._ICON_PATH.read_bytes()
+
+        with TestClient(app) as client:
+            response = client.get("/favicon.ico")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.content == expected
+
+    def test_not_gated_by_bearer_token_auth(self, tmp_path):
+        # Same rationale as /health -- a client fetching a favicon typically hasn't
+        # authenticated yet, so this must work with no Authorization header at all.
+        _, app = self._server_and_app(tmp_path, mcp_auth_token="s3cr3t")
+
+        with TestClient(app) as client:
+            response = client.get("/favicon.ico")
+
+        assert response.status_code == 200
+
+    def test_returns_404_when_icon_file_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mcp_server_module, "_ICON_PATH", tmp_path / "no_such_icon.png")
+        _, app = self._server_and_app(tmp_path)
+
+        with TestClient(app) as client:
+            response = client.get("/favicon.ico")
+
+        assert response.status_code == 404

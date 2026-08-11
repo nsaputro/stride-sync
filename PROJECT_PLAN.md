@@ -1497,6 +1497,35 @@ measure of the jog itself.
   re-uploaded to claude.ai (or wherever the skill is installed from) and tested in a fresh chat —
   editing the file in this repo doesn't update any already-installed copy.
 
+### Stage 35 — `/favicon.ico`: the icon fetch that actually mattered 🔄
+
+Direct follow-up to Stage 33, reported live after installing `v0.8.0` (which shipped Stage 33)
+and reconnecting the connector in Claude — the generic fallback icon was still showing. A
+StrideSync add-on log line pasted live, `GET /favicon.ico HTTP/1.1 404 Not Found`, settled it: the
+client fetches this classic browser convention directly, not the MCP `Implementation.icons` field
+from Stage 33 at all. This session's sandbox network policy blocked reaching the user's live
+Cloudflare Tunnel hostname directly (confirmed via the agent-proxy's own connection log, a policy
+denial rather than a bug to retry around), so this was diagnosed from that one log line plus
+reasoning about what request pattern would produce it, not by inspecting the live response
+directly.
+
+- ✅ New `_load_icon_bytes()` (`app/mcp/server.py`): raw `icon.png` bytes, factored out of
+  `_load_server_icon` so both the MCP `icons` field and the new route below share one file read
+  instead of `/favicon.ico` re-decoding `_load_server_icon`'s base64 output.
+- ✅ New `@mcp.custom_route("/favicon.ico", methods=["GET"])`: serves those bytes as
+  `image/png`, alongside `/health` and `/mcp`. Deliberately **not** gated by `mcp_auth_token`,
+  same reasoning as `/health` — an icon isn't personal Garmin data, and a client fetching a
+  favicon typically hasn't authenticated yet anyway. Returns 404 (not a crash) if `icon.png`
+  can't be read, same graceful-degradation posture as `_load_server_icon`.
+- ✅ `_load_server_icon` (Stage 33) and its `icons=[...]` wiring left in place — still correct per
+  the MCP spec and cheap to keep declaring, even though it turned out not to be what actually
+  drove the client's rendering.
+- ✅ New `TestFavicon` test class (`tests/test_mcp_server.py`), built the same way as
+  `TestHealthCheck` — real ASGI requests via `TestClient`, not a mocked route function: 200 with
+  the exact `icon.png` bytes and `image/png` content type, not gated by bearer-token auth even
+  when `mcp_auth_token` is set, 404 when the icon file is missing. Full suite green (335 passed,
+  up from 332).
+
 ---
 
 ## Getting Started (Development)
