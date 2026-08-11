@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-11
+
 ### Fixed
 - **MCP client still showed a generic fallback connector icon after 0.8.0** (milestone Stage 35,
   follow-up to Stage 33): declaring the server's icon via MCP's `Implementation.icons` field
@@ -592,7 +594,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/nsaputro/stride-sync/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nsaputro/stride-sync/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nsaputro/stride-sync/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nsaputro/stride-sync/compare/v0.5.0...v0.6.0
