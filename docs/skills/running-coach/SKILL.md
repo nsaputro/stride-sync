@@ -131,6 +131,10 @@ Instead, always call `activity_laps` for these sessions and split laps into segm
 
 Report the actual work-rep pace/HR (e.g. as a range across the reps) as the meaningful number, and mention the recovery jog pace/HR separately if relevant, rather than presenting a single blended average as if it represented the workout's effort.
 
+### Short-burst Sprint sessions: use recovery-lap average HR, not max HR
+
+For Sprint sessions built from very short max-effort bursts (e.g. 10-15 seconds — the exact duration depends on the Garmin training plan the session came from) followed by much longer jog recoveries (e.g. 3 minutes), apply the same lap-segmentation approach above, plus one more wrinkle specific to this structure: each recovery-jog lap will show a brief HR spike right at the very start — that's residual carryover from the preceding all-out burst, not something produced by the jog itself. When assessing how easy/controlled a recovery jog actually was, use that lap's **average HR**, not its **max HR** — the max is misleading here and will overstate how hard the jog portion was. This is what actually tells you whether recovery jogs are staying easy across the session or whether fatigue is genuinely accumulating rep-to-rep.
+
 ## Charting run data (pace / HR over time)
 
 When visualizing how pace and/or heart rate varied over the course of a run, follow these conventions so charts come out at full fidelity and read the way Garmin's own charts do. These were tuned against real user feedback comparing output to the Garmin Connect app.
