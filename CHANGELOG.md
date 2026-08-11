@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-11
+
 ### Added
 - **MCP server icon** (milestone Stage 33): the server now declares its own icon (via MCP's
   `Implementation.icons` field, embedded as a base64 `data:` URI from the add-on's existing
@@ -581,7 +583,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/nsaputro/stride-sync/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nsaputro/stride-sync/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nsaputro/stride-sync/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/nsaputro/stride-sync/compare/v0.4.1...v0.5.0
