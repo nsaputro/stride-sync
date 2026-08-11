@@ -8,6 +8,13 @@
   `icon.png`), so MCP clients that render a connector icon — like Claude's mobile app — show
   StrideSync's own icon instead of a generic fallback.
 
+- **`running-coach` example skill: short-burst Sprint session guidance** (milestone Stage 34,
+  `docs/skills/running-coach/SKILL.md` follow-up): for Sprint sessions built from very short
+  (e.g. 10-15s, depending on the Garmin training plan) max-effort bursts followed by much longer
+  (e.g. 3 min) jog recoveries, use a recovery lap's average HR rather than its max HR when judging
+  how easy/controlled the jog was — the max is residual carryover from the preceding burst, not
+  the jog's own intensity. Purely additive documentation — no application code changed.
+
 ### Fixed
 - **Dockerfile never actually shipped `icon.png` inside the container image** — only `app/` and
   `rootfs/` were copied in, so any code reading `icon.png` at runtime (the new server-icon feature

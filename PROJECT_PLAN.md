@@ -1475,6 +1475,28 @@ app) had nothing to show and substituted their own generic default.
   starts normally (no icon, not a crash) when the icon file is missing. Full suite green (332
   passed, up from 328).
 
+### Stage 34 — `running-coach` skill: short-burst Sprint sessions need recovery-lap average HR, not max HR 🔄
+
+Requested directly, as a follow-up to the existing lap-segmentation guidance (Stage 9/23): Sprint
+sessions built from very short (e.g. 10-15s, depending on the Garmin training plan) max-effort
+bursts followed by much longer (e.g. 3 min) jog recoveries have a wrinkle the general
+work-rep/recovery-jog split doesn't call out on its own — each recovery-jog lap carries a brief
+HR spike right at its start from the preceding burst, which overstates that lap's `max_hr` as a
+measure of the jog itself.
+
+- ✅ New subsection in `docs/skills/running-coach/SKILL.md`, placed immediately after the existing
+  "Critical: structured/interval sessions need lap-level analysis" guidance since it's a
+  refinement of the same `activity_laps` segmentation, not a separate workflow: for these
+  sessions, use a recovery lap's **average HR**, not its **max HR**, when judging how easy/
+  controlled the jog was — the max is carryover from the burst, not the jog's own intensity, and
+  average HR is what actually shows whether recovery is staying easy or fatigue is accumulating
+  rep-to-rep across the session.
+- ✅ Purely additive documentation — no application code changed, no version bump needed (lands
+  within the still-open, unreleased `0.8.0` cycle alongside Stage 33).
+- ⚠️ Per this skill's existing workflow note: `SKILL.md` changes only take effect once manually
+  re-uploaded to claude.ai (or wherever the skill is installed from) and tested in a fresh chat —
+  editing the file in this repo doesn't update any already-installed copy.
+
 ---
 
 ## Getting Started (Development)
