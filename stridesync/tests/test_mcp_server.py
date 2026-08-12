@@ -13,6 +13,7 @@ from app.mcp.server import (
     _clamp,
     _connect_readonly,
     _load_server_icon,
+    build_http_app,
     create_server,
     find_activities,
     get_activity_hr_zones,
@@ -952,6 +953,85 @@ class TestHttpAuthEnforcement:
         # Not 401: the request got past auth into actual MCP protocol handling (a 400 here is
         # the MCP session-handshake requirement, unrelated to auth — see PR description/commit).
         assert response.status_code != 401
+
+
+class TestPathTokenAuth:
+    """Confirms `/mcp/<token>` authenticates the same way a correct `Authorization: Bearer`
+    header would, over a real ASGI request/response cycle — see PROJECT_PLAN.md milestone
+    Stage 36, added because Claude's cloud/mobile custom-connector setup has no field for a
+    custom header, only a bare URL.
+    """
+
+    def _rpc_headers(self):
+        # Deliberately no Authorization header on any of these -- the whole point is
+        # authenticating via the URL path instead.
+        return {"Accept": "application/json, text/event-stream"}
+
+    def _mcp_app(self, tmp_path, mcp_auth_token="s3cr3t"):
+        settings = make_settings(tmp_path)
+        settings = Settings(**{**settings.__dict__, "mcp_auth_token": mcp_auth_token})
+        seed_db(settings.db_path)
+        return build_http_app(settings)
+
+    def test_accepts_request_with_correct_token_in_path(self, tmp_path):
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp/s3cr3t",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=self._rpc_headers(),
+            )
+
+        # Same criterion as the header-based equivalent in TestHttpAuthEnforcement: not 401
+        # means it got past auth into actual MCP protocol handling.
+        assert response.status_code != 401
+
+    def test_rejects_wrong_token_in_path(self, tmp_path):
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp/wrong-token",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=self._rpc_headers(),
+            )
+
+        # No route matches an unrecognized "/mcp/<anything>" path -- a plain 404, not a 401,
+        # so a guessed token can't be distinguished from "wrong" vs. "close."
+        assert response.status_code == 404
+
+    def test_plain_mcp_endpoint_still_requires_header_auth(self, tmp_path):
+        # The path-token middleware must not weaken the existing /mcp + header path -- a bare
+        # /mcp request with no credentials at all still needs to be rejected.
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers=self._rpc_headers(),
+            )
+
+        assert response.status_code == 401
+
+    def test_plain_mcp_endpoint_still_accepts_header_auth(self, tmp_path):
+        # Regression check: the middleware being present doesn't break the original,
+        # already-documented connection path.
+        with TestClient(self._mcp_app(tmp_path)) as client:
+            response = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                headers={**self._rpc_headers(), "Authorization": "Bearer s3cr3t"},
+            )
+
+        assert response.status_code != 401
+
+    def test_path_token_middleware_not_added_when_auth_token_not_configured(self, tmp_path):
+        settings = make_settings(tmp_path)
+        assert settings.mcp_auth_token == ""
+        seed_db(settings.db_path)
+
+        app = build_http_app(settings)
+
+        assert not any(
+            getattr(mw, "cls", None) is mcp_server_module.PathTokenAuthMiddleware
+            for mw in app.user_middleware
+        )
 
 
 class TestHealthCheck:

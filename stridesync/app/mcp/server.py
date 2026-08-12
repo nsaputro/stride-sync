@@ -51,6 +51,13 @@ see `health_check` below.
 (via `_load_server_icon`) as a base64 `data:` URI built from the add-on's existing `icon.png` —
 but a real client turned out to fetch `/favicon.ico` directly instead of reading that field (see
 `favicon` below), so both are served from the same `icon.png` via `_load_icon_bytes`.
+
+**Path-embedded token auth (milestone Stage 36)**: Claude's cloud/mobile custom-connector setup
+only accepts a bare URL, with no field for a custom `Authorization` header, so `mcp_auth_token`
+was previously all-or-nothing with that client. `PathTokenAuthMiddleware` lets the same token be
+supplied as a URL path segment instead — `/mcp/<mcp_auth_token>` — translating it into the normal
+`Authorization: Bearer <token>` header before `SharedSecretVerifier`'s existing check runs, so the
+plain `/mcp` + header path is completely unaffected either way.
 """
 
 from __future__ import annotations
@@ -62,9 +69,11 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import uvicorn
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from mcp.types import Icon
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -93,6 +102,78 @@ class SharedSecretVerifier(TokenVerifier):
         if not hmac.compare_digest(token, self._token):
             return None
         return AccessToken(token=token, client_id="stridesync-mcp-client", scopes=[])
+
+
+class PathTokenAuthMiddleware:
+    """Raw ASGI middleware translating a URL-embedded token (`/mcp/<token>`) into the standard
+    `Authorization: Bearer <token>` header `SharedSecretVerifier` already checks (milestone
+    Stage 36).
+
+    Claude's cloud/mobile "custom connector" setup only takes a bare URL — no field for a custom
+    header — so `mcp_auth_token` was previously all-or-nothing with that client (see DOCS.md's
+    "Known limitation": leave it unset, or lose Claude's mobile connector entirely). Embedding the
+    shared secret in the URL path itself (the same pattern webhook-style secret URLs commonly use)
+    lets that client authenticate too, without weakening the plain `/mcp` + header path at all.
+
+    Only intercepts a request to exactly `<mcp_path>/<token>` (e.g. `/mcp/abc123`, one segment,
+    no further nesting) — everything else, including the plain `/mcp` endpoint with a real
+    `Authorization` header, passes through completely unchanged, unaffected by this middleware
+    being present. A wrong token in the path is left untouched rather than rejected explicitly, so
+    it falls through to Starlette's own 404 for an unmatched route — this doesn't confirm or deny
+    whether a guessed token was "close," unlike an explicit 401 would.
+    """
+
+    def __init__(self, app, mcp_path: str, token: str) -> None:
+        self.app = app
+        self._mcp_path = mcp_path
+        self._prefix = mcp_path.rstrip("/") + "/"
+        self._token = token
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope["path"]
+            if path.startswith(self._prefix):
+                candidate = path[len(self._prefix) :]
+                if (
+                    candidate
+                    and "/" not in candidate
+                    and hmac.compare_digest(candidate, self._token)
+                ):
+                    scope = dict(scope)
+                    scope["path"] = self._mcp_path
+                    scope["raw_path"] = self._mcp_path.encode("ascii")
+                    headers = [
+                        (name, value)
+                        for name, value in scope.get("headers", [])
+                        if name.lower() != b"authorization"
+                    ]
+                    headers.append((b"authorization", f"Bearer {self._token}".encode("ascii")))
+                    scope["headers"] = headers
+        await self.app(scope, receive, send)
+
+
+def build_http_app(settings: Settings) -> Starlette:
+    """Build the ASGI app actually served over HTTP: `create_server()`'s FastMCP app, plus a
+    `/mcp/<token>` path-token-auth alias (milestone Stage 36) added as the *outermost* middleware
+    layer when `mcp_auth_token` is configured — there's no secret to embed in a URL when it isn't
+    set, so the plain, unauthenticated `/mcp` behaves exactly the same either way in that case.
+
+    Added via Starlette's `app.add_middleware()` (always inserts at the front of the middleware
+    stack) rather than the `middleware=` parameter `mcp.http_app()`/`mcp.run()` accept — that
+    parameter always appends *after* FastMCP's own `AuthenticationMiddleware`, confirmed by a
+    real ASGI request during development returning `401`: the `Authorization` header this
+    middleware injects arrived too late for `AuthenticationMiddleware` to see it, since that
+    layer had already run by the time control reached this one. `PathTokenAuthMiddleware` must
+    run *before* it, not after, so only `add_middleware()` actually works here.
+    """
+    mcp = create_server(settings)
+    app = mcp.http_app(path="/mcp")
+    if settings.mcp_auth_token:
+        app.add_middleware(
+            PathTokenAuthMiddleware, mcp_path="/mcp", token=settings.mcp_auth_token
+        )
+    return app
+
 
 _MIN_LIMIT = 1
 _MAX_LIMIT = 200
@@ -882,16 +963,24 @@ def main() -> None:
     logging.basicConfig(level=settings.log_level.upper())
 
     logger.info("Starting StrideSync MCP server on port %d (path /mcp)", settings.mcp_port)
-    mcp = create_server(settings)
-    # show_banner=False also skips fastmcp's PyPI update-check network call (see
-    # fastmcp.utilities.cli.log_server_banner) — an add-on service shouldn't phone home on
-    # startup, and the ANSI-art banner doesn't render usefully in the HA add-on log viewer.
-    mcp.run(
-        transport="http",
+    app = build_http_app(settings)
+    # Served directly via uvicorn rather than FastMCP's own mcp.run(...) convenience wrapper —
+    # that wrapper builds its own internal app object with no seam to add_middleware() on it
+    # before serving (see build_http_app's docstring for why that specifically matters here).
+    # Config kwargs mirror what mcp.run(transport="http", ...) uses internally:
+    # timeout_graceful_shutdown so an s6-overlay restart isn't held up waiting on this service,
+    # ws="websockets-sansio" for the same SSE-reconnection support fastmcp's own default uses.
+    # No banner call here (unlike mcp.run(show_banner=False) before it) — skipping fastmcp's
+    # banner entirely, not just suppressing it, has the same effect: an add-on service shouldn't
+    # phone home to PyPI on startup, and the ANSI-art banner doesn't render usefully in the HA
+    # add-on log viewer either way.
+    uvicorn.run(
+        app,
         host="0.0.0.0",
         port=settings.mcp_port,
-        path="/mcp",
-        show_banner=False,
+        timeout_graceful_shutdown=2,
+        ws="websockets-sansio",
+        log_level=settings.log_level.lower(),
     )
 
 
