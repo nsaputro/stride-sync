@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-12
+
 ### Added
 - **Path-embedded `mcp_auth_token`: `/mcp/<token>`** (milestone Stage 36): the shared secret can
   now be supplied as part of the URL (`https://<host>/mcp/<mcp_auth_token>`) instead of only via
@@ -603,7 +605,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
   reference-style link in the generated `stridesync/CHANGELOG.md`. Caught by simulating the
   script against this repo's real `CHANGELOG.md` before ever running it for real.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/nsaputro/stride-sync/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/nsaputro/stride-sync/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nsaputro/stride-sync/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/nsaputro/stride-sync/compare/v0.6.0...v0.7.0
