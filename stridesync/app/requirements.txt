@@ -14,3 +14,9 @@ requests  # used directly in app/sync/garmin_client.py to catch transport-level 
 # inside the add-on; see app/mcp/server.py module docstring for why garmy-mcp's bundled server
 # wasn't reused as-is.
 fastmcp
+# Already an indirect dependency of fastmcp (its own mcp.run(transport="http") is built on it) —
+# listed explicitly because app/mcp/server.py now imports and calls it directly (milestone
+# Stage 36: serving a manually-built ASGI app via uvicorn.run(), not mcp.run(), so a Starlette
+# add_middleware() call can run before fastmcp's own auth middleware). Relying on it staying
+# available as an unlisted transitive dependency would be fragile.
+uvicorn

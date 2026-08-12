@@ -1526,6 +1526,58 @@ directly.
   when `mcp_auth_token` is set, 404 when the icon file is missing. Full suite green (335 passed,
   up from 332).
 
+### Stage 36 — Path-embedded `mcp_auth_token`: `/mcp/<token>`, for clients that can't send a header 🔄
+
+Requested directly, closing a gap `stridesync/DOCS.md` already documented as a "known
+limitation": Claude's cloud/mobile custom-connector UI only takes a bare URL, with no field for a
+custom `Authorization` header, so `mcp_auth_token` was previously all-or-nothing with that
+client — set it and Claude's mobile connector simply couldn't authenticate at all (`401` on every
+request), or leave it unset and rely entirely on a Cloudflare WAF IP-range rule for protection.
+
+- ✅ New `PathTokenAuthMiddleware` (`app/mcp/server.py`): raw ASGI middleware translating a
+  request to `/mcp/<token>` into the standard `/mcp` request with an
+  `Authorization: Bearer <token>` header injected — the same "secret embedded in the URL path"
+  pattern webhook-style URLs commonly use. A wrong token in the path is left untouched rather
+  than rejected explicitly, falling through to Starlette's own 404 for an unmatched route, so a
+  guessed token can't be distinguished from "wrong" vs. "close" the way an explicit 401 would.
+- ⚠️ **Real implementation pitfall, found via a failing test, not assumed**: passing this
+  middleware through FastMCP's own `middleware=` parameter (to `mcp.run()`/`mcp.http_app()`)
+  does *not* work — that parameter always appends *after* FastMCP's own
+  `AuthenticationMiddleware` in the Starlette middleware stack, so by the time
+  `PathTokenAuthMiddleware` ran and injected the header, `AuthenticationMiddleware` had already
+  read the (missing) header and decided "unauthenticated." Confirmed via a real ASGI request
+  returning `401` during development. Fixed by calling Starlette's `app.add_middleware()`
+  directly on the already-built app instead — that method always inserts at the front of the
+  stack, guaranteeing `PathTokenAuthMiddleware` runs first.
+- ✅ New `build_http_app(settings)`: builds `create_server()`'s FastMCP app via `mcp.http_app()`,
+  then `add_middleware()`s the path-token layer on top when `mcp_auth_token` is configured.
+  `main()` now serves this app directly via `uvicorn.run(...)` instead of `mcp.run(transport=
+  "http", ...)` — that convenience wrapper builds its own internal app object with no seam to
+  `add_middleware()` on it before serving, which is exactly what this fix needs. `uvicorn.run`'s
+  config kwargs (`timeout_graceful_shutdown=2`, `ws="websockets-sansio"`) mirror what `mcp.run()`
+  used internally, so this isn't a behavior change beyond the one thing it exists to fix.
+- ✅ **Verified against a real running server, not just `TestClient`** — learned from the
+  Stage 35 Dockerfile gap (a fix that looked correct in tests but was never actually reachable at
+  runtime): ran `python3 -m app.mcp.server` as a real background process and `curl`'d it
+  directly — `/health` and `/favicon.ico` 200, `/mcp` with no credentials 401, `/mcp/<correct
+  token>` and `/mcp` with a correct `Authorization` header both reach real MCP protocol handling
+  (400, the session-handshake requirement — not 401), `/mcp/<wrong token>` 404. Confirmed clean
+  process log output and shutdown.
+- ✅ `stridesync/DOCS.md`'s Claude-mobile/Cloudflare-Tunnel section rewritten: the "known
+  limitation" callout now describes the workaround instead of a dead end, setup step 1 changes
+  from "leave `mcp_auth_token` empty" to "set it," the connector URL in step 4 becomes
+  `https://<tunnel-hostname>/mcp/<mcp_auth_token>`, and the WAF rule (step 3) is reframed as
+  recommended defense-in-depth rather than the only real access control. The empty-token +
+  WAF-only path is kept as an explicitly still-supported fallback for anyone who'd rather not put
+  a secret in a URL at all.
+- ✅ New `TestPathTokenAuth` test class (`tests/test_mcp_server.py`), built the same way as
+  `TestHttpAuthEnforcement` — real ASGI requests via `TestClient` against `build_http_app()`'s
+  actual output: correct path-token not `401` (reaches protocol handling), wrong path-token
+  `404`, plain `/mcp` with no credentials still `401` (middleware doesn't weaken the existing
+  path), plain `/mcp` with a correct header still works (regression check), and no path-token
+  middleware gets added at all when `mcp_auth_token` isn't configured. Full suite green (340
+  passed, up from 335).
+
 ---
 
 ## Getting Started (Development)
