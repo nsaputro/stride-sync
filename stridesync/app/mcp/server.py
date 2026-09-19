@@ -530,7 +530,7 @@ def get_activity_samples(
 
 
 def get_last_sync_status(conn: sqlite3.Connection) -> Dict[str, Any]:
-    """Outcome of the most recent sync attempt, so staleness is never silent (see CLAUDE.md)."""
+    """Outcome of the most recent sync attempt, so staleness is never silent (see AGENTS.md)."""
     row = conn.execute(
         """
         SELECT started_at, finished_at, status, activities_synced, error_message

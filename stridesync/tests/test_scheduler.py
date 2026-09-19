@@ -1068,7 +1068,7 @@ class TestRunForever:
         assert len(calls) == 1
 
     def test_auth_failure_does_not_crash_the_loop(self, tmp_path):
-        # CLAUDE.md: sync failures must never crash the service — the sync-scheduler must keep
+        # AGENTS.md: sync failures must never crash the service — the sync-scheduler must keep
         # retrying on the next interval rather than taking the whole s6 service down.
         settings = make_settings(tmp_path)
         attempts = []

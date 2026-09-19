@@ -8,7 +8,7 @@
 -- and heart rate broken down over the course of an activity, rather than a single average.
 --
 -- sync_log: outcome of every sync run — success/partial/failed, counts, and error detail — so
--- staleness is never silent (see CLAUDE.md, "Fail loud, not silent").
+-- staleness is never silent (see AGENTS.md, "Fail loud, not silent").
 
 CREATE TABLE IF NOT EXISTS activities (
     activity_id             INTEGER PRIMARY KEY,

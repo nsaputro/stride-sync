@@ -1,8 +1,8 @@
 """Single interface to Garmin Connect auth + activity fetch.
 
-Sync and MCP code should never call `garminconnect` directly — see CLAUDE.md, Coding
-Conventions. Wrapping it here means a future library swap (see PROJECT_PLAN.md's "Known risk:
-unofficial Garmin auth breakage") is a one-file change — which is exactly what happened here.
+Sync and MCP code should never call `garminconnect` directly — see AGENTS.md, Coding
+Conventions. Wrapping it here means a future library swap
+is a one-file change — which is exactly what happened here.
 This module used to wrap `garmy`, but three successive fixes on top of it (a corrected
 User-Agent, `curl_cffi` TLS-fingerprint impersonation, then a human-like login delay — see
 CHANGELOG.md) all failed to get past Garmin's Cloudflare bot challenge on the SSO login.
@@ -828,7 +828,7 @@ class GarminClient:
     """Authenticates against Garmin Connect and fetches activity data.
 
     Every call that reaches Garmin's unofficial API is wrapped so failures surface as
-    GarminAuthError/GarminAPIError — never a silently empty result (CLAUDE.md: "Fail loud").
+    GarminAuthError/GarminAPIError — never a silently empty result (AGENTS.md: "Fail loud").
     """
 
     def __init__(self, username: str, password: str, token_dir: Optional[str] = None) -> None:
