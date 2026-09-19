@@ -193,8 +193,7 @@ using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories (`Adde
 Three pipelines, following the same split used in `siap-jalan` and `health-recorder`. CI never
 publishes images — that's exclusively owned by the release and pre-release workflows.
 
-**CI** (`.github/workflows/ci.yml`) — runs on every push to `main`, `dev`, `claude/**`,
-`feature/**`, `fix/**` and on PRs targeting `main`:
+**CI** (`.github/workflows/ci.yml`) — runs on push to `main` and on PRs targeting `main`:
 
 - yamllint on `stridesync/config.yaml` + `stridesync/build.yaml`
 - hadolint on `stridesync/Dockerfile`
