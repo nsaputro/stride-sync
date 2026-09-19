@@ -1,34 +1,51 @@
 schema: spec-driven
 
 context: |
-  Project: StrideSync
-  Description: Home Assistant add-on that syncs Garmin Connect running data and exposes it via MCP over Streamable HTTP for AI conversational analysis.
-  Tech stack: Python 3.12, FastMCP (Streamable HTTP), SQLite (/data/stridesync.db), python-garminconnect, s6-overlay, Docker (Alpine base).
-  Architecture: Dual supervised s6 services (sync-scheduler and mcp-server) running inside the container.
-  Key conventions:
-  - Separate sync scheduler (app/sync) and MCP server (app/mcp) modules; failure in sync must not terminate the MCP server.
-  - Fail loud, not silent: all sync outcomes recorded in sync_log table.
-  - Single Garmin client wrapper at app/sync/garmin_client.py isolating unofficial API risk.
-  - Three-file versioning contract: stridesync/NEXT_VERSION, stridesync/config.yaml, stridesync-dev/config.yaml.
-  - Git policy: Always work on feature branches, never commit directly to main.
-  - CI requirement: ci-pass is the required status check on pull requests.
+  StrideSync: HA add-on syncing Garmin Connect running data to SQLite (/data/stridesync.db) and serving FastMCP over Streamable HTTP (port 8765/8766).
+  Stack: Python 3.12, SQLite, python-garminconnect, FastMCP (<4.0.0), s6-overlay (Alpine).
+  Architecture: Dual supervised s6 services (sync-scheduler and mcp-server). Sync failure must not stop MCP server.
+  Conventions:
+  - Single Garmin client wrapper (app/sync/garmin_client.py) isolating unofficial API.
+  - Fail loud: all sync outcomes logged to sync_log table.
+  - Versioning: 3-file convention (stridesync/NEXT_VERSION, stridesync/config.yaml, stridesync-dev/config.yaml).
+  - Git: Feature branches only, PRs targeting main, ci-pass check required.
+  - Project Board: GitHub Project #2 (Backlog -> Ready [must be issue] -> In Progress -> Done).
 
 rules:
   proposal:
-    - Focus on motivation, user impact, and capabilities being introduced or changed.
-    - Identify whether spec-level behavior changes or if skip_specs is appropriate.
+    - "Be concise: limit proposals to under 250 words using bullet points over prose."
+    - "Omit introductory filler, background fluff, and architecture restatements."
+    - "State 'Why' in 1-2 sentences and list 'What Changes' as concise bullets."
+    - "Set skip_specs: true for changes that do not alter observable system requirements."
+    - "Exclude internal class names, algorithms, or implementation details."
+
   specs:
-    - Format requirements with normative SHALL/MUST statements.
-    - Scenarios must use exactly 4 hashtags (#### Scenario:) with WHEN/THEN clauses.
+    - "State each requirement in 1-2 normative sentences (SHALL/MUST); avoid narrative exposition."
+    - "Keep '## Purpose' between 50-120 characters (concise yet satisfying strict validation)."
+    - "Scenarios must be minimal: exactly 1 WHEN and 1-2 THEN bullet lines (single sentence each)."
+    - "Define only observable inputs, outputs, and behaviors; exclude internal code details, libraries, and class names."
+    - "Omit duplicate or redundant scenarios; cover core happy path and critical boundary/error only."
+
+  design:
+    - "Omit design.md entirely unless the change introduces complex architecture or data migrations."
+    - "When created, cap design at 300 words using bullet points only."
+    - "Never repeat context or requirements from proposal or specs; use links/references."
+    - "Document only non-obvious technical trade-offs and decisions with 1-sentence rationales."
+
   tasks:
-    - Group tasks under numbered headings with verification criteria in each task checkbox.
+    - "Cap task lists at 3-8 actionable checkboxes formatted as: '- [ ] X.Y Action and verification'."
+    - "Merge implementation and verification into a single task line; avoid separate test runner tasks."
+    - "Omit procedural meta-tasks (e.g. 'review code', 'make a plan', 'git commit')."
+    - "No narrative commentary outside headings and checkbox tasks."
 
 operations:
   apply:
     guidance:
-      - Run syntax validation and tests before marking tasks complete.
-      - Follow repository three-file versioning rules when bumping versions.
+      - "Keep progress updates telegraphic (1 sentence per task completed)."
+      - "Do not echo full test logs or entire file contents in progress output."
+      - "Run syntax parsing and tests before marking tasks complete."
   archive:
     guidance:
-      - Verify all specs validate with openspec validate --specs --strict.
-      - Update repository CHANGELOG.md and stridesync/CHANGELOG.md with unreleased changes.
+      - "Provide a 2-3 bullet summary of the archive outcome."
+      - "Verify specs with openspec validate --specs --strict before archiving."
+      - "Update CHANGELOG.md [Unreleased] with a single concise bullet."

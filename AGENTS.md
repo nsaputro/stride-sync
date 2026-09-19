@@ -24,6 +24,11 @@ Workflows are available as slash commands or skills in `.agents/`:
 1. **Check existing specifications first**: Before proposing or modifying capabilities, review `openspec/specs/` with `openspec list --specs`.
 2. **Behavioral contracts**: Specs define observable behavior, inputs, outputs, constraints, and testable scenarios (using `#### Scenario:` with `WHEN`/`THEN`). Implementation details belong in `design.md` or `tasks.md`.
 3. **Spec validation**: Run `openspec validate --specs --strict` before completing changes.
+4. **Token efficiency & conciseness**: Keep all generated artifacts compact and high-signal per `openspec/config.yaml` rules:
+   - Proposals: <250 words, 1-2 sentence 'Why', concise bulleted 'What Changes', use `skip_specs: true` when requirements don't change.
+   - Specs: 1-2 normative sentences per requirement, ultra-compact 1-line WHEN/THEN scenarios, zero internal code details.
+   - Design: omit unless architectural/breaking; cap at <300 words with bulleted decisions.
+   - Tasks: 3-8 actionable checkboxes with inline verification; avoid narrative fluff.
 
 ---
 
