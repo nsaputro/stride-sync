@@ -93,7 +93,6 @@ This repo follows the standard Home Assistant add-on repository layout:
 stride-sync/
 ├── repository.yaml          # Add-on repository descriptor (required at root)
 ├── AGENTS.md                # Agent instructions and guidelines
-├── CLAUDE.md                # Claude instructions
 ├── README.md
 ├── CHANGELOG.md             # Repo-level changelog (Keep a Changelog format)
 ├── LICENSE
@@ -146,6 +145,40 @@ If `sync-scheduler` fails or restarts, `mcp-server` remains alive and answers qu
 - Garmin auth/session code lives behind a single client interface (`app/sync/garmin_client.py`) to isolate unofficial API breakage risks.
 - **Fail loud, not silent**: a failed sync must write an updated status to the `sync_log` table so staleness is visible via MCP and web UI.
 - All MCP tools are read-only except gear assignment write-backs (`add_activity_gear`, `remove_activity_gear`), which require explicit user confirmation.
+
+---
+
+## Local Development & Testing
+
+You do not need Home Assistant running to develop or test this add-on. Build and run the container standalone first; install it into HA only once it behaves correctly on its own:
+
+```bash
+# Build the add-on image standalone (same Dockerfile HA Supervisor uses)
+docker build -t stridesync-dev ./stridesync
+
+# Run it with a local /data volume and options.json substituting for HA Supervisor's config UI
+mkdir -p .dev-data
+cat > .dev-data/options.json <<'EOF'
+{
+  "garmin_username": "you@example.com",
+  "garmin_password": "changeme",
+  "sync_interval_hours": 6,
+  "mcp_port": 8765,
+  "log_level": "info"
+}
+EOF
+
+docker run --rm -it \
+  -p 8765:8765 \
+  -p 8767:8767 \
+  -v "$(pwd)/.dev-data:/data" \
+  stridesync-dev
+```
+
+- `bashio::config` reads `/data/options.json` — outside of HA Supervisor, you provide this file yourself as shown above.
+- Once running, point an MCP client at `http://localhost:8765/mcp` to exercise the MCP server without needing HA ingress or `mcp-proxy` on the HA side.
+- For an MFA/2FA account, `http://localhost:8767/` serves the one-time login UI directly (this is what a real HA install reaches through the add-on's ingress panel instead).
+- Only after standalone behavior is verified should you add the repo to a real HA instance (**Settings → Add-ons → Add-on Store → ⋮ → Repositories** → this repo's URL) to test Supervisor packaging, ingress, and the options UI.
 
 ---
 

@@ -390,7 +390,7 @@ def run_sync_once(settings: Settings, client: GarminClient) -> int:
     before — rather than a fixed most-recent-N count, so a busy stretch (more activities logged
     than a fixed count would cover) is never silently missed.
 
-    Records the outcome in `sync_log` regardless of success or failure (CLAUDE.md: "Fail loud,
+    Records the outcome in `sync_log` regardless of success or failure (AGENTS.md: "Fail loud,
     not silent" — a broken sync must never leave the database looking current without a trace).
     Every record type's count (activities, daily_wellness, vo2max_history, planned_workouts,
     gear) is logged on both the success and failure path, so an add-on log line alone is enough

@@ -2,8 +2,8 @@
 
 Each s6 service's `run` script reads `/data/options.json` via `bashio::config` and exports
 these as env vars before exec'ing into the Python process (see rootfs/etc/services.d/*/run) —
-see PROJECT_PLAN.md §1, HA add-on configuration table. Outside the container (local dev), set
-the same env vars directly; see CLAUDE.md, Local Development & Testing.
+see AGENTS.md, HA add-on configuration table. Outside the container (local dev), set
+the same env vars directly; see AGENTS.md, Local Development & Testing.
 """
 
 from __future__ import annotations

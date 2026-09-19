@@ -9,7 +9,7 @@ step — connect any MCP client (e.g. Claude Desktop, Antigravity) to it over th
 **Almost entirely read-only**: the one exception is a small, explicitly-confirmed gear-correction
 write surface (e.g. "this run was actually in my other shoes") — every other tool only reads.
 
-See [`openspec/specs/`](openspec/specs/) for capability specifications, and [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) for agent guidelines and repository conventions.
+See [`openspec/specs/`](openspec/specs/) for capability specifications, and [`AGENTS.md`](AGENTS.md) for agent guidelines and repository conventions.
 
 <img src="docs/images/dashboard.png" alt="StrideSync Dashboard tab showing synced activity/wellness/VO2-max/planned-workout totals and recent activities" width="360">
 
@@ -117,7 +117,7 @@ home, rather than standing up a new always-on service from scratch:
 ## Quick Start
 
 You do not need a Home Assistant instance to try StrideSync — build and run it standalone first
-(see `CLAUDE.md`'s Local Development & Testing section for the full walkthrough):
+(see `AGENTS.md`'s Local Development & Testing section for the full walkthrough):
 
 ```bash
 docker build -t stridesync-dev ./stridesync

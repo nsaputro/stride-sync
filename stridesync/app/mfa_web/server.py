@@ -282,7 +282,7 @@ def _sync_summary(db_path: str) -> Dict[str, Any]:
 
     Opens its own read-only connection rather than reuse `app/mcp/server.py`'s (which serves the
     same `sync_log`/`activities` data to MCP clients) — this module and the MCP server are meant
-    to stay independently runnable (CLAUDE.md), so importing one from the other for a handful of
+    to stay independently runnable (AGENTS.md), so importing one from the other for a handful of
     count queries isn't worth coupling them. Returns defaults, not an error, if the DB file
     doesn't exist yet (e.g. the sync-scheduler service hasn't completed its first pass).
 
