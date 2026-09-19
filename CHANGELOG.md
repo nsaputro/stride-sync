@@ -8,7 +8,13 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-08-12
+### Added
+- **OpenSpec spec-driven development support for Antigravity** (milestone Stage 37):
+  - Initialized OpenSpec integration with Antigravity tool configuration (`openspec init --tools antigravity`).
+  - Added 6 baseline OpenSpec capability specifications under `openspec/specs/`: `garmin-sync`, `data-storage`, `mcp-server`, `web-ui`, `gear-management`, and `ha-addon-packaging`.
+  - Added Antigravity workflows in `.agents/workflows/` (`opsx-propose`, `opsx-apply`, `opsx-update`, `opsx-sync`, `opsx-archive`, `opsx-explore`) and OpenSpec skills in `.agents/skills/`.
+  - Added `AGENTS.md` defining project guidelines, OpenSpec workflows, coding conventions, and Home Assistant repository standards for AI agents.
+  - Installed `running-coach` skill into `.agents/skills/running-coach/SKILL.md` for native progressive disclosure loading in Antigravity.
 
 ### Added
 - **Path-embedded `mcp_auth_token`: `/mcp/<token>`** (milestone Stage 36): the shared secret can

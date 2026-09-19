@@ -2,13 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Plan
+## Spec-Driven Development & Project Plan
 
-**Always read `PROJECT_PLAN.md` before implementing any new feature.**
+This repository uses **[OpenSpec](https://github.com/Fission-AI/OpenSpec)** for spec-driven development. Core capability specifications live in `openspec/specs/` and agent instructions live in `AGENTS.md`.
 
-- Check which milestone the feature belongs to and confirm it is listed there.
-- When you open a PR for a feature, tick its checkbox in `PROJECT_PLAN.md` and include the updated file in the same commit.
-- If a feature is not yet in the plan, add it to the appropriate milestone before starting work.
+- For new features and modifications, follow the OpenSpec workflow (`openspec/specs/` and `openspec/changes/`).
+- Historical milestone progress and architectural decisions are tracked in `PROJECT_PLAN.md`.
+- When you open a PR for a feature, update its corresponding OpenSpec delta or spec, tick any related item in `PROJECT_PLAN.md`, and include the updated files in the same commit.
 
 ## Purpose
 

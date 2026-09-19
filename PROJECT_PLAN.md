@@ -1578,6 +1578,28 @@ request), or leave it unset and rely entirely on a Cloudflare WAF IP-range rule 
   middleware gets added at all when `mcp_auth_token` isn't configured. Full suite green (340
   passed, up from 335).
 
+### Stage 37 — Migrate to OpenSpec for Antigravity 🔄
+
+Migrates the repository development workflow to **OpenSpec** (AI-native spec-driven development)
+and sets up full pair programming integration with **Antigravity** (Google DeepMind agentic coding
+assistant).
+
+- ✅ Initialized OpenSpec with Antigravity tool configuration (`openspec init --tools antigravity`),
+  creating `.agents/skills/` (the 6 core OpenSpec skills) and `.agents/workflows/` (slash commands
+  for `/opsx-propose`, `/opsx-apply`, `/opsx-update`, `/opsx-sync`, `/opsx-archive`, `/opsx-explore`).
+- ✅ Formalized 6 core capability specifications in `openspec/specs/`:
+  - `garmin-sync`: Garmin Connect authentication, session tokens, scheduling, incremental sync, backfill, telemetry.
+  - `data-storage`: Relational SQLite database schema, tables, lap/split series, wellness metrics, startup migrations.
+  - `mcp-server`: FastMCP Streamable HTTP server, dual-transport bearer auth, `/health`, `/favicon.ico`, 18 tools.
+  - `web-ui`: Home Assistant Ingress & standalone web UI, Dashboard, Running (HR zones & weekly mileage), Settings.
+  - `gear-management`: Equipment tracking, live activity gear inspection, write-backs with human confirmation.
+  - `ha-addon-packaging`: HA add-on layout, s6-overlay supervision, multi-arch builds, 3-file versioning, CI/CD.
+- ✅ All specifications strictly validated with `openspec validate --specs --strict` (6 passed, 0 failed) and verified with `openspec doctor`.
+- ✅ Configured project context and artifact rules in `openspec/config.yaml`.
+- ✅ Added `AGENTS.md` defining project conventions, git policy, Home Assistant conventions, coding standards, and OpenSpec workflows for Antigravity and coding agents.
+- ✅ Installed domain-specific `running-coach` skill into `.agents/skills/running-coach/SKILL.md` for progressive disclosure activation in Antigravity.
+- ✅ Updated `CLAUDE.md` and `README.md` to reference OpenSpec specifications and `AGENTS.md`.
+
 ---
 
 ## Getting Started (Development)

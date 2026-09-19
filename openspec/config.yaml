@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  Project: StrideSync
+  Description: Home Assistant add-on that syncs Garmin Connect running data and exposes it via MCP over Streamable HTTP for AI conversational analysis.
+  Tech stack: Python 3.12, FastMCP (Streamable HTTP), SQLite (/data/stridesync.db), python-garminconnect, s6-overlay, Docker (Alpine base).
+  Architecture: Dual supervised s6 services (sync-scheduler and mcp-server) running inside the container.
+  Key conventions:
+  - Separate sync scheduler (app/sync) and MCP server (app/mcp) modules; failure in sync must not terminate the MCP server.
+  - Fail loud, not silent: all sync outcomes recorded in sync_log table.
+  - Single Garmin client wrapper at app/sync/garmin_client.py isolating unofficial API risk.
+  - Three-file versioning contract: stridesync/NEXT_VERSION, stridesync/config.yaml, stridesync-dev/config.yaml.
+  - Git policy: Always work on feature branches, never commit directly to main.
+  - CI requirement: ci-pass is the required status check on pull requests.
+
+rules:
+  proposal:
+    - Focus on motivation, user impact, and capabilities being introduced or changed.
+    - Identify whether spec-level behavior changes or if skip_specs is appropriate.
+  specs:
+    - Format requirements with normative SHALL/MUST statements.
+    - Scenarios must use exactly 4 hashtags (#### Scenario:) with WHEN/THEN clauses.
+  tasks:
+    - Group tasks under numbered headings with verification criteria in each task checkbox.
+
+operations:
+  apply:
+    guidance:
+      - Run syntax validation and tests before marking tasks complete.
+      - Follow repository three-file versioning rules when bumping versions.
+  archive:
+    guidance:
+      - Verify all specs validate with openspec validate --specs --strict.
+      - Update repository CHANGELOG.md and stridesync/CHANGELOG.md with unreleased changes.

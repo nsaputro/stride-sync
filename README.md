@@ -1,17 +1,15 @@
 # 🏃 StrideSync
 
-A Home Assistant add-on that syncs Garmin Connect running data and exposes it to Claude via MCP
+A Home Assistant add-on that syncs Garmin Connect running data and exposes it to AI assistants (Claude, Antigravity, etc.) via MCP
 for conversational analysis — cadence, pace, heart-rate trends, training load.
 
 Runs continuously on your Home Assistant server. No local-only setup, no client-side install
-step — connect any MCP client (e.g. Claude Desktop) to it over the network.
+step — connect any MCP client (e.g. Claude Desktop, Antigravity) to it over the network.
 
 **Almost entirely read-only**: the one exception is a small, explicitly-confirmed gear-correction
 write surface (e.g. "this run was actually in my other shoes") — every other tool only reads.
 
-See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for architecture details, MCP connection instructions,
-and milestones. See [`CLAUDE.md`](CLAUDE.md) for repository conventions and local development
-setup.
+See [`openspec/specs/`](openspec/specs/) for capability specifications, [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) for agent guidelines and repository conventions, and [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for architectural history and milestones.
 
 <img src="docs/images/dashboard.png" alt="StrideSync Dashboard tab showing synced activity/wellness/VO2-max/planned-workout totals and recent activities" width="360">
 

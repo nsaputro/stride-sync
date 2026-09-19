@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **OpenSpec spec-driven development support for Antigravity** (milestone Stage 37)
+
 ## [0.9.0] - 2026-08-12
 
 ### Added
