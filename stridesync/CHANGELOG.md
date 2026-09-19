@@ -4,6 +4,7 @@
 
 ### Added
 - **OpenSpec spec-driven development support for Antigravity** (milestone Stage 37)
+- Pre-release dev channel end-to-end testing workflow documented in `AGENTS.md`
 
 ## [0.9.0] - 2026-08-12
 
