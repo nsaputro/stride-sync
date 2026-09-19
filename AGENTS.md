@@ -94,7 +94,6 @@ stride-sync/
 ├── repository.yaml          # Add-on repository descriptor (required at root)
 ├── AGENTS.md                # Agent instructions and guidelines
 ├── CLAUDE.md                # Claude instructions
-├── PROJECT_PLAN.md          # Architectural history and milestone log
 ├── README.md
 ├── CHANGELOG.md             # Repo-level changelog (Keep a Changelog format)
 ├── LICENSE

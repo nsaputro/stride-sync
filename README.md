@@ -9,7 +9,7 @@ step — connect any MCP client (e.g. Claude Desktop, Antigravity) to it over th
 **Almost entirely read-only**: the one exception is a small, explicitly-confirmed gear-correction
 write surface (e.g. "this run was actually in my other shoes") — every other tool only reads.
 
-See [`openspec/specs/`](openspec/specs/) for capability specifications, [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) for agent guidelines and repository conventions, and [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for architectural history and milestones.
+See [`openspec/specs/`](openspec/specs/) for capability specifications, and [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) for agent guidelines and repository conventions.
 
 <img src="docs/images/dashboard.png" alt="StrideSync Dashboard tab showing synced activity/wellness/VO2-max/planned-workout totals and recent activities" width="360">
 
@@ -137,7 +137,7 @@ docker run --rm -it -p 8765:8765 -p 8767:8767 -v "$(pwd)/.dev-data:/data" stride
 ```
 
 Then point an MCP client at `http://localhost:8765/mcp` — see
-[`PROJECT_PLAN.md` §2](PROJECT_PLAN.md#2-mcp-connection) for the Claude Desktop config snippet.
+[`stridesync/DOCS.md`](stridesync/DOCS.md#connecting-claude-to-stridesync) for the Claude Desktop config snippet.
 
 For an MFA/2FA account, open `http://localhost:8767/` for the one-time login UI (this is what
 real HA installs reach through the add-on's ingress panel instead — see the MFA section below).
@@ -178,7 +178,7 @@ StrideSync depends on unofficial, reverse-engineered Garmin Connect libraries. G
 its login/SSO flow without notice, which can break syncing until the underlying library is
 updated. When this happens, StrideSync fails loudly in the add-on log and reports sync staleness
 through the MCP server (`last_sync_status` tool) rather than silently serving stale data as if it
-were current. See `PROJECT_PLAN.md`'s "Known risk" section for the full design rationale.
+were current. See [`openspec/specs/garmin-sync/spec.md`](openspec/specs/garmin-sync/spec.md) and [`stridesync/DOCS.md`](stridesync/DOCS.md) for full design rationale and recovery procedures.
 
 **Accounts with MFA/2FA enabled** need a one-time interactive login — either via the add-on's
 ingress web UI (StrideSync panel in the HA sidebar → **Log in to Garmin Connect**) or, without a

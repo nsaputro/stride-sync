@@ -2,14 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Spec-Driven Development & Project Plan
+## Spec-Driven Development & Project Tracking
 
 This repository uses **[OpenSpec](https://github.com/Fission-AI/OpenSpec)** for spec-driven development. Core capability specifications live in `openspec/specs/` and agent instructions live in `AGENTS.md`.
 
 - For new features and modifications, follow the OpenSpec workflow (`openspec/specs/` and `openspec/changes/`).
 - Active backlog and sprint tasks are tracked on the [GitHub Project Board](https://github.com/users/nsaputro/projects/2). Tasks in `Ready` are backed by GitHub Issues.
-- Historical milestone progress and architectural decisions are tracked in `PROJECT_PLAN.md`.
-- When you open a PR for a feature, update its corresponding OpenSpec delta or spec, tick any related item in `PROJECT_PLAN.md`, and include the updated files in the same commit.
+- When you open a PR for a feature, update its corresponding OpenSpec delta or spec, link the corresponding GitHub Issue, and include the updated files in the same commit.
 
 ## Purpose
 
@@ -26,7 +25,7 @@ Two long-running services live inside the add-on:
 2. **MCP server** — serves that data to MCP clients over **Streamable HTTP** (not stdio, since
    the client is not on the same machine as the add-on).
 
-See `PROJECT_PLAN.md` for the detailed architecture, MCP connection instructions, and milestones.
+See [`openspec/specs/`](openspec/specs/) and [`stridesync/DOCS.md`](stridesync/DOCS.md) for detailed capability specifications and MCP connection instructions.
 
 ## Git Policy
 
@@ -46,7 +45,6 @@ This repo follows the standard [HA add-on repository layout](https://developers.
 stride-sync/
 ├── repository.yaml          # Add-on repository descriptor (required at root for HA to recognize the store)
 ├── CLAUDE.md
-├── PROJECT_PLAN.md
 ├── README.md
 ├── CHANGELOG.md             # Repo-level changelog (Keep a Changelog format)
 ├── LICENSE
@@ -109,7 +107,7 @@ Every `run` script starts with `#!/usr/bin/with-contenv bashio` so it can read a
   `python3 -m app.mcp.server`) so either can be started standalone for local testing without
   pulling in the other.
 - Garmin auth/session code lives behind a single client interface (`app/sync/garmin_client.py`)
-  so the unofficial-API breakage risk (see `PROJECT_PLAN.md`) is isolated to one module — sync
+  so the unofficial-API breakage risk is isolated to one module — sync
   and MCP code should never call `garminconnect` directly.
 - Fail loud, not silent: a failed sync must produce a clear log line and an updated "last sync
   status" the MCP server can surface — never a silently stale database.
