@@ -125,6 +125,24 @@ jobs:
           print(f"All {len(list(pathlib.Path('stridesync/app').rglob('*.py')))} Python files OK")
           EOF
 
+  # ── OpenSpec validation ──────────────────────────────────────────────────────
+  openspec:
+    name: OpenSpec validation
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate OpenSpec specs & workspace health
+        run: |
+          npx --yes @fission-ai/openspec validate --all --strict
+          npx --yes @fission-ai/openspec doctor
+
   # ── Unit tests ───────────────────────────────────────────────────────────────
   test:
     name: Unit tests
@@ -255,7 +273,7 @@ jobs:
   ci-pass:
     name: CI Pass
     runs-on: ubuntu-latest
-    needs: [lint, python-syntax, test, build-test]
+    needs: [lint, python-syntax, openspec, test, build-test]
     if: always()
     steps:
       - name: Check results
@@ -264,6 +282,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           R_LINT: ${{ needs.lint.result }}
           R_SYNTAX: ${{ needs.python-syntax.result }}
+          R_OPENSPEC: ${{ needs.openspec.result }}
           R_TEST: ${{ needs.test.result }}
           R_BUILD: ${{ needs.build-test.result }}
         run: |
@@ -272,7 +291,7 @@ jobs:
             exit 0
           fi
           failed=0
-          for job_result in "$R_LINT" "$R_SYNTAX" "$R_TEST" "$R_BUILD"; do
+          for job_result in "$R_LINT" "$R_SYNTAX" "$R_OPENSPEC" "$R_TEST" "$R_BUILD"; do
             if [[ "$job_result" != "success" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

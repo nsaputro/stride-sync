@@ -173,6 +173,6 @@ Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories: `Add
 ## CI / Release
 
 Pipelines defined in `.github/workflows/`:
-- **CI** (`ci.yml`): yamllint, hadolint, version-ordering check, Python `ast.parse` syntax check, `pytest`, Docker smoke build. Required status check: `CI Pass`.
+- **CI** (`ci.yml`): yamllint, hadolint, version-ordering check, Python `ast.parse` syntax check, OpenSpec validation (`openspec validate --all --strict`), `pytest`, Docker smoke build. Required status check: `CI Pass`.
 - **Pre-release** (`prerelease.yml`): builds and publishes `{arch}-stridesync:{version}` from `stridesync-dev/config.yaml`.
 - **Release** (`release.yml`): tags `v{NEXT_VERSION}`, publishes `:latest` images, creates GitHub Release, and opens post-release bump PR.
