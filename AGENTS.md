@@ -197,7 +197,7 @@ docker run --rm -it \
 Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) categories: `Added`, `Changed`, `Fixed`, `Removed`.
 
 - **Root `CHANGELOG.md`**: Captures all notable repository changes, including user-facing features, developer tooling, OpenSpec specs, and CI infrastructure.
-- **Add-on `stridesync/CHANGELOG.md` (Shown in HA UI)**: **User-facing changes only**. Non-user-impacting changes (such as OpenSpec specifications, internal developer docs, agent workflows, and CI refactors) must **never** be added here.
+- **Add-on `stridesync/CHANGELOG.md` (Rendered in HA UI)**: **User-facing changes only**. This includes both HA UI / add-on configuration changes and user-accessible features such as added or updated MCP tools, resources, endpoints, and Garmin sync capabilities. Non-user-impacting changes (such as OpenSpec specifications, internal developer docs, agent workflows, and CI refactors) must **never** be added here.
 - **Conciseness & High Signal**: Keep changelog entries compact and high-signal (single-sentence bullet points). Avoid verbose narratives, debugging backstories, and diagnostic transcripts.
 
 ---
