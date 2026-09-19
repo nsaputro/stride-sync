@@ -201,6 +201,7 @@ publishes images — that's exclusively owned by the release and pre-release wor
 - Version-ordering check: `stridesync/NEXT_VERSION` must be greater than `stridesync/config.yaml`
   `version` (catches the release workflow ever being skipped without bumping `NEXT_VERSION`)
 - Python `ast.parse` syntax check on `stridesync/app/`
+- OpenSpec validation (`openspec validate --all --strict` and `openspec doctor`)
 - `pytest` on `stridesync/tests/`
 - Docker build smoke test for the add-on (`linux/amd64`, no push)
 
