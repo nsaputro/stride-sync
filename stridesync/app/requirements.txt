@@ -12,8 +12,8 @@ requests  # used directly in app/sync/garmin_client.py to catch transport-level 
 
 # MCP server — fastmcp serves Streamable HTTP natively (transport="http"), no mcp-proxy needed
 # inside the add-on; see app/mcp/server.py module docstring for why garmy-mcp's bundled server
-# wasn't reused as-is.
-fastmcp
+# wasn't reused as-is. Pin <4.0.0 to prevent FastMCP 4.x breaking changes.
+fastmcp>=3.4.0,<4.0.0
 # Already an indirect dependency of fastmcp (its own mcp.run(transport="http") is built on it) —
 # listed explicitly because app/mcp/server.py now imports and calls it directly (milestone
 # Stage 36: serving a manually-built ASGI app via uvicorn.run(), not mcp.run(), so a Starlette
