@@ -27,6 +27,37 @@ Workflows are available as slash commands or skills in `.agents/`:
 
 ---
 
+## Project Management (GitHub Projects Kanban Board)
+
+Project tracking and task management is organized on the **[StrideSync GitHub Project Board](https://github.com/users/nsaputro/projects/2)** linked to `nsaputro/stride-sync`.
+
+### Board Columns & Lifecycle Rules
+
+The board uses four status columns: `Backlog`, `Ready`, `In Progress`, and `Done`.
+
+| Column | Purpose | Rules & Transitions |
+|---|---|---|
+| **`Backlog`** | Unscheduled ideas, prospective features, and deferred validations | Stored as draft project items or issues. No branch or active planning needed. |
+| **`Ready`** | Prioritized tasks ready for immediate implementation | **Mandatory**: Any item moving to `Ready` **must be converted into a GitHub Issue** in `nsaputro/stride-sync`. Define clear scope and acceptance criteria in the issue description. |
+| **`In Progress`** | Actively being planned or implemented | Move the issue to `In Progress` when starting an OpenSpec change (`/opsx-propose` or `/opsx-apply`) on a `feature/` branch. |
+| **`Done`** | Merged and verified tasks | When the PR merges to `main` and the OpenSpec change is archived (`/opsx-archive`), move the issue to `Done`. |
+
+### Agent Workflow with the Project Board
+
+1. **Selecting work**: Pick tasks exclusively from the `Ready` column (or promote an item from `Backlog` by converting it into a GitHub Issue in `Ready` first).
+2. **Starting work**: Move the issue from `Ready` to `In Progress`:
+   ```bash
+   gh project item-edit 2 --owner nsaputro --url "https://github.com/nsaputro/stride-sync/issues/<number>" --field "Status" --value "In Progress"
+   ```
+3. **Branching & Planning**: Create a feature branch (`git checkout -b feature/<issue-name>`) and initiate OpenSpec planning (`/opsx-propose "<issue-name>"`).
+4. **Pull Request**: Reference the issue in the PR description (e.g. `Closes #<number>`).
+5. **Completion**: Once merged, move the issue to `Done`:
+   ```bash
+   gh project item-edit 2 --owner nsaputro --url "https://github.com/nsaputro/stride-sync/issues/<number>" --field "Status" --value "Done"
+   ```
+
+---
+
 ## Purpose
 
 StrideSync is a Home Assistant add-on that syncs running data (activities, cadence, pace, heart rate, training load, recovery/wellness, gear) from Garmin Connect and exposes it to AI agents over MCP (Streamable HTTP) for conversational analysis. It runs continuously on the HA server — there is no local-only mode and no client-side install step.

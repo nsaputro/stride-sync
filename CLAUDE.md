@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repository uses **[OpenSpec](https://github.com/Fission-AI/OpenSpec)** for spec-driven development. Core capability specifications live in `openspec/specs/` and agent instructions live in `AGENTS.md`.
 
 - For new features and modifications, follow the OpenSpec workflow (`openspec/specs/` and `openspec/changes/`).
+- Active backlog and sprint tasks are tracked on the [GitHub Project Board](https://github.com/users/nsaputro/projects/2). Tasks in `Ready` are backed by GitHub Issues.
 - Historical milestone progress and architectural decisions are tracked in `PROJECT_PLAN.md`.
 - When you open a PR for a feature, update its corresponding OpenSpec delta or spec, tick any related item in `PROJECT_PLAN.md`, and include the updated files in the same commit.
 
