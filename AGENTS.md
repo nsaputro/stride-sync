@@ -208,3 +208,31 @@ Pipelines defined in `.github/workflows/`:
 - **CI** (`ci.yml`): yamllint, hadolint, version-ordering check, Python `ast.parse` syntax check, OpenSpec validation (`openspec validate --all --strict`), `pytest`, Docker smoke build. Required status check: `CI Pass`.
 - **Pre-release** (`prerelease.yml`): builds and publishes `{arch}-stridesync:{version}` from `stridesync-dev/config.yaml`.
 - **Release** (`release.yml`): tags `v{NEXT_VERSION}`, publishes `:latest` images, creates GitHub Release, and opens post-release bump PR.
+
+### Pre-Release End-to-End Testing (Dev Channel)
+
+Before cutting any stable release, validate all new features and changes on the dev channel first:
+
+1. **Bump Pre-Release Version**: In your feature PR, ensure `stridesync-dev/config.yaml` version tracks `{NEXT_VERSION}b{N}` (strictly greater than any existing tags).
+2. **Merge PR**: Merge the feature PR to `main` after CI passes.
+3. **Trigger Pre-Release Workflow**:
+   ```bash
+   gh workflow run prerelease.yml --ref main
+   ```
+   This builds and publishes multi-arch images (`{arch}-stridesync:{version}`) to GHCR and tags `v{version}`.
+4. **Upgrade Dev Add-on in Home Assistant**:
+   Reload the repository store and upgrade the dev channel add-on (`stridesync_dev`):
+   ```bash
+   ha store reload
+   ha apps update stridesync_dev
+   ```
+   *(or in the HA Web UI under Settings → Add-ons → StrideSync (dev) → Update)*.
+5. **Verify MCP Server & Live Sync**:
+   - Confirm all supervised services (`sync-scheduler`, `mcp-server`, `mfa-web`) start cleanly in add-on logs.
+   - Query the unauthenticated health endpoint on the dev port (host port `8766`):
+     ```bash
+     curl -s http://<ha-host>:8766/health
+     ```
+   - Test MCP protocol initialization and tool execution (`last_sync_status`, `recent_activities`, etc.) to confirm live Garmin synchronization.
+6. **Cut Stable Release**: Once dev verification is green, trigger the `Release` workflow to publish the stable release.
+
