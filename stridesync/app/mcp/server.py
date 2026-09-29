@@ -66,8 +66,10 @@ import base64
 import hmac
 import logging
 import sqlite3
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 
 import uvicorn
 from fastmcp import FastMCP
@@ -188,6 +190,28 @@ def _connect_readonly(db_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+def _connect_write(db_path: str) -> sqlite3.Connection:
+    """Open a writable connection with WAL mode and busy timeout for user-initiated overrides."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    return conn
+
+
+def _validate_iso_date(date_str: str, field_name: str = "workout_date") -> str:
+    """Validate and return normalized YYYY-MM-DD string, or raise ValueError."""
+    if not isinstance(date_str, str) or not date_str.strip():
+        raise ValueError(f"{field_name} is required and must be an ISO date string (YYYY-MM-DD)")
+    clean_date = date_str.strip()
+    try:
+        dt = date.fromisoformat(clean_date)
+        return dt.isoformat()
+    except ValueError as e:
+        raise ValueError(f"{field_name} must be a valid ISO date in YYYY-MM-DD format: {e}") from e
+
 
 
 def _make_garmin_client(settings: Settings) -> GarminClient:
@@ -438,34 +462,203 @@ def get_vo2max_trend(conn: sqlite3.Connection, days: int = 90) -> List[Dict[str,
     return [dict(row) for row in rows]
 
 
-def get_planned_vs_actual(conn: sqlite3.Connection, days: int = 14) -> List[Dict[str, Any]]:
-    """Planned workouts from an active Garmin Connect training plan, LEFT JOINed against
-    completed activities by calendar date — see PROJECT_PLAN.md milestone v0.12.
+def save_plan_override(
+    conn: sqlite3.Connection,
+    workout_date: str,
+    workout_name: str,
+    workout_type: str,
+    reason: str,
+    planned_distance_meters: Optional[float] = None,
+    planned_duration_seconds: Optional[float] = None,
+    planned_target_pace_sec_per_km: Optional[float] = None,
+    planned_target_hr_low: Optional[int] = None,
+    planned_target_hr_high: Optional[int] = None,
+    notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Upsert a planned workout override for a calendar date, persisting coaching rationale."""
+    valid_date = _validate_iso_date(workout_date, "workout_date")
+    if not workout_name or not workout_name.strip():
+        raise ValueError("workout_name is required and cannot be empty")
+    if not workout_type or not workout_type.strip():
+        raise ValueError("workout_type is required and cannot be empty")
+    if not reason or not reason.strip():
+        raise ValueError("reason is required and cannot be empty (a coaching rationale must be provided)")
 
-    Only returns dates with a planned workout; an account with no active plan gets `[]`, not an
-    error. A day with multiple completed activities yields one row per match (rare, not
-    deduplicated). `actual_*` fields are `None` when nothing was logged for that planned date.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT INTO plan_overrides (
+            workout_date, workout_name, workout_type,
+            planned_distance_meters, planned_duration_seconds,
+            planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
+            reason, notes, created_at, updated_at
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        ON CONFLICT(workout_date) DO UPDATE SET
+            workout_name = excluded.workout_name,
+            workout_type = excluded.workout_type,
+            planned_distance_meters = excluded.planned_distance_meters,
+            planned_duration_seconds = excluded.planned_duration_seconds,
+            planned_target_pace_sec_per_km = excluded.planned_target_pace_sec_per_km,
+            planned_target_hr_low = excluded.planned_target_hr_low,
+            planned_target_hr_high = excluded.planned_target_hr_high,
+            reason = excluded.reason,
+            notes = excluded.notes,
+            updated_at = excluded.updated_at
+        """,
+        (
+            valid_date,
+            workout_name.strip(),
+            workout_type.strip(),
+            planned_distance_meters,
+            planned_duration_seconds,
+            planned_target_pace_sec_per_km,
+            planned_target_hr_low,
+            planned_target_hr_high,
+            reason.strip(),
+            notes.strip() if notes is not None else None,
+            now_iso,
+            now_iso,
+        ),
+    )
+    conn.commit()
+
+    row = conn.execute(
+        """
+        SELECT workout_date, workout_name, workout_type,
+               planned_distance_meters, planned_duration_seconds,
+               planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
+               reason, notes, created_at, updated_at
+        FROM plan_overrides
+        WHERE workout_date = ?
+        """,
+        (valid_date,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"Failed to retrieve plan override for {valid_date}")
+    return dict(row)
+
+
+def fetch_plan_overrides(
+    conn: sqlite3.Connection,
+    days: int = 14,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Active planned workout overrides within a date window, ordered chronologically."""
+    clauses = []
+    params: List[Any] = []
+
+    if start_date is not None:
+        valid_start = _validate_iso_date(start_date, "start_date")
+        clauses.append("workout_date >= date(?)")
+        params.append(valid_start)
+
+    if end_date is not None:
+        valid_end = _validate_iso_date(end_date, "end_date")
+        clauses.append("workout_date <= date(?)")
+        params.append(valid_end)
+
+    if start_date is None and end_date is None:
+        days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
+        clauses.append("workout_date >= date('now', '-' || ? || ' days')")
+        clauses.append("workout_date <= date('now', '+' || ? || ' days')")
+        params.extend([days, days])
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""
+        SELECT workout_date, workout_name, workout_type,
+               planned_distance_meters, planned_duration_seconds,
+               planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
+               reason, notes, created_at, updated_at
+        FROM plan_overrides
+        {where_sql}
+        ORDER BY workout_date ASC
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def remove_plan_override(
+    conn: sqlite3.Connection,
+    workout_date: str,
+) -> Dict[str, Any]:
+    """Delete a plan override for a specific date, reverting to Garmin's plan."""
+    valid_date = _validate_iso_date(workout_date, "workout_date")
+    row = conn.execute(
+        "SELECT workout_date FROM plan_overrides WHERE workout_date = ?", (valid_date,)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No plan override found for workout_date '{valid_date}'")
+    conn.execute("DELETE FROM plan_overrides WHERE workout_date = ?", (valid_date,))
+    conn.commit()
+    return {"status": "deleted", "workout_date": valid_date}
+
+
+set_plan_override = save_plan_override
+get_plan_overrides = fetch_plan_overrides
+delete_plan_override = remove_plan_override
+
+
+
+def get_planned_vs_actual(conn: sqlite3.Connection, days: int = 14) -> List[Dict[str, Any]]:
+    """Planned workouts merged with athlete plan overrides, LEFT JOINed against completed
+    activities by calendar date.
+
+    If an override exists for a date, `is_overridden` is True, target fields reflect the
+    override, and original Garmin values are preserved under `garmin_planned_*`.
     """
     days = _clamp(days, _MIN_DAYS, _MAX_DAYS)
     rows = conn.execute(
         """
+        WITH dates AS (
+            SELECT workout_date FROM planned_workouts WHERE workout_date >= date('now', '-' || ? || ' days')
+            UNION
+            SELECT workout_date FROM plan_overrides WHERE workout_date >= date('now', '-' || ? || ' days')
+        )
         SELECT
-            pw.workout_date, pw.workout_name, pw.workout_type, pw.planned_distance_meters,
-            pw.planned_duration_seconds, pw.planned_target_pace_sec_per_km,
-            pw.planned_target_hr_low, pw.planned_target_hr_high,
+            d.workout_date,
+            CASE WHEN po.workout_date IS NOT NULL THEN 1 ELSE 0 END AS is_overridden,
+            COALESCE(po.workout_name, pw.workout_name) AS workout_name,
+            COALESCE(po.workout_type, pw.workout_type) AS workout_type,
+            CASE WHEN po.workout_date IS NOT NULL THEN po.planned_distance_meters ELSE pw.planned_distance_meters END AS planned_distance_meters,
+            CASE WHEN po.workout_date IS NOT NULL THEN po.planned_duration_seconds ELSE pw.planned_duration_seconds END AS planned_duration_seconds,
+            CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_pace_sec_per_km ELSE pw.planned_target_pace_sec_per_km END AS planned_target_pace_sec_per_km,
+            CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_hr_low ELSE pw.planned_target_hr_low END AS planned_target_hr_low,
+            CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_hr_high ELSE pw.planned_target_hr_high END AS planned_target_hr_high,
+            po.reason AS override_reason,
+            po.notes AS override_notes,
+            pw.workout_name AS garmin_planned_workout_name,
+            pw.workout_type AS garmin_planned_workout_type,
+            pw.planned_distance_meters AS garmin_planned_distance_meters,
+            pw.planned_duration_seconds AS garmin_planned_duration_seconds,
+            pw.planned_target_pace_sec_per_km AS garmin_planned_target_pace_sec_per_km,
+            pw.planned_target_hr_low AS garmin_planned_target_hr_low,
+            pw.planned_target_hr_high AS garmin_planned_target_hr_high,
             a.activity_id, a.activity_name, a.activity_type,
             a.distance_meters AS actual_distance_meters,
             a.duration_seconds AS actual_duration_seconds,
             a.average_pace_sec_per_km AS actual_average_pace_sec_per_km,
             a.average_hr AS actual_average_hr
-        FROM planned_workouts pw
-        LEFT JOIN activities a ON date(a.start_time_local) = pw.workout_date
-        WHERE pw.workout_date >= date('now', '-' || ? || ' days')
-        ORDER BY pw.workout_date ASC
+        FROM dates d
+        LEFT JOIN plan_overrides po ON po.workout_date = d.workout_date
+        LEFT JOIN planned_workouts pw ON pw.workout_date = d.workout_date
+        LEFT JOIN activities a ON date(a.start_time_local) = d.workout_date
+        ORDER BY d.workout_date ASC
         """,
-        (days,),
+        (days, days),
     ).fetchall()
-    return [dict(row) for row in rows]
+
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["is_overridden"] = bool(item["is_overridden"])
+        result.append(item)
+    return result
+
 
 
 def get_gear_mileage(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
@@ -826,11 +1019,9 @@ def create_server(settings: Settings) -> FastMCP:
 
     @mcp.tool()
     def planned_vs_actual(days: int = 14) -> List[Dict[str, Any]]:
-        """Get planned workouts from an active Garmin Connect training plan compared against
-        what was actually logged, for each of the last N days. Returns [] if this account has no
-        active training plan configured — that's expected, not an error. This is the most
-        speculative of StrideSync's tools: Garmin's training-plan field mappings are unverified
-        against a live account, unlike everything else in this server.
+        """Get planned workouts from an active Garmin Connect training plan merged with any athlete
+        plan overrides, compared against what was actually logged for each of the last N days.
+        Returns [] if this account has no active training plan or overrides configured.
 
         Args:
             days: Number of days to look back (1-365, default 14).
@@ -840,6 +1031,86 @@ def create_server(settings: Settings) -> FastMCP:
             return get_planned_vs_actual(conn, days)
         finally:
             conn.close()
+
+    @mcp.tool()
+    def set_plan_override(
+        workout_date: str,
+        workout_name: str,
+        workout_type: str,
+        reason: str,
+        planned_distance_meters: Optional[float] = None,
+        planned_duration_seconds: Optional[float] = None,
+        planned_target_pace_sec_per_km: Optional[float] = None,
+        planned_target_hr_low: Optional[int] = None,
+        planned_target_hr_high: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Upsert a planned workout override for a specific calendar date with a coaching rationale.
+        Overrides persist across syncs and supersede Garmin's scheduled workouts for that date in
+        `planned_vs_actual`.
+
+        Args:
+            workout_date: Target date in ISO YYYY-MM-DD format (required).
+            workout_name: Name of the overridden workout (e.g. 'Taper Long Run + Marathon Pace', required).
+            workout_type: Workout type category (e.g. 'AEROBIC_BASE', 'LACTATE_THRESHOLD', 'RECOVERY', 'REST', required).
+            reason: Required explanation for the override (e.g. 'Taper week 1: reduce volume').
+            planned_distance_meters: Target distance in meters (optional).
+            planned_duration_seconds: Target duration in seconds (optional).
+            planned_target_pace_sec_per_km: Target pace in seconds per kilometer (optional).
+            planned_target_hr_low: Lower heart rate target in bpm (optional).
+            planned_target_hr_high: Upper heart rate target in bpm (optional).
+            notes: Execution details or instructions (optional).
+        """
+        conn = _connect_write(settings.db_path)
+        try:
+            return save_plan_override(
+                conn,
+                workout_date=workout_date,
+                workout_name=workout_name,
+                workout_type=workout_type,
+                reason=reason,
+                planned_distance_meters=planned_distance_meters,
+                planned_duration_seconds=planned_duration_seconds,
+                planned_target_pace_sec_per_km=planned_target_pace_sec_per_km,
+                planned_target_hr_low=planned_target_hr_low,
+                planned_target_hr_high=planned_target_hr_high,
+                notes=notes,
+            )
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def get_plan_overrides(
+        days: int = 14,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch active workout plan overrides across a date window, ordered chronologically.
+
+        Args:
+            days: Lookback and forward window in days if start_date and end_date are omitted (default 14).
+            start_date: Optional start date in YYYY-MM-DD format.
+            end_date: Optional end date in YYYY-MM-DD format.
+        """
+        conn = _connect_readonly(settings.db_path)
+        try:
+            return fetch_plan_overrides(conn, days=days, start_date=start_date, end_date=end_date)
+        finally:
+            conn.close()
+
+    @mcp.tool()
+    def delete_plan_override(workout_date: str) -> Dict[str, Any]:
+        """Delete an existing workout plan override for a specific date, reverting to Garmin's plan.
+
+        Args:
+            workout_date: Date of the override to delete in YYYY-MM-DD format (required).
+        """
+        conn = _connect_write(settings.db_path)
+        try:
+            return remove_plan_override(conn, workout_date=workout_date)
+        finally:
+            conn.close()
+
 
     @mcp.tool()
     def gear_mileage() -> List[Dict[str, Any]]:

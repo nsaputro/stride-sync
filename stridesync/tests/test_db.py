@@ -14,10 +14,47 @@ def test_connect_creates_schema(tmp_path):
         }
         assert {
             "activities", "activity_metrics", "sync_log", "daily_wellness", "vo2max_history",
-            "planned_workouts", "gear"
+            "planned_workouts", "gear", "plan_overrides"
         } <= tables
+        indexes = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+        assert "idx_plan_overrides_date" in indexes
     finally:
         conn.close()
+
+
+def test_connect_creates_plan_overrides_on_existing_database(tmp_path):
+    db_path = str(tmp_path / "stridesync.db")
+    old_conn = sqlite3.connect(db_path)
+    old_conn.execute(
+        "CREATE TABLE activities (activity_id INTEGER PRIMARY KEY, start_time_local TEXT, synced_at TEXT)"
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    conn = db.connect(db_path)
+    try:
+        tables = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert "plan_overrides" in tables
+        indexes = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            ).fetchall()
+        }
+        assert "idx_plan_overrides_date" in indexes
+    finally:
+        conn.close()
+
 
 
 def test_connect_is_idempotent(tmp_path):

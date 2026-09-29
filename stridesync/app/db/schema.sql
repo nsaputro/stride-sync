@@ -201,3 +201,23 @@ CREATE TABLE IF NOT EXISTS gear (
     total_distance_meters    REAL,
     total_activities         INTEGER
 );
+
+-- plan_overrides: athlete/coach modifications to scheduled workouts with required rationale tracking.
+-- Unlike planned_workouts (which is wiped and re-synced from Garmin on each sync), plan_overrides
+-- persists across syncs and is keyed by workout_date (at most one override per calendar day).
+CREATE TABLE IF NOT EXISTS plan_overrides (
+    workout_date                   TEXT PRIMARY KEY, -- 'YYYY-MM-DD'
+    workout_name                   TEXT NOT NULL,    -- e.g. "Taper Long Run + Marathon Pace"
+    workout_type                   TEXT NOT NULL,    -- e.g. "AEROBIC_BASE", "LACTATE_THRESHOLD", "RECOVERY", "REST"
+    planned_distance_meters        REAL,
+    planned_duration_seconds       REAL,
+    planned_target_pace_sec_per_km REAL,
+    planned_target_hr_low          INTEGER,
+    planned_target_hr_high         INTEGER,
+    reason                         TEXT NOT NULL,    -- Required: Why was the Garmin plan overridden?
+    notes                          TEXT,             -- Optional: Specific instructions (e.g. shoes, warm-up, fueling)
+    created_at                     TEXT NOT NULL,
+    updated_at                     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plan_overrides_date ON plan_overrides (workout_date);
+
