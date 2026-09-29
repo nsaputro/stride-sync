@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Display future scheduled training plans as mobile-friendly expandable workout cards with collapsible coaching rationale and notes on the Running tab.
+
 ## [0.9.2] - 2026-09-29
 
 ### Added

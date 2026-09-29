@@ -1205,8 +1205,9 @@ def test_running_page_renders_plan_table(tmp_path):
         """
         INSERT INTO plan_overrides (
             workout_date, workout_name, workout_type, planned_distance_meters,
-            planned_duration_seconds, reason, notes, created_at, updated_at
-        ) VALUES (?, 'Coach Easy Strides', 'RECOVERY', 5000.0, 1800.0, 'Fatigue prevention', 'Easy jog with 4x strides', datetime('now'), datetime('now'))
+            planned_duration_seconds, planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
+            reason, notes, created_at, updated_at
+        ) VALUES (?, 'Coach Easy Strides', 'RECOVERY', 5000.0, 1800.0, 350.0, 120, 135, 'Fatigue prevention', 'Easy jog with 4x strides', datetime('now'), datetime('now'))
         """,
         (tomorrow,),
     )
@@ -1232,12 +1233,15 @@ def test_running_page_renders_plan_table(tmp_path):
     response = TestClient(mfa_web_server.create_app(settings)).get("/running")
     assert response.status_code == 200
 
-    # Headers
-    assert "<th>Date</th>" in response.text
-    assert "<th>Workout</th>" in response.text
-    assert "<th>Target</th>" in response.text
-    assert "<th>Pace / HR</th>" in response.text
-    assert "<th>Notes / Rationale</th>" in response.text
+    # Expandable card structure
+    assert '<div class="plan-card">' in response.text
+    assert '<div class="plan-date">' in response.text
+    assert '<div class="plan-title">' in response.text
+    assert '<div class="plan-metrics">' in response.text
+    assert '<span class="plan-chip">⏱️ 5:50 /km</span>' in response.text
+    assert '<span class="plan-chip">❤️ 120–135 bpm</span>' in response.text
+    assert '<details class="plan-details">' in response.text
+    assert '<summary class="plan-summary">Coaching rationale & notes</summary>' in response.text
 
     # Content
     assert "Coach Easy Strides" in response.text

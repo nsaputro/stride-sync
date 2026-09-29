@@ -109,37 +109,80 @@ _STYLE = """
     background: rgba(156, 163, 175, 0.15);
     color: var(--muted);
   }
-  .table-container {
-    overflow-x: auto;
-    margin-bottom: 1.2rem;
-    border-radius: 0.8rem;
-    border: 1px solid var(--border-soft);
+  .plan-card {
     background: var(--card);
+    border: 1px solid var(--border-soft);
+    border-radius: 0.85rem;
+    padding: 0.85rem 0.95rem;
   }
-  .plan-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-    text-align: left;
+  .plan-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.35rem;
   }
-  .plan-table th {
-    padding: 0.65rem 0.85rem;
-    font-size: 0.76rem;
+  .plan-date {
+    font-size: 0.8rem;
     font-weight: 600;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border-bottom: 1px solid var(--border-soft);
-    white-space: nowrap;
   }
-  .plan-table td {
-    padding: 0.75rem 0.85rem;
-    border-bottom: 1px solid var(--border-soft);
-    vertical-align: top;
-    color: var(--text);
+  .plan-title {
+    font-size: 0.95rem;
+    line-height: 1.3;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3rem;
   }
-  .plan-table tr:last-child td {
-    border-bottom: none;
+  .plan-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.45rem;
+  }
+  .plan-chip {
+    font-size: 0.76rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.4rem;
+    background: var(--tile);
+    border: 1px solid var(--border-soft);
+    color: var(--muted);
+  }
+  details.plan-details {
+    margin-top: 0.65rem;
+    border-top: 1px dashed var(--border-soft);
+    padding-top: 0.55rem;
+  }
+  summary.plan-summary {
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--primary);
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  summary.plan-summary::-webkit-details-marker {
+    display: none;
+  }
+  summary.plan-summary::after {
+    content: "▾";
+    font-size: 0.85rem;
+    transition: transform 0.2s ease;
+  }
+  details.plan-details[open] summary.plan-summary::after {
+    transform: rotate(180deg);
+  }
+  .plan-details-content {
+    margin-top: 0.45rem;
+    padding: 0.55rem 0.7rem;
+    background: var(--tile);
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-soft);
   }
   .reason-text {
     font-size: 0.82rem;
@@ -687,11 +730,10 @@ def _future_plan_html(settings: Settings) -> str:
     if not workouts:
         return eyebrow + '<div class="card"><p class="muted">No upcoming workouts scheduled.</p></div>'
 
-    rows_html: List[str] = []
+    cards_html: List[str] = []
     for w in workouts:
         date_str = escape(w["workout_date"])
         day_str = escape(w["day_name"])
-        date_html = f"<td>{date_str} ({day_str})</td>"
 
         w_name = escape(w["workout_name"] or "Planned Workout")
         if w["is_overridden"]:
@@ -704,7 +746,6 @@ def _future_plan_html(settings: Settings) -> str:
         else:
             badge = '<span class="badge badge-garmin">Garmin</span>'
             superseded = ""
-        workout_html = f"<td><strong>{w_name}</strong>{badge}{superseded}</td>"
 
         dist = w["planned_distance_km"]
         dur = w["planned_duration_minutes"]
@@ -716,45 +757,48 @@ def _future_plan_html(settings: Settings) -> str:
             target_str = f"— ({dur}m)"
         else:
             target_str = "—"
-        target_html = f"<td>{escape(target_str)}</td>"
 
         pace = w["planned_target_pace"]
         hr = w["planned_target_hr"]
-        if pace and hr:
-            pace_hr_str = f'{escape(pace)}<br><span class="row-meta">{escape(hr)}</span>'
-        elif pace:
-            pace_hr_str = escape(pace)
-        elif hr:
-            pace_hr_str = f'<span class="row-meta">{escape(hr)}</span>'
+        metrics_chips: List[str] = []
+        if pace:
+            metrics_chips.append(f'<span class="plan-chip">⏱️ {escape(pace)}</span>')
+        if hr:
+            metrics_chips.append(f'<span class="plan-chip">❤️ {escape(hr)}</span>')
+        metrics_html = f'<div class="plan-metrics">{"".join(metrics_chips)}</div>' if metrics_chips else ""
+
+        has_details = bool(w["is_overridden"] and (w.get("reason") or w.get("notes") or superseded))
+        if has_details:
+            details_inner: List[str] = []
+            if superseded:
+                details_inner.append(superseded)
+            if w.get("reason"):
+                details_inner.append(f'<div class="reason-text"><strong>Rationale:</strong> {escape(w["reason"])}</div>')
+            if w.get("notes"):
+                details_inner.append(f'<div class="notes-text"><strong>Notes:</strong> {escape(w["notes"])}</div>')
+
+            details_html = (
+                '<details class="plan-details">'
+                '<summary class="plan-summary">Coaching rationale & notes</summary>'
+                f'<div class="plan-details-content">{"".join(details_inner)}</div>'
+                '</details>'
+            )
         else:
-            pace_hr_str = "—"
-        pace_hr_html = f"<td>{pace_hr_str}</td>"
+            details_html = ""
 
-        if w["is_overridden"]:
-            reason_part = f'<div class="reason-text">{escape(w["reason"] or "")}</div>' if w["reason"] else ""
-            notes_part = f'<div class="notes-text">{escape(w["notes"])}</div>' if w["notes"] else ""
-            notes_rationale_str = (reason_part + notes_part) if (reason_part or notes_part) else "—"
-        else:
-            notes_rationale_str = "—"
-        notes_html = f"<td>{notes_rationale_str}</td>"
+        cards_html.append(
+            '<div class="plan-card">'
+            '<div class="plan-card-header">'
+            f'<div class="plan-date">{date_str} ({day_str})</div>'
+            f'<div class="row-value">{escape(target_str)}</div>'
+            '</div>'
+            f'<div class="plan-title"><strong>{w_name}</strong>{badge}</div>'
+            f'{metrics_html}'
+            f'{details_html}'
+            '</div>'
+        )
 
-        rows_html.append(f"<tr>{date_html}{workout_html}{target_html}{pace_hr_html}{notes_html}</tr>")
-
-    table_body = "".join(rows_html)
-    return (
-        f"{eyebrow}"
-        '<div class="table-container">'
-        '<table class="plan-table">'
-        "<thead><tr>"
-        "<th>Date</th>"
-        "<th>Workout</th>"
-        "<th>Target</th>"
-        "<th>Pace / HR</th>"
-        "<th>Notes / Rationale</th>"
-        "</tr></thead>"
-        f"<tbody>{table_body}</tbody>"
-        "</table></div>"
-    )
+    return f'{eyebrow}<div class="row-list">{"".join(cards_html)}</div>'
 
 
 async def running(request: Request) -> HTMLResponse:
