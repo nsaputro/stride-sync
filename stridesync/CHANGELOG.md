@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Plan override management tools (`set_plan_override`, `get_plan_overrides`, `delete_plan_override`) and merged override tracking in `planned_vs_actual`.
+
 ## [0.9.0] - 2026-08-12
 
 ### Added
