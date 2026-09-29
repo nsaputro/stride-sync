@@ -22,7 +22,7 @@ import logging
 import os
 import sqlite3
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any, Dict, List, Optional
 
@@ -83,14 +83,75 @@ _STYLE = """
     color: var(--muted); margin: 1.5rem 0 0.6rem;
   }
   .eyebrow:first-child { margin-top: 0; }
-  .badge {
+  div.badge {
     display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 600;
     padding: 0.55rem 0.8rem; border-radius: 999px; margin-bottom: 1.1rem; color: var(--muted);
     background: var(--tile);
   }
-  .badge.ok { color: var(--ok); background: var(--ok-bg); }
-  .badge.error { color: var(--error); background: var(--error-bg); }
+  div.badge.ok { color: var(--ok); background: var(--ok-bg); }
+  div.badge.error { color: var(--error); background: var(--error-bg); }
   .badge-dot { width: 0.45rem; height: 0.45rem; border-radius: 999px; background: currentColor; flex-shrink: 0; }
+  span.badge, .badge-override, .badge-garmin {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.45rem;
+    border-radius: 0.35rem;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+  }
+  .badge-override {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+  }
+  .badge-garmin {
+    background: rgba(156, 163, 175, 0.15);
+    color: var(--muted);
+  }
+  .table-container {
+    overflow-x: auto;
+    margin-bottom: 1.2rem;
+    border-radius: 0.8rem;
+    border: 1px solid var(--border-soft);
+    background: var(--card);
+  }
+  .plan-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    text-align: left;
+  }
+  .plan-table th {
+    padding: 0.65rem 0.85rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border-soft);
+    white-space: nowrap;
+  }
+  .plan-table td {
+    padding: 0.75rem 0.85rem;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: top;
+    color: var(--text);
+  }
+  .plan-table tr:last-child td {
+    border-bottom: none;
+  }
+  .reason-text {
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: var(--text);
+  }
+  .notes-text {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 0.25rem;
+    font-style: italic;
+  }
   .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-bottom: 0.5rem; }
   .stat-tile {
     background: var(--tile); border: 1px solid var(--border-soft); border-radius: 0.85rem;
@@ -524,9 +585,186 @@ def _weekly_distance_html(settings: Settings) -> str:
     return f'<div class="eyebrow">Weekly total distance</div><div class="row-list">{items}</div>'
 
 
+def _format_target_pace(pace_sec: Optional[float]) -> Optional[str]:
+    if pace_sec is None or pace_sec <= 0:
+        return None
+    minutes = int(pace_sec // 60)
+    seconds = int(round(pace_sec % 60))
+    if seconds == 60:
+        minutes += 1
+        seconds = 0
+    return f"{minutes}:{seconds:02d} /km"
+
+
+def _format_target_hr(low: Optional[int], high: Optional[int]) -> Optional[str]:
+    if low is not None and high is not None:
+        return f"{low}–{high} bpm"
+    if low is not None:
+        return f"{low}+ bpm"
+    if high is not None:
+        return f"≤{high} bpm"
+    return None
+
+
+def _future_planned_workouts(db_path: str) -> List[Dict[str, Any]]:
+    if not os.path.exists(db_path):
+        return []
+
+    conn = _connect_readonly(db_path)
+    try:
+        today_iso = date.today().isoformat()
+        rows = conn.execute(
+            """
+            WITH dates AS (
+                SELECT workout_date FROM planned_workouts WHERE workout_date >= :today
+                UNION
+                SELECT workout_date FROM plan_overrides WHERE workout_date >= :today
+            )
+            SELECT
+                d.workout_date,
+                CASE WHEN po.workout_date IS NOT NULL THEN 1 ELSE 0 END AS is_overridden,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.workout_name ELSE pw.workout_name END AS workout_name,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.workout_type ELSE pw.workout_type END AS workout_type,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.planned_distance_meters ELSE pw.planned_distance_meters END AS planned_distance_meters,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.planned_duration_seconds ELSE pw.planned_duration_seconds END AS planned_duration_seconds,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_pace_sec_per_km ELSE pw.planned_target_pace_sec_per_km END AS planned_target_pace_sec_per_km,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_hr_low ELSE pw.planned_target_hr_low END AS planned_target_hr_low,
+                CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_hr_high ELSE pw.planned_target_hr_high END AS planned_target_hr_high,
+                po.reason,
+                po.notes,
+                pw.workout_name AS garmin_workout_name
+            FROM dates d
+            LEFT JOIN planned_workouts pw ON d.workout_date = pw.workout_date
+            LEFT JOIN plan_overrides po ON d.workout_date = po.workout_date
+            ORDER BY d.workout_date ASC
+            """,
+            {"today": today_iso},
+        ).fetchall()
+    finally:
+        conn.close()
+
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        w_date = row["workout_date"]
+        try:
+            day_name = datetime.fromisoformat(w_date).strftime("%a")
+        except ValueError:
+            day_name = ""
+
+        is_ov = bool(row["is_overridden"])
+        dist_meters = row["planned_distance_meters"]
+        dist_km = round(dist_meters / 1000.0, 2) if dist_meters is not None else None
+
+        dur_sec = row["planned_duration_seconds"]
+        dur_min = int(round(dur_sec / 60.0)) if dur_sec is not None else None
+
+        pace_str = _format_target_pace(row["planned_target_pace_sec_per_km"])
+        hr_str = _format_target_hr(row["planned_target_hr_low"], row["planned_target_hr_high"])
+
+        results.append(
+            {
+                "workout_date": w_date,
+                "day_name": day_name,
+                "is_overridden": is_ov,
+                "workout_name": row["workout_name"],
+                "workout_type": row["workout_type"],
+                "planned_distance_km": dist_km,
+                "planned_duration_minutes": dur_min,
+                "planned_target_pace": pace_str,
+                "planned_target_hr": hr_str,
+                "reason": row["reason"],
+                "notes": row["notes"],
+                "garmin_workout_name": row["garmin_workout_name"] if is_ov else None,
+            }
+        )
+
+    return results
+
+
+def _future_plan_html(settings: Settings) -> str:
+    workouts = _future_planned_workouts(settings.db_path)
+    eyebrow = '<div class="eyebrow">Upcoming training plan</div>'
+    if not workouts:
+        return eyebrow + '<div class="card"><p class="muted">No upcoming workouts scheduled.</p></div>'
+
+    rows_html: List[str] = []
+    for w in workouts:
+        date_str = escape(w["workout_date"])
+        day_str = escape(w["day_name"])
+        date_html = f"<td>{date_str} ({day_str})</td>"
+
+        w_name = escape(w["workout_name"] or "Planned Workout")
+        if w["is_overridden"]:
+            badge = '<span class="badge badge-override">Override</span>'
+            superseded = (
+                f'<div class="row-meta">Original: <del>{escape(w["garmin_workout_name"])}</del></div>'
+                if w["garmin_workout_name"]
+                else ""
+            )
+        else:
+            badge = '<span class="badge badge-garmin">Garmin</span>'
+            superseded = ""
+        workout_html = f"<td><strong>{w_name}</strong>{badge}{superseded}</td>"
+
+        dist = w["planned_distance_km"]
+        dur = w["planned_duration_minutes"]
+        if dist is not None and dur is not None:
+            target_str = f"{dist:.1f} km ({dur}m)"
+        elif dist is not None:
+            target_str = f"{dist:.1f} km"
+        elif dur is not None:
+            target_str = f"— ({dur}m)"
+        else:
+            target_str = "—"
+        target_html = f"<td>{escape(target_str)}</td>"
+
+        pace = w["planned_target_pace"]
+        hr = w["planned_target_hr"]
+        if pace and hr:
+            pace_hr_str = f'{escape(pace)}<br><span class="row-meta">{escape(hr)}</span>'
+        elif pace:
+            pace_hr_str = escape(pace)
+        elif hr:
+            pace_hr_str = f'<span class="row-meta">{escape(hr)}</span>'
+        else:
+            pace_hr_str = "—"
+        pace_hr_html = f"<td>{pace_hr_str}</td>"
+
+        if w["is_overridden"]:
+            reason_part = f'<div class="reason-text">{escape(w["reason"] or "")}</div>' if w["reason"] else ""
+            notes_part = f'<div class="notes-text">{escape(w["notes"])}</div>' if w["notes"] else ""
+            notes_rationale_str = (reason_part + notes_part) if (reason_part or notes_part) else "—"
+        else:
+            notes_rationale_str = "—"
+        notes_html = f"<td>{notes_rationale_str}</td>"
+
+        rows_html.append(f"<tr>{date_html}{workout_html}{target_html}{pace_hr_html}{notes_html}</tr>")
+
+    table_body = "".join(rows_html)
+    return (
+        f"{eyebrow}"
+        '<div class="table-container">'
+        '<table class="plan-table">'
+        "<thead><tr>"
+        "<th>Date</th>"
+        "<th>Workout</th>"
+        "<th>Target</th>"
+        "<th>Pace / HR</th>"
+        "<th>Notes / Rationale</th>"
+        "</tr></thead>"
+        f"<tbody>{table_body}</tbody>"
+        "</table></div>"
+    )
+
+
 async def running(request: Request) -> HTMLResponse:
     settings: Settings = request.app.state.settings
-    body = _hr_zone_ranges_html(settings) + _weekly_distance_html(settings)
+    # The upcoming training plan table MUST come first at the very top
+    body = (
+        _future_plan_html(settings)
+        + _hr_zone_ranges_html(settings)
+        + _weekly_distance_html(settings)
+    )
     return _page("Running", body, active_tab="running")
 
 

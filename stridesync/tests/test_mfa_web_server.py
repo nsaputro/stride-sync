@@ -1061,3 +1061,208 @@ def test_weekly_distance_skips_malformed_and_missing_data(tmp_path):
     # a week with 0.0 km rather than crashing.
     assert len(weeks) == 1
     assert weeks[0]["distance_km"] == 0.0
+
+
+def test_future_planned_workouts_empty(tmp_path):
+    from app import db
+
+    settings = make_settings(tmp_path)
+    # Even if db does not exist
+    assert mfa_web_server._future_planned_workouts(settings.db_path) == []
+
+    # And with an empty initialized db
+    conn = db.connect(settings.db_path)
+    conn.close()
+    assert mfa_web_server._future_planned_workouts(settings.db_path) == []
+
+    # Running page renders empty-state message
+    response = TestClient(mfa_web_server.create_app(settings)).get("/running")
+    assert response.status_code == 200
+    assert "Upcoming training plan" in response.text
+    assert "No upcoming workouts scheduled." in response.text
+
+
+def test_future_planned_workouts_with_garmin_and_overrides(tmp_path):
+    from datetime import date, timedelta
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    next_week = (date.today() + timedelta(days=7)).isoformat()
+    past_date = (date.today() - timedelta(days=2)).isoformat()
+
+    # Past workout (should NOT appear)
+    conn.execute(
+        """
+        INSERT INTO planned_workouts (
+            plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, planned_target_pace_sec_per_km,
+            planned_target_hr_low, planned_target_hr_high, synced_at
+        ) VALUES ('plan_1', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """,
+        (past_date, "Past Recovery", "RECOVERY", 5000.0, 1800.0, 360.0, 120, 135),
+    )
+
+    # Tomorrow workout (to be overridden)
+    conn.execute(
+        """
+        INSERT INTO planned_workouts (
+            plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, planned_target_pace_sec_per_km,
+            planned_target_hr_low, planned_target_hr_high, synced_at
+        ) VALUES ('plan_1', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """,
+        (tomorrow, "Garmin Base Run", "AEROBIC_BASE", 8000.0, 2700.0, 340.0, 130, 145),
+    )
+
+    # Next week workout (unoverridden Garmin plan)
+    conn.execute(
+        """
+        INSERT INTO planned_workouts (
+            plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, planned_target_pace_sec_per_km,
+            planned_target_hr_low, planned_target_hr_high, synced_at
+        ) VALUES ('plan_1', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """,
+        (next_week, "Garmin Long Run", "LONG_RUN", 18000.0, 6000.0, 330.0, 135, 150),
+    )
+
+    # Override for tomorrow
+    conn.execute(
+        """
+        INSERT INTO plan_overrides (
+            workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, planned_target_pace_sec_per_km,
+            planned_target_hr_low, planned_target_hr_high, reason, notes,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        """,
+        (
+            tomorrow,
+            "Coach Taper Base",
+            "AEROBIC_BASE",
+            6000.0,
+            2100.0,
+            350.0,
+            125,
+            140,
+            "Marathon taper: reduce volume by 25%",
+            "Keep effort conversational",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    workouts = mfa_web_server._future_planned_workouts(settings.db_path)
+    assert len(workouts) == 2
+
+    # Tomorrow's entry: overridden
+    w_tomorrow = workouts[0]
+    assert w_tomorrow["workout_date"] == tomorrow
+    assert w_tomorrow["is_overridden"] is True
+    assert w_tomorrow["workout_name"] == "Coach Taper Base"
+    assert w_tomorrow["planned_distance_km"] == 6.0
+    assert w_tomorrow["planned_duration_minutes"] == 35
+    assert w_tomorrow["planned_target_pace"] == "5:50 /km"
+    assert w_tomorrow["planned_target_hr"] == "125–140 bpm"
+    assert w_tomorrow["reason"] == "Marathon taper: reduce volume by 25%"
+    assert w_tomorrow["notes"] == "Keep effort conversational"
+    assert w_tomorrow["garmin_workout_name"] == "Garmin Base Run"
+
+    # Next week's entry: not overridden
+    w_next = workouts[1]
+    assert w_next["workout_date"] == next_week
+    assert w_next["is_overridden"] is False
+    assert w_next["workout_name"] == "Garmin Long Run"
+    assert w_next["planned_distance_km"] == 18.0
+    assert w_next["planned_duration_minutes"] == 100
+    assert w_next["planned_target_pace"] == "5:30 /km"
+    assert w_next["planned_target_hr"] == "135–150 bpm"
+    assert w_next["reason"] is None
+    assert w_next["garmin_workout_name"] is None
+
+
+def test_running_page_renders_plan_table(tmp_path):
+    from datetime import date, timedelta
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    conn.execute(
+        """
+        INSERT INTO planned_workouts (
+            plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, synced_at
+        ) VALUES ('plan_1', ?, 'Garmin Interval', 'INTERVAL', 7000.0, 2400.0, datetime('now'))
+        """,
+        (tomorrow,),
+    )
+    conn.execute(
+        """
+        INSERT INTO plan_overrides (
+            workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, reason, notes, created_at, updated_at
+        ) VALUES (?, 'Coach Easy Strides', 'RECOVERY', 5000.0, 1800.0, 'Fatigue prevention', 'Easy jog with 4x strides', datetime('now'), datetime('now'))
+        """,
+        (tomorrow,),
+    )
+
+    # Also insert HR zone and activity so all 3 sections are rendered
+    conn.execute(
+        """
+        INSERT INTO activities (
+            activity_id, activity_name, activity_type, start_time_local, start_time_gmt,
+            distance_meters, synced_at
+        ) VALUES (1, 'Run', 'running', datetime('now', '-1 days'), 'x', 5000.0, datetime('now'))
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO activity_hr_zones (activity_id, zone_number, zone_low_boundary_hr, seconds_in_zone)
+        VALUES (1, 1, 110, 600.0)
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/running")
+    assert response.status_code == 200
+
+    # Headers
+    assert "<th>Date</th>" in response.text
+    assert "<th>Workout</th>" in response.text
+    assert "<th>Target</th>" in response.text
+    assert "<th>Pace / HR</th>" in response.text
+    assert "<th>Notes / Rationale</th>" in response.text
+
+    # Content
+    assert "Coach Easy Strides" in response.text
+    assert '<span class="badge badge-override">Override</span>' in response.text
+    assert "<del>Garmin Interval</del>" in response.text
+    assert "5.0 km (30m)" in response.text
+    assert "Fatigue prevention" in response.text
+    assert "Easy jog with 4x strides" in response.text
+
+    # Section ordering MUST strictly be: Upcoming training plan -> Heart rate zones -> Weekly total distance
+    idx_plan = response.text.index("Upcoming training plan")
+    idx_zones = response.text.index("Heart rate zones")
+    idx_weekly = response.text.index("Weekly total distance")
+    assert idx_plan < idx_zones < idx_weekly
+
+
+def test_format_target_pace_and_hr():
+    assert mfa_web_server._format_target_pace(None) is None
+    assert mfa_web_server._format_target_pace(0) is None
+    assert mfa_web_server._format_target_pace(-10) is None
+    assert mfa_web_server._format_target_pace(350.0) == "5:50 /km"
+    assert mfa_web_server._format_target_pace(299.8) == "5:00 /km"
+
+    assert mfa_web_server._format_target_hr(None, None) is None
+    assert mfa_web_server._format_target_hr(130, 145) == "130–145 bpm"
+    assert mfa_web_server._format_target_hr(140, None) == "140+ bpm"
+    assert mfa_web_server._format_target_hr(None, 155) == "≤155 bpm"
+
