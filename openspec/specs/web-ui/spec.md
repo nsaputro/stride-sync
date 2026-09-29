@@ -27,11 +27,19 @@ The Dashboard tab SHALL display current synchronization health, total synced rec
 - **THEN** an immediate sync is initiated and the UI updates the sync status badge upon completion.
 
 ### Requirement: Running Analytics Tab
-The Running tab SHALL display heart rate zone ranges and aggregate weekly mileage grouped Monday through Sunday with most recent weeks first.
+The Running tab SHALL display upcoming scheduled training plans with merged plan overrides at the very top of the tab, followed by heart rate zone ranges and aggregate weekly mileage grouped Monday through Sunday with most recent weeks first.
+
+#### Scenario: Viewing upcoming training plan
+- **WHEN** the Running tab is opened
+- **THEN** future scheduled workouts are rendered in an upcoming training plan table at the top of the tab, showing dates, workout names, target metrics, pace, heart rate, override badges, and coaching rationales.
 
 #### Scenario: Viewing weekly volume
 - **WHEN** the Running tab is opened
-- **THEN** weekly distances are displayed in chronological order (recent first) grouped by calendar week along with heart rate zone thresholds.
+- **THEN** weekly distances are displayed in chronological order (recent first) grouped by calendar week along with heart rate zone thresholds below the upcoming training plan.
+
+#### Scenario: No upcoming workouts scheduled
+- **WHEN** the Running tab is opened and no workouts are scheduled on or after the current date
+- **THEN** an empty-state card indicating no upcoming workouts scheduled is rendered above heart rate zones.
 
 ### Requirement: Settings, MFA, and Backfill Controls
 The Settings tab SHALL provide Garmin account configuration, interactive MFA code submission, historical backfill trigger with live progress streaming, and a diagnostics panel.
