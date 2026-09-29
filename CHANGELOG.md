@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-29
+
 ### Added
 - Plan override management tools (`set_plan_override`, `get_plan_overrides`, `delete_plan_override`) and merged override tracking in `planned_vs_actual`.
 - OpenSpec spec-driven development support with baseline capability specs and Antigravity workflows.
@@ -151,7 +153,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - FastMCP server over Streamable HTTP exposing 5 core tools.
 - CI and release automation pipelines.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/nsaputro/stride-sync/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/nsaputro/stride-sync/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/nsaputro/stride-sync/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/nsaputro/stride-sync/compare/v0.7.0...v0.8.0
