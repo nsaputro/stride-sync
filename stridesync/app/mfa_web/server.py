@@ -151,34 +151,37 @@ _STYLE = """
     color: var(--muted);
   }
   details.plan-details {
-    margin-top: 0.65rem;
-    border-top: 1px dashed var(--border-soft);
-    padding-top: 0.55rem;
+    margin-top: 0.45rem;
   }
   summary.plan-summary {
     cursor: pointer;
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--primary);
     user-select: none;
     list-style: none;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    gap: 0.4rem;
   }
   summary.plan-summary::-webkit-details-marker {
     display: none;
   }
-  summary.plan-summary::after {
-    content: "▾";
+  .plan-toggle-chip {
+    color: var(--primary);
     font-size: 0.85rem;
+    padding: 0.2rem 0.55rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-color: rgba(59, 130, 246, 0.4);
+    background: var(--tile);
     transition: transform 0.2s ease;
   }
-  details.plan-details[open] summary.plan-summary::after {
+  details.plan-details[open] .plan-toggle-chip {
     transform: rotate(180deg);
   }
   .plan-details-content {
-    margin-top: 0.45rem;
+    margin-top: 0.55rem;
     padding: 0.55rem 0.7rem;
     background: var(--tile);
     border-radius: 0.5rem;
@@ -777,14 +780,16 @@ def _future_plan_html(settings: Settings) -> str:
             if w.get("notes"):
                 details_inner.append(f'<div class="notes-text"><strong>Notes:</strong> {escape(w["notes"])}</div>')
 
-            details_html = (
+            toggle_chip = '<span class="plan-chip plan-toggle-chip" title="Coaching details">▾</span>'
+            summary_content = "".join(metrics_chips) + toggle_chip if metrics_chips else '<span class="plan-chip plan-toggle-chip">Coaching details ▾</span>'
+            bottom_html = (
                 '<details class="plan-details">'
-                '<summary class="plan-summary">Coaching rationale & notes</summary>'
+                f'<summary class="plan-summary">{summary_content}</summary>'
                 f'<div class="plan-details-content">{"".join(details_inner)}</div>'
                 '</details>'
             )
         else:
-            details_html = ""
+            bottom_html = f'<div class="plan-metrics">{"".join(metrics_chips)}</div>' if metrics_chips else ""
 
         cards_html.append(
             '<div class="plan-card">'
@@ -793,8 +798,7 @@ def _future_plan_html(settings: Settings) -> str:
             f'<div class="row-value">{escape(target_str)}</div>'
             '</div>'
             f'<div class="plan-title"><strong>{w_name}</strong>{badge}</div>'
-            f'{metrics_html}'
-            f'{details_html}'
+            f'{bottom_html}'
             '</div>'
         )
 

@@ -1237,11 +1237,12 @@ def test_running_page_renders_plan_table(tmp_path):
     assert '<div class="plan-card">' in response.text
     assert '<div class="plan-date">' in response.text
     assert '<div class="plan-title">' in response.text
-    assert '<div class="plan-metrics">' in response.text
+    assert '<details class="plan-details">' in response.text
+    assert '<summary class="plan-summary">' in response.text
     assert '<span class="plan-chip">⏱️ 5:50 /km</span>' in response.text
     assert '<span class="plan-chip">❤️ 120–135 bpm</span>' in response.text
-    assert '<details class="plan-details">' in response.text
-    assert '<summary class="plan-summary">Coaching rationale & notes</summary>' in response.text
+    assert '<span class="plan-chip plan-toggle-chip" title="Coaching details">▾</span>' in response.text
+    assert "Coaching rationale & notes" not in response.text
 
     # Content
     assert "Coach Easy Strides" in response.text
