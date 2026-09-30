@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-30
+
 ### Changed
 - Display future scheduled training plans as mobile-friendly expandable workout cards with an inline expand toggle next to the heart rate chip on the Running tab.
 
@@ -161,7 +163,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - FastMCP server over Streamable HTTP exposing 5 core tools.
 - CI and release automation pipelines.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/nsaputro/stride-sync/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/nsaputro/stride-sync/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/nsaputro/stride-sync/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/nsaputro/stride-sync/compare/v0.8.1...v0.9.0
