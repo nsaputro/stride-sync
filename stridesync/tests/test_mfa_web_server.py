@@ -1170,6 +1170,8 @@ def test_future_planned_workouts_with_garmin_and_overrides(tmp_path):
     assert w_tomorrow["reason"] == "Marathon taper: reduce volume by 25%"
     assert w_tomorrow["notes"] == "Keep effort conversational"
     assert w_tomorrow["garmin_workout_name"] == "Garmin Base Run"
+    assert w_tomorrow["garmin_planned_distance_km"] == 8.0
+    assert w_tomorrow["garmin_planned_duration_minutes"] == 45
 
     # Next week's entry: not overridden
     w_next = workouts[1]
@@ -1182,6 +1184,8 @@ def test_future_planned_workouts_with_garmin_and_overrides(tmp_path):
     assert w_next["planned_target_hr"] == "135–150 bpm"
     assert w_next["reason"] is None
     assert w_next["garmin_workout_name"] is None
+    assert w_next["garmin_planned_distance_km"] is None
+    assert w_next["garmin_planned_duration_minutes"] is None
 
 
 def test_running_page_renders_plan_table(tmp_path):
@@ -1241,14 +1245,17 @@ def test_running_page_renders_plan_table(tmp_path):
     assert '<summary class="plan-summary">' in response.text
     assert '<span class="plan-chip">⏱️ 5:50 /km</span>' in response.text
     assert '<span class="plan-chip">❤️ 120–135 bpm</span>' in response.text
-    assert '<span class="plan-chip plan-toggle-chip" title="Coaching details">▾</span>' in response.text
+    assert (
+        '<span class="plan-chip plan-toggle-chip" title="Coaching details">'
+        '<span class="plan-toggle-icon">▾</span></span>'
+    ) in response.text
     assert "Coaching rationale & notes" not in response.text
 
     # Content
     assert "Coach Easy Strides" in response.text
     assert '<span class="badge badge-override">Override</span>' in response.text
-    assert "<del>Garmin Interval</del>" in response.text
-    assert "5.0 km (30m)" in response.text
+    assert "<del>Garmin Interval 7.0 km (40m)</del>" in response.text
+    assert '<del class="plan-orig-target">7.0 km (40m)</del> 5.0 km (30m)' in response.text
     assert "Fatigue prevention" in response.text
     assert "Easy jog with 4x strides" in response.text
 
@@ -1257,6 +1264,55 @@ def test_running_page_renders_plan_table(tmp_path):
     idx_zones = response.text.index("Heart rate zones")
     idx_weekly = response.text.index("Weekly total distance")
     assert idx_plan < idx_zones < idx_weekly
+
+
+def test_running_page_renders_rest_day_override(tmp_path):
+    from datetime import date, timedelta
+    from app import db
+
+    settings = make_settings(tmp_path)
+    conn = db.connect(settings.db_path)
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    # Garmin had 44-minute sprint with no distance specified
+    conn.execute(
+        """
+        INSERT INTO planned_workouts (
+            plan_id, workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, synced_at
+        ) VALUES ('plan_sprint', ?, 'Sprint', 'SPRINT', NULL, 2640.0, datetime('now'))
+        """,
+        (tomorrow,),
+    )
+    # Override with Rest day: 0m duration, 0m distance, no pace/hr
+    conn.execute(
+        """
+        INSERT INTO plan_overrides (
+            workout_date, workout_name, workout_type, planned_distance_meters,
+            planned_duration_seconds, planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
+            reason, notes, created_at, updated_at
+        ) VALUES (?, 'Taper Rest & Recovery', 'RECOVERY', 0.0, 0.0, NULL, NULL, NULL, 'Hamstring rest', 'Full rest', datetime('now'), datetime('now'))
+        """,
+        (tomorrow,),
+    )
+    conn.commit()
+    conn.close()
+
+    response = TestClient(mfa_web_server.create_app(settings)).get("/running")
+    assert response.status_code == 200
+
+    # Verify original time crossed-out in header before 0.0 km (0m)
+    assert '<del class="plan-orig-target">(44m)</del> 0.0 km (0m)' in response.text
+    # Verify toggle chip has only the chevron icon and no text button like "Coaching details ▾"
+    assert (
+        '<summary class="plan-summary">'
+        '<span class="plan-chip plan-toggle-chip" title="Coaching details">'
+        '<span class="plan-toggle-icon">▾</span></span>'
+        '</summary>'
+    ) in response.text
+    assert "Coaching details ▾" not in response.text
+    assert "<del>Sprint (44m)</del>" in response.text
+    assert "Hamstring rest" in response.text
 
 
 def test_format_target_pace_and_hr():

@@ -165,6 +165,12 @@ _STYLE = """
   summary.plan-summary::-webkit-details-marker {
     display: none;
   }
+  .plan-orig-target {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 0.85rem;
+    margin-right: 0.35rem;
+  }
   .plan-toggle-chip {
     color: var(--primary);
     font-size: 0.85rem;
@@ -175,9 +181,12 @@ _STYLE = """
     justify-content: center;
     border-color: rgba(59, 130, 246, 0.4);
     background: var(--tile);
+  }
+  .plan-toggle-icon {
+    display: inline-block;
     transition: transform 0.2s ease;
   }
-  details.plan-details[open] .plan-toggle-chip {
+  details.plan-details[open] .plan-toggle-icon {
     transform: rotate(180deg);
   }
   .plan-details-content {
@@ -678,7 +687,9 @@ def _future_planned_workouts(db_path: str) -> List[Dict[str, Any]]:
                 CASE WHEN po.workout_date IS NOT NULL THEN po.planned_target_hr_high ELSE pw.planned_target_hr_high END AS planned_target_hr_high,
                 po.reason,
                 po.notes,
-                pw.workout_name AS garmin_workout_name
+                pw.workout_name AS garmin_workout_name,
+                pw.planned_distance_meters AS garmin_planned_distance_meters,
+                pw.planned_duration_seconds AS garmin_planned_duration_seconds
             FROM dates d
             LEFT JOIN planned_workouts pw ON d.workout_date = pw.workout_date
             LEFT JOIN plan_overrides po ON d.workout_date = po.workout_date
@@ -704,6 +715,12 @@ def _future_planned_workouts(db_path: str) -> List[Dict[str, Any]]:
         dur_sec = row["planned_duration_seconds"]
         dur_min = int(round(dur_sec / 60.0)) if dur_sec is not None else None
 
+        garmin_dist_m = row["garmin_planned_distance_meters"] if is_ov else None
+        garmin_dist_km = round(garmin_dist_m / 1000.0, 2) if garmin_dist_m is not None else None
+
+        garmin_dur_s = row["garmin_planned_duration_seconds"] if is_ov else None
+        garmin_dur_min = int(round(garmin_dur_s / 60.0)) if garmin_dur_s is not None else None
+
         pace_str = _format_target_pace(row["planned_target_pace_sec_per_km"])
         hr_str = _format_target_hr(row["planned_target_hr_low"], row["planned_target_hr_high"])
 
@@ -721,6 +738,8 @@ def _future_planned_workouts(db_path: str) -> List[Dict[str, Any]]:
                 "reason": row["reason"],
                 "notes": row["notes"],
                 "garmin_workout_name": row["garmin_workout_name"] if is_ov else None,
+                "garmin_planned_distance_km": garmin_dist_km,
+                "garmin_planned_duration_minutes": garmin_dur_min,
             }
         )
 
@@ -738,18 +757,6 @@ def _future_plan_html(settings: Settings) -> str:
         date_str = escape(w["workout_date"])
         day_str = escape(w["day_name"])
 
-        w_name = escape(w["workout_name"] or "Planned Workout")
-        if w["is_overridden"]:
-            badge = '<span class="badge badge-override">Override</span>'
-            superseded = (
-                f'<div class="row-meta">Original: <del>{escape(w["garmin_workout_name"])}</del></div>'
-                if w["garmin_workout_name"]
-                else ""
-            )
-        else:
-            badge = '<span class="badge badge-garmin">Garmin</span>'
-            superseded = ""
-
         dist = w["planned_distance_km"]
         dur = w["planned_duration_minutes"]
         if dist is not None and dur is not None:
@@ -761,6 +768,47 @@ def _future_plan_html(settings: Settings) -> str:
         else:
             target_str = "—"
 
+        orig_target_str = None
+        if w["is_overridden"]:
+            garmin_dist = w.get("garmin_planned_distance_km")
+            garmin_dur = w.get("garmin_planned_duration_minutes")
+            if garmin_dist is not None and garmin_dur is not None:
+                garmin_fmt = f"{garmin_dist:.1f} km ({garmin_dur}m)"
+            elif garmin_dist is not None:
+                garmin_fmt = f"{garmin_dist:.1f} km"
+            elif garmin_dur is not None:
+                garmin_fmt = f"({garmin_dur}m)"
+            else:
+                garmin_fmt = None
+
+            if garmin_fmt and garmin_fmt != target_str:
+                if garmin_dist is None and garmin_dur == dur:
+                    pass
+                else:
+                    orig_target_str = garmin_fmt
+
+        if orig_target_str:
+            target_html = f'<del class="plan-orig-target">{escape(orig_target_str)}</del> {escape(target_str)}'
+        else:
+            target_html = escape(target_str)
+
+        w_name = escape(w["workout_name"] or "Planned Workout")
+        if w["is_overridden"]:
+            badge = '<span class="badge badge-override">Override</span>'
+            orig_meta: List[str] = []
+            if w.get("garmin_workout_name"):
+                orig_meta.append(escape(w["garmin_workout_name"]))
+            if orig_target_str:
+                orig_meta.append(escape(orig_target_str))
+            superseded = (
+                f'<div class="row-meta">Original: <del>{" ".join(orig_meta)}</del></div>'
+                if orig_meta
+                else ""
+            )
+        else:
+            badge = '<span class="badge badge-garmin">Garmin</span>'
+            superseded = ""
+
         pace = w["planned_target_pace"]
         hr = w["planned_target_hr"]
         metrics_chips: List[str] = []
@@ -768,7 +816,6 @@ def _future_plan_html(settings: Settings) -> str:
             metrics_chips.append(f'<span class="plan-chip">⏱️ {escape(pace)}</span>')
         if hr:
             metrics_chips.append(f'<span class="plan-chip">❤️ {escape(hr)}</span>')
-        metrics_html = f'<div class="plan-metrics">{"".join(metrics_chips)}</div>' if metrics_chips else ""
 
         has_details = bool(w["is_overridden"] and (w.get("reason") or w.get("notes") or superseded))
         if has_details:
@@ -780,8 +827,8 @@ def _future_plan_html(settings: Settings) -> str:
             if w.get("notes"):
                 details_inner.append(f'<div class="notes-text"><strong>Notes:</strong> {escape(w["notes"])}</div>')
 
-            toggle_chip = '<span class="plan-chip plan-toggle-chip" title="Coaching details">▾</span>'
-            summary_content = "".join(metrics_chips) + toggle_chip if metrics_chips else '<span class="plan-chip plan-toggle-chip">Coaching details ▾</span>'
+            toggle_chip = '<span class="plan-chip plan-toggle-chip" title="Coaching details"><span class="plan-toggle-icon">▾</span></span>'
+            summary_content = "".join(metrics_chips) + toggle_chip if metrics_chips else toggle_chip
             bottom_html = (
                 '<details class="plan-details">'
                 f'<summary class="plan-summary">{summary_content}</summary>'
@@ -795,7 +842,7 @@ def _future_plan_html(settings: Settings) -> str:
             '<div class="plan-card">'
             '<div class="plan-card-header">'
             f'<div class="plan-date">{date_str} ({day_str})</div>'
-            f'<div class="row-value">{escape(target_str)}</div>'
+            f'<div class="row-value">{target_html}</div>'
             '</div>'
             f'<div class="plan-title"><strong>{w_name}</strong>{badge}</div>'
             f'{bottom_html}'
