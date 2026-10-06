@@ -31,11 +31,11 @@ The Running tab SHALL display upcoming scheduled training plans with merged plan
 
 #### Scenario: Viewing upcoming training plan
 - **WHEN** the Running tab is opened
-- **THEN** future scheduled workouts are rendered in expandable workout cards at the top of the tab, displaying dates, workout names, target metrics, pace, heart rate, and override badges without horizontal overflow.
+- **THEN** future scheduled workouts are rendered in expandable workout cards at the top of the tab, displaying dates, workout names, target metrics with crossed-out original planned targets for overrides, pace, heart rate, and override badges without horizontal overflow.
 
 #### Scenario: Expanding coaching rationale on workout card
 - **WHEN** a user taps or clicks on an overridden workout card's coaching disclosure
-- **THEN** the coaching rationale, specific instructions, and superseded Garmin workout are revealed inline.
+- **THEN** the coaching rationale, specific instructions, and superseded Garmin workout are revealed inline without rotating text upside down.
 
 #### Scenario: Viewing weekly volume
 - **WHEN** the Running tab is opened

@@ -4,4 +4,4 @@
 - [x] 1.2 Render crossed-out original target duration preceding the active target in workout card headers when overridden.
 - [x] 1.3 Fix toggle chip rendering on cards without metrics to ensure only chevron rotates without flipping text.
 - [x] 1.4 Update `tests/test_mfa_web_server.py` assertions and verify test suite passes.
-- [ ] 1.5 Verify live rendering on dev channel add-on in Home Assistant.
+- [x] 1.5 Verify live rendering on dev channel add-on in Home Assistant.
