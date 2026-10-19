@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-19
+
 ### Added
 - Batch workout scheduling tool `schedule_garmin_workouts` to upload and schedule structured workouts with exact lap timing directly to Garmin Connect and connected Garmin watches.
 - Support for structured step payloads and Garmin schedule identifiers in plan overrides storage.
@@ -178,7 +180,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - FastMCP server over Streamable HTTP exposing 5 core tools.
 - CI and release automation pipelines.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/nsaputro/stride-sync/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/nsaputro/stride-sync/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/nsaputro/stride-sync/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/nsaputro/stride-sync/compare/v0.9.1...v0.9.2

@@ -1,11 +1,12 @@
 # Changelog
 
-## [0.9.4] - 2026-10-06
+## [0.9.5] - 2026-10-19
 
 ### Added
-- Display crossed-out original planned target duration before updated targets on overridden workout cards.
+- Batch workout scheduling tool `schedule_garmin_workouts` to upload and schedule structured workouts with exact lap timing directly to Garmin Connect and connected Garmin watches.
+- Support for structured step payloads and Garmin schedule identifiers in plan overrides storage.
 
-### Fixed
-- Prevent upside-down coaching details text by isolating rotation transform strictly to the chevron icon.
+### Changed
+- Enforce pace (`pace.zone`) and heart rate (`heart.rate.zone`) target types for running workout steps uploaded to Garmin Connect, avoiding speed (`speed.zone`).
 
-[0.9.4]: https://github.com/nsaputro/stride-sync/releases/tag/v0.9.4
+[0.9.5]: https://github.com/nsaputro/stride-sync/releases/tag/v0.9.5
