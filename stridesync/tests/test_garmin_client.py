@@ -24,6 +24,7 @@ from app.sync.garmin_client import (
     _normalize_training_baseline,
     _normalize_vo2max,
     _pace_sec_per_km,
+    build_running_workout_payload,
     describe_transport_error,
 )
 
@@ -1903,3 +1904,112 @@ class TestGarminClientFetch:
 
         with pytest.raises(GarminConnectConnectionError):
             client.fetch_diagnostic("training_plans")
+
+    def test_build_running_workout_payload_structures_all_step_types(self):
+        steps = [
+            {"step_type": "warmup", "distance_meters": 2000, "target_hr_low": 130, "target_hr_high": 145},
+            {
+                "step_type": "repeat_group",
+                "repeats": 4,
+                "work": {"step_type": "interval", "distance_meters": 1000, "target_pace_sec_per_km": 240},
+                "recovery": {"step_type": "recovery", "duration_seconds": 90},
+            },
+            {"step_type": "cooldown", "distance_meters": 1000},
+        ]
+        payload = build_running_workout_payload("Tempo Session", steps)
+
+        assert payload["workoutName"] == "Tempo Session"
+        assert payload["estimatedDurationInSecs"] >= 600
+        assert payload["sportType"]["sportTypeKey"] == "running"
+        seg = payload["workoutSegments"][0]
+        assert len(seg["workoutSteps"]) == 3
+        # warmup step has heart rate target
+        warmup = seg["workoutSteps"][0]
+        assert warmup["stepType"]["stepTypeKey"] == "warmup"
+        assert warmup["targetType"]["workoutTargetTypeKey"] == "heart.rate.zone"
+        assert warmup["targetValueOne"] == 130.0
+        assert warmup["targetValueTwo"] == 145.0
+        # repeat group has 4 iterations and 2 inner steps
+        repeat = seg["workoutSteps"][1]
+        assert repeat["stepType"]["stepTypeKey"] == "repeat"
+        assert repeat["numberOfIterations"] == 4
+        assert len(repeat["workoutSteps"]) == 2
+        work_step = repeat["workoutSteps"][0]
+        assert work_step["stepType"]["stepTypeKey"] == "interval"
+        assert work_step["targetType"]["workoutTargetTypeKey"] == "speed.zone"
+        # cooldown step
+        cooldown = seg["workoutSteps"][2]
+        assert cooldown["stepType"]["stepTypeKey"] == "cooldown"
+
+    def test_build_running_workout_payload_validations(self):
+        with pytest.raises(ValueError, match="workout_name is required"):
+            build_running_workout_payload("", [{"step_type": "warmup", "duration_seconds": 300}])
+
+        with pytest.raises(ValueError, match="steps list is required"):
+            build_running_workout_payload("Run", [])
+
+        with pytest.raises(ValueError, match="Repeat group must contain"):
+            build_running_workout_payload("Run", [{"step_type": "repeat_group", "repeats": 3}])
+
+    def test_upload_running_workout_calls_underlying_method(self):
+        client = make_client()
+        client._garmin.upload_workout.return_value = {"workoutId": 456, "workoutName": "5k Tempo"}
+
+        steps = [{"step_type": "interval", "distance_meters": 5000, "target_pace_sec_per_km": 270}]
+        res = client.upload_running_workout("5k Tempo", steps)
+
+        assert res["workoutId"] == 456
+        client._garmin.upload_workout.assert_called_once()
+
+    def test_upload_running_workout_raises_garmin_api_error_on_failure(self):
+        client = make_client()
+        client._garmin.upload_workout.side_effect = GarminConnectConnectionError("connection failed")
+
+        steps = [{"step_type": "interval", "distance_meters": 5000}]
+        with pytest.raises(GarminAPIError, match="Failed to upload workout"):
+            client.upload_running_workout("5k Tempo", steps)
+
+    def test_schedule_workout_calls_underlying_method(self):
+        client = make_client()
+        client._garmin.schedule_workout.return_value = {"scheduledWorkoutId": 789, "date": "2026-10-25"}
+
+        res = client.schedule_workout(456, "2026-10-25")
+
+        assert res["scheduledWorkoutId"] == 789
+        client._garmin.schedule_workout.assert_called_once_with(456, "2026-10-25")
+
+    def test_schedule_workout_raises_garmin_api_error_on_failure(self):
+        client = make_client()
+        client._garmin.schedule_workout.side_effect = GarminConnectConnectionError("schedule timeout")
+
+        with pytest.raises(GarminAPIError, match="Failed to schedule workout"):
+            client.schedule_workout(456, "2026-10-25")
+
+    def test_unschedule_workout_calls_underlying_method(self):
+        client = make_client()
+
+        client.unschedule_workout(789)
+
+        client._garmin.unschedule_workout.assert_called_once_with(789)
+
+    def test_unschedule_workout_raises_garmin_api_error_on_failure(self):
+        client = make_client()
+        client._garmin.unschedule_workout.side_effect = GarminConnectConnectionError("unschedule error")
+
+        with pytest.raises(GarminAPIError, match="Failed to unschedule workout"):
+            client.unschedule_workout(789)
+
+    def test_delete_workout_calls_underlying_method(self):
+        client = make_client()
+
+        client.delete_workout(456)
+
+        client._garmin.delete_workout.assert_called_once_with(456)
+
+    def test_delete_workout_raises_garmin_api_error_on_failure(self):
+        client = make_client()
+        client._garmin.delete_workout.side_effect = GarminConnectConnectionError("delete error")
+
+        with pytest.raises(GarminAPIError, match="Failed to delete workout"):
+            client.delete_workout(456)
+

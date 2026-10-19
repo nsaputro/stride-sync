@@ -45,6 +45,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "daily_wellness", "stress_max", "INTEGER")
     _add_column_if_missing(conn, "daily_wellness", "respiration_waking_avg", "REAL")
     _add_column_if_missing(conn, "daily_wellness", "respiration_sleep_avg", "REAL")
+    _add_column_if_missing(conn, "plan_overrides", "garmin_workout_id", "INTEGER")
+    _add_column_if_missing(conn, "plan_overrides", "garmin_schedule_id", "INTEGER")
+    _add_column_if_missing(conn, "plan_overrides", "steps_json", "TEXT")
     conn.commit()
 
 
