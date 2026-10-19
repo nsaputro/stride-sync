@@ -20,4 +20,4 @@
 ## 5. Dev Release Deployment & End-to-End Testing
 
 - [x] 5.1 Bump `stridesync-dev/config.yaml` version tracking `{NEXT_VERSION}b{N}` and verify Docker packaging checks in CI.
-- [ ] 5.2 Deploy the dev channel release to Home Assistant and execute end-to-end MCP integration tests against the live MCP server to verify batch workout scheduling on Garmin Connect.
+- [x] 5.2 Deploy the dev channel release to Home Assistant and execute end-to-end MCP integration tests against the live MCP server to verify batch workout scheduling on Garmin Connect.
