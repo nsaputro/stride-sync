@@ -52,7 +52,7 @@ from garminconnect.workout import (
 )
 
 TARGET_TYPE_NO_TARGET: int = getattr(TargetType, "NO_TARGET", 1)
-TARGET_TYPE_SPEED: int = getattr(TargetType, "SPEED_ZONE", getattr(TargetType, "SPEED", 5))
+TARGET_TYPE_PACE: int = getattr(TargetType, "PACE_ZONE", 6)
 TARGET_TYPE_HEART_RATE: int = getattr(TargetType, "HEART_RATE_ZONE", getattr(TargetType, "HEART_RATE", 4))
 
 # python-garminconnect's own login()/connectapi() wrap most failures into its own exception
@@ -844,9 +844,9 @@ def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableSt
 
     if s.get("target_pace_sec_per_km") is not None:
         target_type = {
-            "workoutTargetTypeId": TARGET_TYPE_SPEED,
-            "workoutTargetTypeKey": "speed.zone",
-            "displayOrder": 5,
+            "workoutTargetTypeId": TARGET_TYPE_PACE,
+            "workoutTargetTypeKey": "pace.zone",
+            "displayOrder": 6,
         }
         pace = float(s["target_pace_sec_per_km"])
         if pace > 0:
@@ -855,9 +855,9 @@ def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableSt
             t_val2 = round(spd * 1.05, 2)
     elif s.get("target_pace_min_sec_per_km") is not None and s.get("target_pace_max_sec_per_km") is not None:
         target_type = {
-            "workoutTargetTypeId": TARGET_TYPE_SPEED,
-            "workoutTargetTypeKey": "speed.zone",
-            "displayOrder": 5,
+            "workoutTargetTypeId": TARGET_TYPE_PACE,
+            "workoutTargetTypeKey": "pace.zone",
+            "displayOrder": 6,
         }
         pace_min = float(s["target_pace_min_sec_per_km"])
         pace_max = float(s["target_pace_max_sec_per_km"])
