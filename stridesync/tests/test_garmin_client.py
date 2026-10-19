@@ -1936,7 +1936,8 @@ class TestGarminClientFetch:
         assert len(repeat["workoutSteps"]) == 2
         work_step = repeat["workoutSteps"][0]
         assert work_step["stepType"]["stepTypeKey"] == "interval"
-        assert work_step["targetType"]["workoutTargetTypeKey"] == "speed.zone"
+        assert work_step["targetType"]["workoutTargetTypeKey"] == "pace.zone"
+        assert work_step["targetType"]["workoutTargetTypeId"] == 6
         # cooldown step
         cooldown = seg["workoutSteps"][2]
         assert cooldown["stepType"]["stepTypeKey"] == "cooldown"
