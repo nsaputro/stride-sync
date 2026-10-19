@@ -51,6 +51,10 @@ from garminconnect.workout import (
     WorkoutSegment,
 )
 
+TARGET_TYPE_NO_TARGET: int = getattr(TargetType, "NO_TARGET", 1)
+TARGET_TYPE_SPEED: int = getattr(TargetType, "SPEED_ZONE", getattr(TargetType, "SPEED", 5))
+TARGET_TYPE_HEART_RATE: int = getattr(TargetType, "HEART_RATE_ZONE", getattr(TargetType, "HEART_RATE", 4))
+
 # python-garminconnect's own login()/connectapi() wrap most failures into its own exception
 # types (the GarminConnect*Error classes below), but it uses both `curl_cffi` and plain
 # `requests` internally depending on which login strategy is active, and a broken network path
@@ -831,7 +835,7 @@ def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableSt
         cond_val = 600.0
 
     target_type = {
-        "workoutTargetTypeId": TargetType.NO_TARGET,
+        "workoutTargetTypeId": TARGET_TYPE_NO_TARGET,
         "workoutTargetTypeKey": "no.target",
         "displayOrder": 1,
     }
@@ -840,7 +844,7 @@ def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableSt
 
     if s.get("target_pace_sec_per_km") is not None:
         target_type = {
-            "workoutTargetTypeId": TargetType.SPEED,
+            "workoutTargetTypeId": TARGET_TYPE_SPEED,
             "workoutTargetTypeKey": "speed.zone",
             "displayOrder": 5,
         }
@@ -851,7 +855,7 @@ def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableSt
             t_val2 = round(spd * 1.05, 2)
     elif s.get("target_pace_min_sec_per_km") is not None and s.get("target_pace_max_sec_per_km") is not None:
         target_type = {
-            "workoutTargetTypeId": TargetType.SPEED,
+            "workoutTargetTypeId": TARGET_TYPE_SPEED,
             "workoutTargetTypeKey": "speed.zone",
             "displayOrder": 5,
         }
@@ -862,7 +866,7 @@ def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableSt
             t_val2 = round(1000.0 / pace_min, 2)
     elif s.get("target_hr_low") is not None or s.get("target_hr_high") is not None:
         target_type = {
-            "workoutTargetTypeId": TargetType.HEART_RATE,
+            "workoutTargetTypeId": TARGET_TYPE_HEART_RATE,
             "workoutTargetTypeKey": "heart.rate.zone",
             "displayOrder": 4,
         }
