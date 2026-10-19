@@ -1,14 +1,17 @@
 import asyncio
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 import pytest
 
 from app import db
 from app.config import Settings
 from app.mcp.server import (
+    batch_schedule_workouts,
     create_server,
     delete_plan_override,
     get_plan_overrides,
     get_planned_vs_actual,
+    schedule_garmin_workouts,
     set_plan_override,
 )
 
@@ -183,6 +186,120 @@ class TestPlanOverrideCRUD:
 
             with pytest.raises(ValueError, match="workout_date"):
                 delete_plan_override(conn, "invalid")
+        finally:
+            conn.close()
+
+    def test_set_plan_override_with_steps_and_garmin_ids(self, tmp_path):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        try:
+            steps = [{"step_type": "interval", "distance_meters": 5000, "target_pace_sec_per_km": 270}]
+            import json
+            record = set_plan_override(
+                conn,
+                workout_date="2026-10-20",
+                workout_name="5k Tempo",
+                workout_type="THRESHOLD",
+                reason="Lactate threshold stimulus",
+                garmin_workout_id=12345,
+                garmin_schedule_id=67890,
+                steps_json=json.dumps(steps),
+            )
+            assert record["garmin_workout_id"] == 12345
+            assert record["garmin_schedule_id"] == 67890
+            assert record["steps"] == steps
+        finally:
+            conn.close()
+
+    def test_remove_plan_override_invokes_garmin_unschedule_and_delete(self, tmp_path):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        try:
+            set_plan_override(
+                conn,
+                workout_date="2026-10-21",
+                workout_name="Speed Work",
+                workout_type="INTERVALS",
+                reason="VO2 max work",
+                garmin_workout_id=111,
+                garmin_schedule_id=222,
+            )
+            mock_client = MagicMock()
+            result = delete_plan_override(conn, "2026-10-21", client=mock_client)
+            assert result["status"] == "deleted"
+            mock_client.unschedule_workout.assert_called_once_with(222)
+            mock_client.delete_workout.assert_called_once_with(111)
+        finally:
+            conn.close()
+
+    def test_batch_schedule_workouts_creates_and_schedules_all(self, tmp_path):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        try:
+            mock_client = MagicMock()
+            mock_client.upload_running_workout.side_effect = [
+                {"workoutId": 1001},
+                {"workoutId": 1002},
+            ]
+            mock_client.schedule_workout.side_effect = [
+                {"scheduledWorkoutId": 2001},
+                {"scheduledWorkoutId": 2002},
+            ]
+
+            workouts = [
+                {
+                    "workout_date": "2026-10-22",
+                    "workout_name": "Easy Run",
+                    "workout_type": "AEROBIC_BASE",
+                    "reason": "Recovery volume",
+                    "steps": [{"step_type": "run", "distance_meters": 8000, "target_pace_sec_per_km": 330}],
+                },
+                {
+                    "workout_date": "2026-10-24",
+                    "workout_name": "5x1k Threshold",
+                    "workout_type": "THRESHOLD",
+                    "reason": "Threshold repeats",
+                    "steps": [
+                        {"step_type": "warmup", "distance_meters": 2000},
+                        {"step_type": "repeat_group", "repeats": 5, "work": {"distance_meters": 1000}, "recovery": {"duration_seconds": 90}},
+                        {"step_type": "cooldown", "distance_meters": 1500},
+                    ],
+                },
+            ]
+
+            results = batch_schedule_workouts(conn, workouts, mock_client)
+            assert len(results) == 2
+            assert results[0]["workout_date"] == "2026-10-22"
+            assert results[0]["garmin_workout_id"] == 1001
+            assert results[0]["garmin_schedule_id"] == 2001
+            assert results[0]["steps"][0]["distance_meters"] == 8000
+            assert results[1]["workout_date"] == "2026-10-24"
+            assert results[1]["garmin_workout_id"] == 1002
+            assert results[1]["garmin_schedule_id"] == 2002
+            assert len(results[1]["steps"]) == 3
+
+            # Verify saved in db
+            all_overrides = get_plan_overrides(conn, start_date="2026-10-20", end_date="2026-10-25")
+            assert len(all_overrides) == 2
+        finally:
+            conn.close()
+
+    def test_batch_schedule_workouts_validation_errors(self, tmp_path):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        try:
+            mock_client = MagicMock()
+            with pytest.raises(ValueError, match="non-empty list"):
+                batch_schedule_workouts(conn, [], mock_client)
+
+            with pytest.raises(ValueError, match="workout_date is required"):
+                batch_schedule_workouts(conn, [{"workout_name": "Run", "workout_type": "BASE", "reason": "R", "steps": [{}]}], mock_client)
+
+            with pytest.raises(ValueError, match="reason is required"):
+                batch_schedule_workouts(conn, [{"workout_date": "2026-10-22", "workout_name": "Run", "workout_type": "BASE", "reason": "", "steps": [{}]}], mock_client)
+
+            with pytest.raises(ValueError, match="steps list is required"):
+                batch_schedule_workouts(conn, [{"workout_date": "2026-10-22", "workout_name": "Run", "workout_type": "BASE", "reason": "R", "steps": []}], mock_client)
         finally:
             conn.close()
 
@@ -397,4 +514,57 @@ class TestFastMCPPlanOverrideTools:
             else (res_after.structured_content or res_after.data)
         )
         assert after_data == []
+
+    def test_schedule_garmin_workouts_mcp_tool_invocation(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        conn.close()
+
+        mock_client = MagicMock()
+        mock_client.upload_running_workout.return_value = {"workoutId": 777}
+        mock_client.schedule_workout.return_value = {"scheduledWorkoutId": 888}
+        monkeypatch.setattr("app.mcp.server._make_garmin_client", lambda s: mock_client)
+
+        server = create_server(settings)
+
+        res = asyncio.run(
+            server.call_tool(
+                "schedule_garmin_workouts",
+                {
+                    "workouts": [
+                        {
+                            "workout_date": "2026-10-25",
+                            "workout_name": "Sunday Long Run with Surge",
+                            "workout_type": "LONG_RUN",
+                            "reason": "Building endurance with 10k pace surge",
+                            "steps": [
+                                {"step_type": "warmup", "distance_meters": 2000},
+                                {"step_type": "interval", "distance_meters": 18000, "target_pace_sec_per_km": 315},
+                                {"step_type": "cooldown", "distance_meters": 1000},
+                            ],
+                        }
+                    ]
+                },
+            )
+        )
+        data = (
+            res.structured_content.get("result", res.structured_content)
+            if isinstance(res.structured_content, dict)
+            else (res.structured_content or res.data)
+        )
+        assert len(data) == 1
+        assert data[0]["workout_date"] == "2026-10-25"
+        assert data[0]["garmin_workout_id"] == 777
+        assert data[0]["garmin_schedule_id"] == 888
+        assert data[0]["steps"][1]["distance_meters"] == 18000
+        mock_client.upload_running_workout.assert_called_once()
+        mock_client.schedule_workout.assert_called_once_with(777, "2026-10-25")
+
+        # Test delete_plan_override calls unschedule & delete on mock_client
+        res_del = asyncio.run(server.call_tool("delete_plan_override", {"workout_date": "2026-10-25"}))
+        del_data = res_del.structured_content or res_del.data
+        assert del_data == {"status": "deleted", "workout_date": "2026-10-25"}
+        mock_client.unschedule_workout.assert_called_once_with(888)
+        mock_client.delete_workout.assert_called_once_with(777)
+
 

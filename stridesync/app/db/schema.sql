@@ -216,6 +216,9 @@ CREATE TABLE IF NOT EXISTS plan_overrides (
     planned_target_hr_high         INTEGER,
     reason                         TEXT NOT NULL,    -- Required: Why was the Garmin plan overridden?
     notes                          TEXT,             -- Optional: Specific instructions (e.g. shoes, warm-up, fueling)
+    garmin_workout_id              INTEGER,          -- Remote Garmin Connect workoutId (if synced to Garmin)
+    garmin_schedule_id             INTEGER,          -- Remote Garmin Connect calendar scheduledWorkoutId
+    steps_json                     TEXT,             -- JSON string of structured steps/intervals
     created_at                     TEXT NOT NULL,
     updated_at                     TEXT NOT NULL
 );

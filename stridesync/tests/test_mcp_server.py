@@ -505,6 +505,35 @@ class TestQueries:
         finally:
             conn.close()
 
+    def test_planned_vs_actual_returns_steps_and_garmin_identifiers(self, tmp_path):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        try:
+            import json
+            steps = [{"step_type": "interval", "distance_meters": 3000, "target_pace_sec_per_km": 280}]
+            conn.execute(
+                """
+                INSERT INTO plan_overrides (
+                    workout_date, workout_name, workout_type, reason,
+                    garmin_workout_id, garmin_schedule_id, steps_json,
+                    created_at, updated_at
+                ) VALUES (
+                    date('now', '+1 days'), 'Interval 3k', 'INTERVALS', 'VO2 max',
+                    999, 888, ?, '2026-10-19T00:00:00Z', '2026-10-19T00:00:00Z'
+                )
+                """,
+                (json.dumps(steps),),
+            )
+            conn.commit()
+            rows = get_planned_vs_actual(conn, days=7)
+            matched = next(r for r in rows if r["workout_name"] == "Interval 3k")
+            assert matched["is_overridden"] is True
+            assert matched["garmin_workout_id"] == 999
+            assert matched["garmin_schedule_id"] == 888
+            assert matched["steps"] == steps
+        finally:
+            conn.close()
+
     def test_gear_mileage_orders_most_used_first(self, tmp_path):
         settings = make_settings(tmp_path)
         seed_db(settings.db_path)
@@ -798,6 +827,7 @@ class TestCreateServer:
             "set_plan_override",
             "get_plan_overrides",
             "delete_plan_override",
+            "schedule_garmin_workouts",
             "gear_mileage",
             "activity_gear",
             "add_activity_gear",

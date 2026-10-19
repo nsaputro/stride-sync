@@ -31,7 +31,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import curl_cffi.requests.exceptions as curl_exceptions
 import requests
@@ -40,6 +40,15 @@ from garminconnect import (
     GarminConnectAuthenticationError,
     GarminConnectConnectionError,
     GarminConnectTooManyRequestsError,
+)
+from garminconnect.workout import (
+    ConditionType,
+    ExecutableStep,
+    RepeatGroup,
+    RunningWorkout,
+    StepType,
+    TargetType,
+    WorkoutSegment,
 )
 
 # python-garminconnect's own login()/connectapi() wrap most failures into its own exception
@@ -800,6 +809,179 @@ def _normalize_samples(activity_id: int, raw: Dict[str, Any]) -> List[ActivitySa
     return samples
 
 
+def _step_dict_to_executable_step(s: Dict[str, Any], order: int) -> ExecutableStep:
+    step_type_raw = str(s.get("step_type") or s.get("type") or "interval").lower()
+    if "warm" in step_type_raw:
+        st_id, st_key = StepType.WARMUP, "warmup"
+    elif "cool" in step_type_raw:
+        st_id, st_key = StepType.COOLDOWN, "cooldown"
+    elif "recov" in step_type_raw or "rest" in step_type_raw:
+        st_id, st_key = StepType.RECOVERY, "recovery"
+    else:
+        st_id, st_key = StepType.INTERVAL, "interval"
+
+    if s.get("distance_meters") is not None:
+        cond_id, cond_key = ConditionType.DISTANCE, "distance"
+        cond_val = float(s["distance_meters"])
+    elif s.get("duration_seconds") is not None:
+        cond_id, cond_key = ConditionType.TIME, "time"
+        cond_val = float(s["duration_seconds"])
+    else:
+        cond_id, cond_key = ConditionType.TIME, "time"
+        cond_val = 600.0
+
+    target_type = {
+        "workoutTargetTypeId": TargetType.NO_TARGET,
+        "workoutTargetTypeKey": "no.target",
+        "displayOrder": 1,
+    }
+    t_val1: Optional[float] = None
+    t_val2: Optional[float] = None
+
+    if s.get("target_pace_sec_per_km") is not None:
+        target_type = {
+            "workoutTargetTypeId": TargetType.SPEED,
+            "workoutTargetTypeKey": "speed.zone",
+            "displayOrder": 5,
+        }
+        pace = float(s["target_pace_sec_per_km"])
+        if pace > 0:
+            spd = 1000.0 / pace
+            t_val1 = round(spd * 0.95, 2)
+            t_val2 = round(spd * 1.05, 2)
+    elif s.get("target_pace_min_sec_per_km") is not None and s.get("target_pace_max_sec_per_km") is not None:
+        target_type = {
+            "workoutTargetTypeId": TargetType.SPEED,
+            "workoutTargetTypeKey": "speed.zone",
+            "displayOrder": 5,
+        }
+        pace_min = float(s["target_pace_min_sec_per_km"])
+        pace_max = float(s["target_pace_max_sec_per_km"])
+        if pace_max > 0 and pace_min > 0:
+            t_val1 = round(1000.0 / pace_max, 2)
+            t_val2 = round(1000.0 / pace_min, 2)
+    elif s.get("target_hr_low") is not None or s.get("target_hr_high") is not None:
+        target_type = {
+            "workoutTargetTypeId": TargetType.HEART_RATE,
+            "workoutTargetTypeKey": "heart.rate.zone",
+            "displayOrder": 4,
+        }
+        t_val1 = float(s.get("target_hr_low") or 0)
+        t_val2 = float(s.get("target_hr_high") or 220)
+
+    kwargs: Dict[str, Any] = {
+        "stepOrder": order,
+        "stepType": {"stepTypeId": st_id, "stepTypeKey": st_key, "displayOrder": st_id},
+        "endCondition": {
+            "conditionTypeId": cond_id,
+            "conditionTypeKey": cond_key,
+            "displayOrder": cond_id,
+            "displayable": True,
+        },
+        "endConditionValue": cond_val,
+        "targetType": target_type,
+    }
+    if t_val1 is not None:
+        kwargs["targetValueOne"] = t_val1
+    if t_val2 is not None:
+        kwargs["targetValueTwo"] = t_val2
+
+    return ExecutableStep(**kwargs)
+
+
+def build_running_workout_payload(
+    workout_name: str,
+    steps: List[Dict[str, Any]],
+    estimated_duration_seconds: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Convert agent-provided structured workout steps into a Garmin Connect RunningWorkout JSON payload."""
+    if not workout_name or not workout_name.strip():
+        raise ValueError("workout_name is required and cannot be empty")
+    if not steps:
+        raise ValueError("steps list is required and cannot be empty")
+
+    order = 1
+    workout_steps: List[Union[ExecutableStep, RepeatGroup]] = []
+    total_sec = 0.0
+
+    for s in steps:
+        is_repeat = (
+            s.get("repeats") is not None
+            or s.get("iterations") is not None
+            or str(s.get("step_type") or s.get("type")).lower() in ("repeat", "repeat_group", "interval_block")
+        )
+        if is_repeat:
+            reps = int(s.get("repeats") or s.get("iterations") or 1)
+            raw_substeps = s.get("steps") or s.get("workout_steps") or []
+            if not raw_substeps and "work" in s:
+                raw_substeps = [s["work"]]
+                if "recovery" in s:
+                    raw_substeps.append(s["recovery"])
+            if not raw_substeps:
+                raise ValueError("Repeat group must contain inner workout steps")
+
+            sub_models: List[ExecutableStep] = []
+            rep_sec = 0.0
+            sub_order = 1
+            for sub in raw_substeps:
+                dur = float(
+                    sub.get("duration_seconds")
+                    or (float(sub.get("distance_meters", 1000)) * 0.3)
+                )
+                rep_sec += dur
+                sub_models.append(_step_dict_to_executable_step(sub, sub_order))
+                sub_order += 1
+
+            total_sec += rep_sec * reps
+            workout_steps.append(
+                RepeatGroup(
+                    stepOrder=order,
+                    stepType={
+                        "stepTypeId": StepType.REPEAT,
+                        "stepTypeKey": "repeat",
+                        "displayOrder": 6,
+                    },
+                    numberOfIterations=reps,
+                    workoutSteps=sub_models,
+                    endCondition={
+                        "conditionTypeId": ConditionType.ITERATIONS,
+                        "conditionTypeKey": "iterations",
+                        "displayOrder": 7,
+                        "displayable": False,
+                    },
+                    endConditionValue=float(reps),
+                )
+            )
+            order += 1
+        else:
+            dur = float(
+                s.get("duration_seconds")
+                or (float(s.get("distance_meters", 1000)) * 0.3)
+            )
+            total_sec += dur
+            workout_steps.append(_step_dict_to_executable_step(s, order))
+            order += 1
+
+    final_est_duration = (
+        int(round(estimated_duration_seconds))
+        if estimated_duration_seconds is not None
+        else max(600, int(round(total_sec)))
+    )
+
+    workout = RunningWorkout(
+        workoutName=workout_name.strip(),
+        estimatedDurationInSecs=final_est_duration,
+        workoutSegments=[
+            WorkoutSegment(
+                segmentOrder=1,
+                sportType={"sportTypeId": 1, "sportTypeKey": "running", "displayOrder": 1},
+                workoutSteps=workout_steps,
+            )
+        ],
+    )
+    return workout.to_dict()
+
+
 # Read-only raw-response checks exposed via GarminClient.fetch_diagnostic (see its docstring) --
 # id -> human label, so the Settings tab's Diagnostics panel can build its dropdown straight from
 # this dict rather than duplicating the check list. Only ever calls known GET-shaped
@@ -1404,6 +1586,96 @@ class GarminClient:
             raise GarminAPIError(
                 f"Could not reach Garmin Connect to remove gear {gear_uuid} from activity "
                 f"{activity_id}: {describe_transport_error(exc)}"
+            ) from exc
+
+    def upload_running_workout(
+        self,
+        workout_name: str,
+        steps: List[Dict[str, Any]],
+        estimated_duration_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Upload a structured running workout to the Garmin Connect workout library.
+
+        Fails loud (raises `GarminAPIError`) if the upload fails or transport breaks.
+        Returns the raw response dictionary from Garmin containing `workoutId`.
+        """
+        payload = build_running_workout_payload(
+            workout_name=workout_name,
+            steps=steps,
+            estimated_duration_seconds=estimated_duration_seconds,
+        )
+        try:
+            return self._garmin.upload_workout(payload)
+        except (
+            GarminConnectConnectionError,
+            GarminConnectTooManyRequestsError,
+            GarminConnectAuthenticationError,
+        ) as exc:
+            raise GarminAPIError(
+                f"Failed to upload workout '{workout_name}': {exc}"
+            ) from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to upload workout '{workout_name}': "
+                f"{describe_transport_error(exc)}"
+            ) from exc
+
+    def schedule_workout(self, workout_id: Union[int, str], workout_date: str) -> Dict[str, Any]:
+        """Schedule an existing workout on a specific calendar date in Garmin Connect.
+
+        When scheduled on the calendar, the workout automatically downloads to the user's
+        Garmin watch on its next sync.
+        """
+        try:
+            return self._garmin.schedule_workout(int(workout_id), str(workout_date))
+        except (
+            GarminConnectConnectionError,
+            GarminConnectTooManyRequestsError,
+            GarminConnectAuthenticationError,
+        ) as exc:
+            raise GarminAPIError(
+                f"Failed to schedule workout {workout_id} on {workout_date}: {exc}"
+            ) from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to schedule workout {workout_id} on {workout_date}: "
+                f"{describe_transport_error(exc)}"
+            ) from exc
+
+    def unschedule_workout(self, scheduled_workout_id: Union[int, str]) -> None:
+        """Remove a scheduled workout from the Garmin Connect calendar."""
+        try:
+            self._garmin.unschedule_workout(int(scheduled_workout_id))
+        except (
+            GarminConnectConnectionError,
+            GarminConnectTooManyRequestsError,
+            GarminConnectAuthenticationError,
+        ) as exc:
+            raise GarminAPIError(
+                f"Failed to unschedule workout {scheduled_workout_id}: {exc}"
+            ) from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to unschedule workout {scheduled_workout_id}: "
+                f"{describe_transport_error(exc)}"
+            ) from exc
+
+    def delete_workout(self, workout_id: Union[int, str]) -> None:
+        """Delete a workout template from the Garmin Connect workout library."""
+        try:
+            self._garmin.delete_workout(int(workout_id))
+        except (
+            GarminConnectConnectionError,
+            GarminConnectTooManyRequestsError,
+            GarminConnectAuthenticationError,
+        ) as exc:
+            raise GarminAPIError(
+                f"Failed to delete workout {workout_id}: {exc}"
+            ) from exc
+        except TRANSPORT_ERRORS as exc:
+            raise GarminAPIError(
+                f"Could not reach Garmin Connect to delete workout {workout_id}: "
+                f"{describe_transport_error(exc)}"
             ) from exc
 
     def fetch_diagnostic(self, check: str) -> Any:

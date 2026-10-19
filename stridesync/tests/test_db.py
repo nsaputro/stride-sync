@@ -243,3 +243,39 @@ def test_readonly_reader_does_not_block_writer_in_wal_mode(tmp_path):
     finally:
         reader.close()
         writer.close()
+
+
+def test_connect_adds_garmin_workout_and_steps_columns_to_an_older_plan_overrides_table(tmp_path):
+    db_path = str(tmp_path / "stridesync.db")
+    old_conn = sqlite3.connect(db_path)
+    old_conn.execute(
+        """
+        CREATE TABLE plan_overrides (
+            workout_date TEXT PRIMARY KEY,
+            workout_name TEXT NOT NULL,
+            workout_type TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    old_conn.execute(
+        """
+        INSERT INTO plan_overrides (workout_date, workout_name, workout_type, reason, created_at, updated_at)
+        VALUES ('2026-10-20', 'Easy Run', 'AEROBIC_BASE', 'Aerobic volume', '2026-10-19T00:00:00Z', '2026-10-19T00:00:00Z')
+        """
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    conn = db.connect(db_path)
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(plan_overrides)")}
+        assert {"garmin_workout_id", "garmin_schedule_id", "steps_json"} <= columns
+        row = conn.execute("SELECT workout_name, garmin_workout_id, steps_json FROM plan_overrides WHERE workout_date = '2026-10-20'").fetchone()
+        assert row["workout_name"] == "Easy Run"
+        assert row["garmin_workout_id"] is None
+        assert row["steps_json"] is None
+    finally:
+        conn.close()

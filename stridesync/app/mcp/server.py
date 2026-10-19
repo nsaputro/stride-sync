@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import json
 import logging
 import sqlite3
 from datetime import date, datetime, timezone
@@ -474,6 +475,9 @@ def save_plan_override(
     planned_target_hr_low: Optional[int] = None,
     planned_target_hr_high: Optional[int] = None,
     notes: Optional[str] = None,
+    garmin_workout_id: Optional[int] = None,
+    garmin_schedule_id: Optional[int] = None,
+    steps_json: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Upsert a planned workout override for a calendar date, persisting coaching rationale."""
     valid_date = _validate_iso_date(workout_date, "workout_date")
@@ -491,9 +495,10 @@ def save_plan_override(
             workout_date, workout_name, workout_type,
             planned_distance_meters, planned_duration_seconds,
             planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
-            reason, notes, created_at, updated_at
+            reason, notes, garmin_workout_id, garmin_schedule_id, steps_json,
+            created_at, updated_at
         ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         ON CONFLICT(workout_date) DO UPDATE SET
             workout_name = excluded.workout_name,
@@ -505,6 +510,9 @@ def save_plan_override(
             planned_target_hr_high = excluded.planned_target_hr_high,
             reason = excluded.reason,
             notes = excluded.notes,
+            garmin_workout_id = excluded.garmin_workout_id,
+            garmin_schedule_id = excluded.garmin_schedule_id,
+            steps_json = excluded.steps_json,
             updated_at = excluded.updated_at
         """,
         (
@@ -518,6 +526,9 @@ def save_plan_override(
             planned_target_hr_high,
             reason.strip(),
             notes.strip() if notes is not None else None,
+            garmin_workout_id,
+            garmin_schedule_id,
+            steps_json,
             now_iso,
             now_iso,
         ),
@@ -529,7 +540,8 @@ def save_plan_override(
         SELECT workout_date, workout_name, workout_type,
                planned_distance_meters, planned_duration_seconds,
                planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
-               reason, notes, created_at, updated_at
+               reason, notes, garmin_workout_id, garmin_schedule_id, steps_json,
+               created_at, updated_at
         FROM plan_overrides
         WHERE workout_date = ?
         """,
@@ -537,7 +549,15 @@ def save_plan_override(
     ).fetchone()
     if row is None:
         raise RuntimeError(f"Failed to retrieve plan override for {valid_date}")
-    return dict(row)
+    result = dict(row)
+    if result.get("steps_json"):
+        try:
+            result["steps"] = json.loads(result["steps_json"])
+        except Exception:
+            result["steps"] = None
+    else:
+        result["steps"] = None
+    return result
 
 
 def fetch_plan_overrides(
@@ -572,35 +592,158 @@ def fetch_plan_overrides(
         SELECT workout_date, workout_name, workout_type,
                planned_distance_meters, planned_duration_seconds,
                planned_target_pace_sec_per_km, planned_target_hr_low, planned_target_hr_high,
-               reason, notes, created_at, updated_at
+               reason, notes, garmin_workout_id, garmin_schedule_id, steps_json,
+               created_at, updated_at
         FROM plan_overrides
         {where_sql}
         ORDER BY workout_date ASC
         """,
         params,
     ).fetchall()
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        item = dict(row)
+        if item.get("steps_json"):
+            try:
+                item["steps"] = json.loads(item["steps_json"])
+            except Exception:
+                item["steps"] = None
+        else:
+            item["steps"] = None
+        results.append(item)
+    return results
 
 
 def remove_plan_override(
     conn: sqlite3.Connection,
     workout_date: str,
+    client: Optional[GarminClient] = None,
 ) -> Dict[str, Any]:
-    """Delete a plan override for a specific date, reverting to Garmin's plan."""
+    """Delete a plan override for a specific date, reverting to Garmin's plan and unscheduling from Garmin if synced."""
     valid_date = _validate_iso_date(workout_date, "workout_date")
     row = conn.execute(
-        "SELECT workout_date FROM plan_overrides WHERE workout_date = ?", (valid_date,)
+        "SELECT workout_date, garmin_workout_id, garmin_schedule_id FROM plan_overrides WHERE workout_date = ?", (valid_date,)
     ).fetchone()
     if row is None:
         raise ValueError(f"No plan override found for workout_date '{valid_date}'")
+
+    if client is not None:
+        if row["garmin_schedule_id"] is not None:
+            try:
+                client.unschedule_workout(row["garmin_schedule_id"])
+            except Exception as exc:
+                logger.warning("Failed to unschedule workout %s from Garmin Connect: %s", row["garmin_schedule_id"], exc)
+        if row["garmin_workout_id"] is not None:
+            try:
+                client.delete_workout(row["garmin_workout_id"])
+            except Exception as exc:
+                logger.warning("Failed to delete workout %s from Garmin Connect: %s", row["garmin_workout_id"], exc)
+
     conn.execute("DELETE FROM plan_overrides WHERE workout_date = ?", (valid_date,))
     conn.commit()
     return {"status": "deleted", "workout_date": valid_date}
 
 
+def batch_schedule_workouts(
+    conn: sqlite3.Connection,
+    workouts: List[Dict[str, Any]],
+    client: GarminClient,
+) -> List[Dict[str, Any]]:
+    """Batch-upload structured workouts to Garmin Connect, schedule them on the athlete's calendar,
+    and persist the records in local plan_overrides with lap steps and remote identifiers.
+    """
+    if not isinstance(workouts, list) or not workouts:
+        raise ValueError("workouts must be a non-empty list of workout specifications")
+
+    results: List[Dict[str, Any]] = []
+    for item in workouts:
+        if not isinstance(item, dict):
+            raise ValueError("Each workout in workouts must be a dictionary")
+
+        w_date = item.get("workout_date")
+        w_name = item.get("workout_name")
+        w_type = item.get("workout_type")
+        reason = item.get("reason")
+        steps = item.get("steps")
+
+        if not w_date:
+            raise ValueError("workout_date is required for each workout")
+        if not w_name or not str(w_name).strip():
+            raise ValueError("workout_name is required for each workout")
+        if not w_type or not str(w_type).strip():
+            raise ValueError("workout_type is required for each workout")
+        if not reason or not str(reason).strip():
+            raise ValueError("reason is required for each workout")
+        if not steps or not isinstance(steps, list):
+            raise ValueError(f"steps list is required for workout '{w_name}' on {w_date}")
+
+        # Compute or pass aggregate metrics
+        planned_dist = item.get("planned_distance_meters")
+        planned_dur = item.get("planned_duration_seconds")
+        if planned_dist is None or planned_dur is None:
+            calc_dist = 0.0
+            calc_dur = 0.0
+            for s in steps:
+                reps = int(s.get("repeats") or s.get("iterations") or 1) if (s.get("repeats") or s.get("iterations")) else 1
+                substeps = s.get("steps") or s.get("workout_steps") or ([s["work"]] if "work" in s else [s])
+                for sub in substeps:
+                    sub_d = float(sub.get("distance_meters") or 0.0)
+                    sub_t = float(sub.get("duration_seconds") or 0.0)
+                    if sub_d > 0 and sub_t == 0.0:
+                        pace = float(sub.get("target_pace_sec_per_km") or 300.0)
+                        sub_t = sub_d * (pace / 1000.0)
+                    elif sub_t > 0 and sub_d == 0.0:
+                        pace = float(sub.get("target_pace_sec_per_km") or 300.0)
+                        sub_d = (sub_t / pace) * 1000.0
+                    calc_dist += sub_d * reps
+                    calc_dur += sub_t * reps
+            if planned_dist is None and calc_dist > 0:
+                planned_dist = round(calc_dist, 1)
+            if planned_dur is None and calc_dur > 0:
+                planned_dur = round(calc_dur, 1)
+
+        # 1. Upload running workout template to Garmin Connect
+        upload_res = client.upload_running_workout(
+            workout_name=str(w_name).strip(),
+            steps=steps,
+            estimated_duration_seconds=planned_dur,
+        )
+        garmin_workout_id = upload_res.get("workoutId")
+
+        # 2. Schedule on Garmin Connect calendar for w_date
+        sched_res = client.schedule_workout(garmin_workout_id, w_date)
+        garmin_schedule_id = (
+            sched_res.get("workoutScheduleId")
+            or sched_res.get("scheduledWorkoutId")
+            or sched_res.get("id")
+        )
+
+        # 3. Save to local SQLite database
+        saved = save_plan_override(
+            conn,
+            workout_date=w_date,
+            workout_name=str(w_name).strip(),
+            workout_type=str(w_type).strip(),
+            reason=str(reason).strip(),
+            planned_distance_meters=planned_dist,
+            planned_duration_seconds=planned_dur,
+            planned_target_pace_sec_per_km=item.get("planned_target_pace_sec_per_km"),
+            planned_target_hr_low=item.get("planned_target_hr_low"),
+            planned_target_hr_high=item.get("planned_target_hr_high"),
+            notes=item.get("notes"),
+            garmin_workout_id=garmin_workout_id,
+            garmin_schedule_id=garmin_schedule_id,
+            steps_json=json.dumps(steps),
+        )
+        results.append(saved)
+
+    return results
+
+
 set_plan_override = save_plan_override
 get_plan_overrides = fetch_plan_overrides
 delete_plan_override = remove_plan_override
+schedule_garmin_workouts = batch_schedule_workouts
 
 
 
@@ -638,6 +781,9 @@ def get_planned_vs_actual(conn: sqlite3.Connection, days: int = 14) -> List[Dict
             pw.planned_target_pace_sec_per_km AS garmin_planned_target_pace_sec_per_km,
             pw.planned_target_hr_low AS garmin_planned_target_hr_low,
             pw.planned_target_hr_high AS garmin_planned_target_hr_high,
+            po.garmin_workout_id,
+            po.garmin_schedule_id,
+            po.steps_json,
             a.activity_id, a.activity_name, a.activity_type,
             a.distance_meters AS actual_distance_meters,
             a.duration_seconds AS actual_duration_seconds,
@@ -656,6 +802,13 @@ def get_planned_vs_actual(conn: sqlite3.Connection, days: int = 14) -> List[Dict
     for row in rows:
         item = dict(row)
         item["is_overridden"] = bool(item["is_overridden"])
+        if item.get("steps_json"):
+            try:
+                item["steps"] = json.loads(item["steps_json"])
+            except Exception:
+                item["steps"] = None
+        else:
+            item["steps"] = None
         result.append(item)
     return result
 
@@ -1099,15 +1252,52 @@ def create_server(settings: Settings) -> FastMCP:
             conn.close()
 
     @mcp.tool()
+    def schedule_garmin_workouts(
+        workouts: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Batch-schedule structured running workouts with exact lap timing, uploading them to Garmin Connect
+        and adding them to the user's Garmin calendar so they download directly to connected Garmin watches.
+
+        Args:
+            workouts: A list of workout objects, each containing:
+                - workout_date: Target date in ISO YYYY-MM-DD format (required).
+                - workout_name: Name of the workout (e.g. '5x1k Threshold Intervals', required).
+                - workout_type: Category (e.g. 'AEROBIC_BASE', 'LACTATE_THRESHOLD', 'RECOVERY', required).
+                - reason: Coaching rationale for this workout (required).
+                - steps: List of structured lap steps (warmup, intervals, recovery, cooldown, repeats) (required).
+                - planned_distance_meters: Optional total distance override.
+                - planned_duration_seconds: Optional total duration override.
+                - notes: Optional execution notes.
+        """
+        client = _make_garmin_client(settings)
+        conn = _connect_write(settings.db_path)
+        try:
+            return batch_schedule_workouts(conn, workouts, client)
+        finally:
+            conn.close()
+
+    @mcp.tool()
     def delete_plan_override(workout_date: str) -> Dict[str, Any]:
         """Delete an existing workout plan override for a specific date, reverting to Garmin's plan.
+        If the override was synced to Garmin Connect, also unschedules and removes it from Garmin calendar.
 
         Args:
             workout_date: Date of the override to delete in YYYY-MM-DD format (required).
         """
         conn = _connect_write(settings.db_path)
         try:
-            return remove_plan_override(conn, workout_date=workout_date)
+            valid_date = _validate_iso_date(workout_date, "workout_date")
+            row = conn.execute(
+                "SELECT garmin_workout_id, garmin_schedule_id FROM plan_overrides WHERE workout_date = ?",
+                (valid_date,),
+            ).fetchone()
+            client: Optional[GarminClient] = None
+            if row and (row["garmin_workout_id"] is not None or row["garmin_schedule_id"] is not None):
+                try:
+                    client = _make_garmin_client(settings)
+                except Exception as exc:
+                    logger.debug("Could not initialize Garmin client during override deletion: %s", exc)
+            return remove_plan_override(conn, workout_date=workout_date, client=client)
         finally:
             conn.close()
 

@@ -8,6 +8,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Added
+- Batch workout scheduling tool `schedule_garmin_workouts` to upload and schedule structured workouts with exact lap timing directly to Garmin Connect and connected Garmin watches.
+- Support for structured step payloads and Garmin schedule identifiers in plan overrides storage.
+
 ## [0.9.4] - 2026-10-06
 
 ### Added
