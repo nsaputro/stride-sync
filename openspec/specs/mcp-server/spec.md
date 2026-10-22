@@ -90,7 +90,7 @@ The server SHALL expose `last_sync_status` and `sync_now` tools for monitoring a
 - **THEN** the server initiates a sync cycle, blocks until finished, and returns the resulting sync status.
 
 ### Requirement: Batch Garmin Workout Scheduling MCP Tool
-The server SHALL expose a `schedule_garmin_workouts` MCP tool that accepts a batch list of workout overrides with structured lap steps, schedules them to Garmin Connect, and records them locally.
+The server SHALL expose a `schedule_garmin_workouts` MCP tool that accepts a batch list of structured workout overrides with typed lap steps, schedules them to Garmin Connect, and records them locally.
 
 #### Scenario: Batch scheduling valid workouts
 - **WHEN** an agent invokes `schedule_garmin_workouts` with one or more valid workout plans and coaching rationales
@@ -99,6 +99,10 @@ The server SHALL expose a `schedule_garmin_workouts` MCP tool that accepts a bat
 #### Scenario: Batch scheduling rejection on invalid inputs
 - **WHEN** an agent invokes `schedule_garmin_workouts` with missing required attributes or empty coaching rationale
 - **THEN** the tool call fails with a validation error without scheduling remote workouts.
+
+#### Scenario: Tool schema introspection
+- **WHEN** an MCP client or agent inspects the tool schema for `schedule_garmin_workouts`
+- **THEN** the schema defines typed properties for step types, durations, distances, target pace, target heart rate, and repeat groups.
 
 ### Requirement: Plan Overrides Management MCP Tools
 The server SHALL expose MCP tools `set_plan_override`, `get_plan_overrides`, and `delete_plan_override` to manage athlete workout modifications with required rationale tracking, structured lap steps, and remote Garmin calendar unscheduling.
