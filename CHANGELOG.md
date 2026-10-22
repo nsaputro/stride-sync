@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-22
+
 ### Added
 - Strongly-typed Pydantic models in `app/mcp/schemas.py` for structured workout steps and MCP tool responses.
 - Enriched parameter documentation and copy-pasteable JSON examples for `schedule_garmin_workouts`.
@@ -184,7 +186,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - FastMCP server over Streamable HTTP exposing 5 core tools.
 - CI and release automation pipelines.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/nsaputro/stride-sync/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/nsaputro/stride-sync/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/nsaputro/stride-sync/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/nsaputro/stride-sync/compare/v0.9.2...v0.9.3
