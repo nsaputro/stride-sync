@@ -24,11 +24,12 @@ Workflows are available as slash commands or skills in `.agents/`:
 1. **Check existing specifications first**: Before proposing or modifying capabilities, review `openspec/specs/` with `openspec list --specs`.
 2. **Behavioral contracts**: Specs define observable behavior, inputs, outputs, constraints, and testable scenarios (using `#### Scenario:` with `WHEN`/`THEN`). Implementation details belong in `design.md` or `tasks.md`.
 3. **Spec validation**: Run `openspec validate --specs --strict` before completing changes.
-4. **Token efficiency & conciseness**: Keep all generated artifacts compact and high-signal per `openspec/config.yaml` rules:
+4. **User-facing documentation**: If a spec change adds, renames, or modifies user-facing capabilities (such as MCP tools, configuration options, endpoints, or UI features), ensure `README.md` and `stridesync/DOCS.md` are updated to match the new behavior.
+5. **Token efficiency & conciseness**: Keep all generated artifacts compact and high-signal per `openspec/config.yaml` rules:
    - Proposals: <250 words, 1-2 sentence 'Why', concise bulleted 'What Changes', use `skip_specs: true` when requirements don't change.
    - Specs: 1-2 normative sentences per requirement, ultra-compact 1-line WHEN/THEN scenarios, zero internal code details.
    - Design: omit unless architectural/breaking; cap at <300 words with bulleted decisions.
-   - Tasks: 3-8 actionable checkboxes with inline verification; avoid narrative fluff.
+   - Tasks: 3-8 actionable checkboxes with inline verification; avoid narrative fluff. Include README/DOCS.md updates if user-facing behavior changed.
 
 ---
 
@@ -144,7 +145,7 @@ If `sync-scheduler` fails or restarts, `mcp-server` remains alive and answers qu
 - Keep the sync scheduler and MCP server as **separate, independently runnable modules** (`app/sync/` and `app/mcp/`).
 - Garmin auth/session code lives behind a single client interface (`app/sync/garmin_client.py`) to isolate unofficial API breakage risks.
 - **Fail loud, not silent**: a failed sync must write an updated status to the `sync_log` table so staleness is visible via MCP and web UI.
-- All MCP tools are read-only except gear assignment write-backs (`add_activity_gear`, `remove_activity_gear`), which require explicit user confirmation.
+- MCP tools support querying synced data as well as executing write operations (scheduling workouts with `schedule_garmin_workouts`, assigning gear with `add_activity_gear`/`remove_activity_gear`, and setting plan overrides with `set_plan_override`/`delete_plan_override`). Tools modifying Garmin Connect data require explicit user confirmation.
 
 ---
 

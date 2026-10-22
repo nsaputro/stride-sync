@@ -986,14 +986,11 @@ def build_running_workout_payload(
     return workout.to_dict()
 
 
-# Read-only raw-response checks exposed via GarminClient.fetch_diagnostic (see its docstring) --
+# Diagnostics raw-response checks exposed via GarminClient.fetch_diagnostic (see its docstring) --
 # id -> human label, so the Settings tab's Diagnostics panel can build its dropdown straight from
 # this dict rather than duplicating the check list. Only ever calls known GET-shaped
-# python-garminconnect methods; never one of its write operations (schedule_workout,
-# upload_workout, add_gear_to_activity, etc.) -- the Diagnostics panel itself stays strictly
-# read-only even though this add-on's MCP server now exposes a small, explicitly-confirmed
-# write surface elsewhere (see PROJECT_PLAN.md milestone Stage 29,
-# GarminClient.add_activity_gear/remove_activity_gear).
+# python-garminconnect methods; never write operations (schedule_workout, upload_workout,
+# add_gear_to_activity, etc.) -- the Diagnostics panel is dedicated to diagnostics inspection.
 DIAGNOSTIC_CHECKS: Dict[str, str] = {
     "training_plans": "Training plans (get_training_plans)",
     "training_plan_detail": (
@@ -1558,9 +1555,8 @@ class GarminClient:
         return items
 
     def add_activity_gear(self, activity_id: int, gear_uuid: str) -> None:
-        """Assign a gear item to an activity in Garmin Connect — see PROJECT_PLAN.md milestone
-        Stage 29. StrideSync's first-ever write-back to Garmin; every other method on this class
-        is read-only. Fails loud (raises `GarminAPIError`) rather than swallowing a failed write
+        """Assign a gear item to an activity in Garmin Connect.
+        Fails loud (raises `GarminAPIError`) rather than swallowing a failed write
         the way this class's best-effort `fetch_*` methods do — a write must never be reported
         (or silently treated) as having succeeded when it didn't.
         """
