@@ -6,9 +6,6 @@ for conversational analysis — cadence, pace, heart-rate trends, training load.
 Runs continuously on your Home Assistant server. No local-only setup, no client-side install
 step — connect any MCP client (e.g. Claude Desktop, Antigravity) to it over the network.
 
-**Almost entirely read-only**: the one exception is a small, explicitly-confirmed gear-correction
-write surface (e.g. "this run was actually in my other shoes") — every other tool only reads.
-
 See [`openspec/specs/`](openspec/specs/) for capability specifications, and [`AGENTS.md`](AGENTS.md) for agent guidelines and repository conventions.
 
 <img src="docs/images/dashboard.png" alt="StrideSync Dashboard tab showing synced activity/wellness/VO2-max/planned-workout totals and recent activities" width="360">
@@ -20,8 +17,8 @@ See [`openspec/specs/`](openspec/specs/) for capability specifications, and [`AG
 - **Automatic syncing** — polls Garmin Connect on a configurable interval (default every 6h) and
   writes activities, laps, HR-zone breakdowns, per-activity sample series, and training-load
   data to a local SQLite database in the add-on's `/data` volume.
-- **MCP server** (Streamable HTTP, port `8765`) exposing 18 tools to any MCP client — activities,
-  trends, recovery/wellness, training plan, gear, and sync — see [MCP Tools](#mcp-tools) below.
+- **MCP server** (Streamable HTTP, port `8765`) exposing 22 tools to any MCP client — activities,
+  trends, recovery/wellness, training plan & workouts, gear, and sync — see [MCP Tools](#mcp-tools) below.
 - **Web UI** (Home Assistant sidebar panel, or standalone on port `8767`) with three tabs:
   - **Dashboard** (pictured above) — last-sync status, total activities/wellness/VO2-max/planned-
     workout records synced, a "Sync now" button, and your most recent activities.
@@ -36,9 +33,7 @@ See [`openspec/specs/`](openspec/specs/) for capability specifications, and [`AG
 
 ## MCP Tools
 
-Every tool below is read-only except the two marked ✍️, which write to your actual Garmin
-Connect account — StrideSync only ever calls those after you've confirmed the specific change in
-conversation.
+StrideSync exposes 22 MCP tools spanning activities, trends, recovery metrics, training plans, workout scheduling, gear management, and sync operations:
 
 **Activities**
 
@@ -66,11 +61,15 @@ conversation.
 |---|---|
 | `daily_wellness` | Sleep, HRV, training status/readiness, day-by-day training load, Body Battery, stress, respiration, and resting HR, per calendar date |
 
-**Training plan**
+**Training plan & workouts**
 
 | Tool | What it does |
 |---|---|
 | `planned_vs_actual` | Planned workouts from an active Garmin Connect training plan vs. what was actually logged |
+| `get_plan_overrides` | View active training plan overrides (moved/skipped workouts) |
+| `set_plan_override` | Set a plan override for a specific date (move, skip, or modify planned workout) |
+| `delete_plan_override` | Delete an existing plan override for a date |
+| `schedule_garmin_workouts` | Build and schedule custom structured workouts directly to Garmin Connect calendar |
 
 **Gear**
 
@@ -78,8 +77,8 @@ conversation.
 |---|---|
 | `gear_mileage` | Cumulative distance/activity count per tracked gear item, most-used first |
 | `activity_gear` | Gear currently assigned to one activity |
-| `add_activity_gear` ✍️ | Assign a gear item to an activity |
-| `remove_activity_gear` ✍️ | Unassign a gear item from an activity |
+| `add_activity_gear` | Assign a gear item to an activity in Garmin Connect |
+| `remove_activity_gear` | Unassign a gear item from an activity in Garmin Connect |
 
 **Sync**
 

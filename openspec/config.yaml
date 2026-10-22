@@ -8,6 +8,7 @@ context: |
   - Single Garmin client wrapper (app/sync/garmin_client.py) isolating unofficial API.
   - Data contracts: Use Pydantic models instead of untyped dictionaries for structured MCP tool schemas, inputs, and outputs.
   - Testing: Unit tests in pytest; significant changes require end-to-end container smoke testing (docker build + s6 runtime verification) and dev channel validation.
+  - Documentation: When a spec change adds or modifies user-facing capabilities, tools, or options, verify and update README.md and stridesync/DOCS.md accordingly.
   - Fail loud: all sync outcomes logged to sync_log table.
   - Versioning: 3-file convention (stridesync/NEXT_VERSION, stridesync/config.yaml, stridesync-dev/config.yaml).
   - Git: Feature branches only, PRs targeting main, ci-pass check required.
@@ -40,6 +41,7 @@ rules:
     - "Omit procedural meta-tasks (e.g. 'review code', 'make a plan', 'git commit')."
     - "No narrative commentary outside headings and checkbox tasks."
     - "Include end-to-end testing verification (container smoke test or dev channel validation) for significant changes."
+    - "Include a task to update README.md (and DOCS.md) whenever user-facing capabilities, tools, or configuration options change."
 
 operations:
   apply:
@@ -52,4 +54,5 @@ operations:
     guidance:
       - "Provide a 2-3 bullet summary of the archive outcome."
       - "Verify specs with openspec validate --specs --strict before archiving."
+      - "Ensure README.md and stridesync/DOCS.md reflect any new or modified user-facing capabilities before archiving."
       - "Update CHANGELOG.md [Unreleased] with a single concise bullet."

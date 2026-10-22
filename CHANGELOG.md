@@ -8,6 +8,9 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Changed
+- Update documentation and README to reflect write tools (workout scheduling, plan overrides, gear assignment) and list all 22 MCP tools, removing obsolete "read-only" statements.
+
 ## [0.10.0] - 2026-10-22
 
 ### Added

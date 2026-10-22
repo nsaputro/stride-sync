@@ -53,7 +53,7 @@ The server SHALL declare its icon in MCP server metadata as a base64 PNG data UR
 - **THEN** the server returns the PNG binary icon with HTTP 200 and `image/png` content type.
 
 ### Requirement: Activity Query MCP Tools
-The server SHALL expose read-only tools for inspecting activities, splits, HR zones, and samples: `recent_activities`, `search_activities`, `activity_laps`, `activity_hr_zones`, and `activity_samples`.
+The server SHALL expose tools for inspecting activities, splits, HR zones, and samples: `recent_activities`, `search_activities`, `activity_laps`, `activity_hr_zones`, and `activity_samples`.
 
 #### Scenario: Querying recent runs
 - **WHEN** an agent calls `recent_activities` with an optional limit

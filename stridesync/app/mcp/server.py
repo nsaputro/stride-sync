@@ -31,14 +31,11 @@ confirmed against a real ASGI request/response cycle, not just unit-tested in is
 optional (empty = disabled) rather than required, so existing LAN-only installs keep working
 without being forced to set one.
 
-**Write-back (milestone Stage 29)**: every tool in this server is a read-only SQLite query
-except three — `activity_gear`, `add_activity_gear`, `remove_activity_gear` — which hit Garmin's
-live API directly (via a fresh `GarminClient`, not the synced database) so a user can correct
-which shoe/gear is assigned to a run. `add_activity_gear`/`remove_activity_gear` are StrideSync's
-only tools that change data in the user's actual Garmin Connect account; their docstrings say so
-explicitly and instruct the calling model to only invoke them after a human has confirmed the
-specific correction — this server has no way to enforce that itself, so it's a documented
-contract with the MCP client, not a technical guarantee.
+**Write operations & Garmin integration**: query tools read from SQLite, while write operations
+hit Garmin's live API directly (`activity_gear`, `add_activity_gear`, `remove_activity_gear`,
+`schedule_garmin_workouts`) or update local database overrides (`set_plan_override`,
+`delete_plan_override`). Write tools instructing changes in Garmin Connect declare confirmation
+requirements in their docstrings so calling agents request human approval.
 
 **Health check (milestone Stage 31)**: `/health` (plain HTTP GET, not the `/mcp` MCP protocol
 path) is the one endpoint on this server deliberately *not* gated by `mcp_auth_token` — added
