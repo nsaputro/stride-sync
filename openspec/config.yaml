@@ -6,6 +6,8 @@ context: |
   Architecture: Dual supervised s6 services (sync-scheduler and mcp-server). Sync failure must not stop MCP server.
   Conventions:
   - Single Garmin client wrapper (app/sync/garmin_client.py) isolating unofficial API.
+  - Data contracts: Use Pydantic models instead of untyped dictionaries for structured MCP tool schemas, inputs, and outputs.
+  - Testing: Unit tests in pytest; significant changes require end-to-end container smoke testing (docker build + s6 runtime verification) and dev channel validation.
   - Fail loud: all sync outcomes logged to sync_log table.
   - Versioning: 3-file convention (stridesync/NEXT_VERSION, stridesync/config.yaml, stridesync-dev/config.yaml).
   - Git: Feature branches only, PRs targeting main, ci-pass check required.
@@ -37,6 +39,7 @@ rules:
     - "Merge implementation and verification into a single task line; avoid separate test runner tasks."
     - "Omit procedural meta-tasks (e.g. 'review code', 'make a plan', 'git commit')."
     - "No narrative commentary outside headings and checkbox tasks."
+    - "Include end-to-end testing verification (container smoke test or dev channel validation) for significant changes."
 
 operations:
   apply:
@@ -44,6 +47,7 @@ operations:
       - "Keep progress updates telegraphic (1 sentence per task completed)."
       - "Do not echo full test logs or entire file contents in progress output."
       - "Run syntax parsing and tests before marking tasks complete."
+      - "Perform end-to-end verification (docker build and runtime container smoke test) for significant changes before completing apply."
   archive:
     guidance:
       - "Provide a 2-3 bullet summary of the archive outcome."

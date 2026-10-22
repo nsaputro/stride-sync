@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Strongly-typed Pydantic schemas and enriched parameter documentation for the `schedule_garmin_workouts` MCP tool.
+
 ## [0.9.5] - 2026-10-19
 
 ### Added

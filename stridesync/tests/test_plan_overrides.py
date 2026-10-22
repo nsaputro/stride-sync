@@ -567,4 +567,85 @@ class TestFastMCPPlanOverrideTools:
         mock_client.unschedule_workout.assert_called_once_with(888)
         mock_client.delete_workout.assert_called_once_with(777)
 
+    def test_schedule_garmin_workouts_tool_schema_introspection(self, tmp_path):
+        settings = make_settings(tmp_path)
+        server = create_server(settings)
+
+        tools = asyncio.run(server.list_tools())
+        tool_map = {t.name: t for t in tools}
+        assert "schedule_garmin_workouts" in tool_map
+        tool = tool_map["schedule_garmin_workouts"]
+
+        # 1. Parameter schema checks
+        props = tool.parameters["properties"]["workouts"]["items"]["properties"]
+        assert "workout_date" in props
+        assert "workout_name" in props
+        assert "workout_type" in props
+        assert "reason" in props
+        assert "steps" in props
+
+        # 2. Discriminated union step items
+        step_items = props["steps"]["items"]
+        assert "anyOf" in step_items
+        step_types = [s["properties"].get("step_type", {}).get("description", "") for s in step_items["anyOf"]]
+        assert any("warmup" in desc for desc in step_types)
+
+        # 3. Output schema check
+        assert tool.output_schema is not None
+        assert "result" in tool.output_schema["properties"]
+
+        # 4. Docstring examples check
+        assert "Single-step workout:" in tool.description
+        assert "Repeat interval workout:" in tool.description
+
+    def test_schedule_garmin_workouts_with_repeat_group_invocation(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        conn.close()
+
+        mock_client = MagicMock()
+        mock_client.upload_running_workout.return_value = {"workoutId": 999}
+        mock_client.schedule_workout.return_value = {"scheduledWorkoutId": 1111}
+        monkeypatch.setattr("app.mcp.server._make_garmin_client", lambda s: mock_client)
+
+        server = create_server(settings)
+
+        res = asyncio.run(
+            server.call_tool(
+                "schedule_garmin_workouts",
+                {
+                    "workouts": [
+                        {
+                            "workout_date": "2026-10-28",
+                            "workout_name": "5x1k Threshold Intervals",
+                            "workout_type": "LACTATE_THRESHOLD",
+                            "reason": "Threshold pace development",
+                            "steps": [
+                                {"step_type": "warmup", "distance_meters": 2000},
+                                {
+                                    "step_type": "repeat",
+                                    "repeats": 5,
+                                    "steps": [
+                                        {"step_type": "interval", "distance_meters": 1000, "target_pace_sec_per_km": 240},
+                                        {"step_type": "recovery", "duration_seconds": 90},
+                                    ],
+                                },
+                                {"step_type": "cooldown", "distance_meters": 1500},
+                            ],
+                        }
+                    ]
+                },
+            )
+        )
+        data = res.structured_content.get("result", res.structured_content)
+        assert len(data) == 1
+        assert data[0]["workout_date"] == "2026-10-28"
+        assert data[0]["garmin_workout_id"] == 999
+        assert data[0]["garmin_schedule_id"] == 1111
+        assert len(data[0]["steps"]) == 3
+        assert data[0]["steps"][1]["repeats"] == 5
+        mock_client.upload_running_workout.assert_called_once()
+        mock_client.schedule_workout.assert_called_once_with(999, "2026-10-28")
+
+
 

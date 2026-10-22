@@ -8,6 +8,10 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Added
+- Strongly-typed Pydantic models in `app/mcp/schemas.py` for structured workout steps and MCP tool responses.
+- Enriched parameter documentation and copy-pasteable JSON examples for `schedule_garmin_workouts`.
+
 ## [0.9.5] - 2026-10-19
 
 ### Added

@@ -81,6 +81,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.config import Settings
+from app.mcp.schemas import (
+    DeleteOverrideResult,
+    GearActionResult,
+    RepeatStep,
+    ScheduledWorkoutResult,
+    SingleStep,
+    WorkoutItem,
+    WorkoutStep,
+)
 from app.sync.garmin_client import GarminAPIError, GarminAuthError, GarminClient
 from app.sync.scheduler import run_sync_once
 
@@ -646,44 +655,49 @@ def remove_plan_override(
 
 def batch_schedule_workouts(
     conn: sqlite3.Connection,
-    workouts: List[Dict[str, Any]],
+    workouts: List[Union[WorkoutItem, Dict[str, Any]]],
     client: GarminClient,
-) -> List[Dict[str, Any]]:
+) -> List[ScheduledWorkoutResult]:
     """Batch-upload structured workouts to Garmin Connect, schedule them on the athlete's calendar,
     and persist the records in local plan_overrides with lap steps and remote identifiers.
     """
     if not isinstance(workouts, list) or not workouts:
         raise ValueError("workouts must be a non-empty list of workout specifications")
 
-    results: List[Dict[str, Any]] = []
+    validated_workouts: List[WorkoutItem] = []
     for item in workouts:
-        if not isinstance(item, dict):
-            raise ValueError("Each workout in workouts must be a dictionary")
+        if isinstance(item, WorkoutItem):
+            validated_workouts.append(item)
+        elif isinstance(item, dict):
+            if not item.get("workout_date"):
+                raise ValueError("workout_date is required for each workout")
+            if not item.get("workout_name") or not str(item.get("workout_name")).strip():
+                raise ValueError("workout_name is required for each workout")
+            if not item.get("workout_type") or not str(item.get("workout_type")).strip():
+                raise ValueError("workout_type is required for each workout")
+            if not item.get("reason") or not str(item.get("reason")).strip():
+                raise ValueError("reason is required for each workout")
+            if not item.get("steps") or not isinstance(item.get("steps"), list):
+                raise ValueError(f"steps list is required for workout '{item.get('workout_name')}' on {item.get('workout_date')}")
+            validated_workouts.append(WorkoutItem(**item))
+        else:
+            raise ValueError("Each workout in workouts must be a WorkoutItem or dictionary")
 
-        w_date = item.get("workout_date")
-        w_name = item.get("workout_name")
-        w_type = item.get("workout_type")
-        reason = item.get("reason")
-        steps = item.get("steps")
-
-        if not w_date:
-            raise ValueError("workout_date is required for each workout")
-        if not w_name or not str(w_name).strip():
-            raise ValueError("workout_name is required for each workout")
-        if not w_type or not str(w_type).strip():
-            raise ValueError("workout_type is required for each workout")
-        if not reason or not str(reason).strip():
-            raise ValueError("reason is required for each workout")
-        if not steps or not isinstance(steps, list):
-            raise ValueError(f"steps list is required for workout '{w_name}' on {w_date}")
+    results: List[ScheduledWorkoutResult] = []
+    for item in validated_workouts:
+        w_date = item.workout_date
+        w_name = item.workout_name.strip()
+        w_type = item.workout_type.strip()
+        reason = item.reason.strip()
+        steps_dicts = [s.model_dump(exclude_unset=True) for s in item.steps]
 
         # Compute or pass aggregate metrics
-        planned_dist = item.get("planned_distance_meters")
-        planned_dur = item.get("planned_duration_seconds")
+        planned_dist = item.planned_distance_meters
+        planned_dur = item.planned_duration_seconds
         if planned_dist is None or planned_dur is None:
             calc_dist = 0.0
             calc_dur = 0.0
-            for s in steps:
+            for s in steps_dicts:
                 reps = int(s.get("repeats") or s.get("iterations") or 1) if (s.get("repeats") or s.get("iterations")) else 1
                 substeps = s.get("steps") or s.get("workout_steps") or ([s["work"]] if "work" in s else [s])
                 for sub in substeps:
@@ -704,8 +718,8 @@ def batch_schedule_workouts(
 
         # 1. Upload running workout template to Garmin Connect
         upload_res = client.upload_running_workout(
-            workout_name=str(w_name).strip(),
-            steps=steps,
+            workout_name=w_name,
+            steps=steps_dicts,
             estimated_duration_seconds=planned_dur,
         )
         garmin_workout_id = upload_res.get("workoutId")
@@ -722,20 +736,20 @@ def batch_schedule_workouts(
         saved = save_plan_override(
             conn,
             workout_date=w_date,
-            workout_name=str(w_name).strip(),
-            workout_type=str(w_type).strip(),
-            reason=str(reason).strip(),
+            workout_name=w_name,
+            workout_type=w_type,
+            reason=reason,
             planned_distance_meters=planned_dist,
             planned_duration_seconds=planned_dur,
-            planned_target_pace_sec_per_km=item.get("planned_target_pace_sec_per_km"),
-            planned_target_hr_low=item.get("planned_target_hr_low"),
-            planned_target_hr_high=item.get("planned_target_hr_high"),
-            notes=item.get("notes"),
+            planned_target_pace_sec_per_km=item.planned_target_pace_sec_per_km,
+            planned_target_hr_low=item.planned_target_hr_low,
+            planned_target_hr_high=item.planned_target_hr_high,
+            notes=item.notes,
             garmin_workout_id=garmin_workout_id,
             garmin_schedule_id=garmin_schedule_id,
-            steps_json=json.dumps(steps),
+            steps_json=json.dumps(steps_dicts),
         )
-        results.append(saved)
+        results.append(ScheduledWorkoutResult(**saved))
 
     return results
 
@@ -1251,23 +1265,87 @@ def create_server(settings: Settings) -> FastMCP:
         finally:
             conn.close()
 
-    @mcp.tool()
+    SCHEDULE_GARMIN_WORKOUTS_DOC = """Batch-schedule structured running workouts with exact lap timing, uploading them to Garmin Connect
+and adding them to the user's Garmin calendar so they download directly to connected Garmin watches.
+
+Args:
+    workouts: A list of workout objects (WorkoutItem), each containing:
+        - workout_date: Target date in ISO YYYY-MM-DD format (e.g. '2026-10-25', required).
+        - workout_name: Name of the workout (e.g. '5x1k Threshold Intervals', required).
+        - workout_type: Category (e.g. 'AEROBIC_BASE', 'LACTATE_THRESHOLD', 'RECOVERY', 'LONG_RUN', required).
+        - reason: Coaching rationale for this workout (required).
+        - steps: Ordered list of structured lap steps or repeat groups (required).
+        - planned_distance_meters: Optional total distance override in meters.
+        - planned_duration_seconds: Optional total duration override in seconds.
+        - planned_target_pace_sec_per_km: Optional target pace in sec/km.
+        - planned_target_hr_low: Optional lower heart rate target in BPM.
+        - planned_target_hr_high: Optional upper heart rate target in BPM.
+        - notes: Optional execution notes.
+
+Step Objects (SingleStep vs RepeatStep):
+    1. SingleStep:
+        - step_type: 'warmup', 'interval', 'recovery', 'cooldown', or 'rest' (required).
+        - duration_seconds: Duration in seconds (use either duration_seconds or distance_meters).
+        - distance_meters: Distance in meters (use either distance_meters or duration_seconds).
+        - target_pace_sec_per_km: Target pace in sec/km (e.g. 300 for 5:00/km, 240 for 4:00/km).
+        - target_pace_min_sec_per_km / target_pace_max_sec_per_km: Pace zone range bounds in sec/km.
+        - target_hr_low / target_hr_high: Heart rate zone target bounds in BPM (e.g. 140-160).
+    2. RepeatStep:
+        - step_type: 'repeat', 'repeat_group', or 'interval_block' (default 'repeat').
+        - repeats: Number of repetitions (required, integer >= 1).
+        - steps: List of SingleStep objects to repeat in each iteration.
+        - work: SingleStep work interval (shorthand when steps list is omitted).
+        - recovery: SingleStep recovery interval (shorthand when steps list is omitted).
+
+Example Payloads:
+    Single-step workout:
+    {
+      "workouts": [
+        {
+          "workout_date": "2026-10-25",
+          "workout_name": "Sunday Long Run",
+          "workout_type": "AEROBIC_BASE",
+          "reason": "Aerobic base endurance",
+          "steps": [
+            {"step_type": "warmup", "duration_seconds": 600},
+            {"step_type": "interval", "duration_seconds": 3600, "target_hr_high": 145, "target_pace_sec_per_km": 330},
+            {"step_type": "cooldown", "duration_seconds": 600}
+          ]
+        }
+      ]
+    }
+
+    Repeat interval workout:
+    {
+      "workouts": [
+        {
+          "workout_date": "2026-10-28",
+          "workout_name": "5x1k Threshold Intervals",
+          "workout_type": "LACTATE_THRESHOLD",
+          "reason": "Threshold pace development",
+          "steps": [
+            {"step_type": "warmup", "distance_meters": 2000},
+            {
+              "step_type": "repeat",
+              "repeats": 5,
+              "steps": [
+                {"step_type": "interval", "distance_meters": 1000, "target_pace_sec_per_km": 240},
+                {"step_type": "recovery", "duration_seconds": 90}
+              ]
+            },
+            {"step_type": "cooldown", "distance_meters": 1500}
+          ]
+        }
+      ]
+    }
+"""
+
+    @mcp.tool(description=SCHEDULE_GARMIN_WORKOUTS_DOC)
     def schedule_garmin_workouts(
-        workouts: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        workouts: List[WorkoutItem],
+    ) -> List[ScheduledWorkoutResult]:
         """Batch-schedule structured running workouts with exact lap timing, uploading them to Garmin Connect
         and adding them to the user's Garmin calendar so they download directly to connected Garmin watches.
-
-        Args:
-            workouts: A list of workout objects, each containing:
-                - workout_date: Target date in ISO YYYY-MM-DD format (required).
-                - workout_name: Name of the workout (e.g. '5x1k Threshold Intervals', required).
-                - workout_type: Category (e.g. 'AEROBIC_BASE', 'LACTATE_THRESHOLD', 'RECOVERY', required).
-                - reason: Coaching rationale for this workout (required).
-                - steps: List of structured lap steps (warmup, intervals, recovery, cooldown, repeats) (required).
-                - planned_distance_meters: Optional total distance override.
-                - planned_duration_seconds: Optional total duration override.
-                - notes: Optional execution notes.
         """
         client = _make_garmin_client(settings)
         conn = _connect_write(settings.db_path)
@@ -1277,7 +1355,7 @@ def create_server(settings: Settings) -> FastMCP:
             conn.close()
 
     @mcp.tool()
-    def delete_plan_override(workout_date: str) -> Dict[str, Any]:
+    def delete_plan_override(workout_date: str) -> DeleteOverrideResult:
         """Delete an existing workout plan override for a specific date, reverting to Garmin's plan.
         If the override was synced to Garmin Connect, also unschedules and removes it from Garmin calendar.
 
@@ -1297,7 +1375,8 @@ def create_server(settings: Settings) -> FastMCP:
                     client = _make_garmin_client(settings)
                 except Exception as exc:
                     logger.debug("Could not initialize Garmin client during override deletion: %s", exc)
-            return remove_plan_override(conn, workout_date=workout_date, client=client)
+            res = remove_plan_override(conn, workout_date=workout_date, client=client)
+            return DeleteOverrideResult(**res)
         finally:
             conn.close()
 
@@ -1329,7 +1408,7 @@ def create_server(settings: Settings) -> FastMCP:
         return client.fetch_activity_gear(activity_id)
 
     @mcp.tool()
-    def add_activity_gear(activity_id: int, gear_uuid: str) -> Dict[str, Any]:
+    def add_activity_gear(activity_id: int, gear_uuid: str) -> GearActionResult:
         """Assign one piece of gear (e.g. a shoe) to one activity in Garmin Connect — a REAL,
         immediate write to the user's Garmin Connect account, unlike every other tool in this
         server. Only call this after the user has explicitly confirmed this specific
@@ -1344,10 +1423,10 @@ def create_server(settings: Settings) -> FastMCP:
         """
         client = _make_garmin_client(settings)
         client.add_activity_gear(activity_id, gear_uuid)
-        return {"status": "added", "activity_id": activity_id, "gear_uuid": gear_uuid}
+        return GearActionResult(status="added", activity_id=activity_id, gear_uuid=gear_uuid)
 
     @mcp.tool()
-    def remove_activity_gear(activity_id: int, gear_uuid: str) -> Dict[str, Any]:
+    def remove_activity_gear(activity_id: int, gear_uuid: str) -> GearActionResult:
         """Unassign one piece of gear from one activity in Garmin Connect — a REAL, immediate
         write to the user's Garmin Connect account, same caution as `add_activity_gear`: only
         call after the user has explicitly confirmed this specific correction.
@@ -1358,7 +1437,7 @@ def create_server(settings: Settings) -> FastMCP:
         """
         client = _make_garmin_client(settings)
         client.remove_activity_gear(activity_id, gear_uuid)
-        return {"status": "removed", "activity_id": activity_id, "gear_uuid": gear_uuid}
+        return GearActionResult(status="removed", activity_id=activity_id, gear_uuid=gear_uuid)
 
     @mcp.tool()
     def activity_hr_zones(activity_id: int) -> List[Dict[str, Any]]:
