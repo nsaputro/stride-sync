@@ -166,7 +166,7 @@ make sure at least one sync has run first:
 
 **Scheduling workouts & plan management**
 
-StrideSync can build structured workouts and schedule them to your Garmin Connect calendar, as well as manage training plan overrides:
+StrideSync can build structured workouts and schedule them to your Garmin Connect calendar, as well as manage training plan overrides. Workout execution notes (falling back to coaching rationale if notes are omitted) are forwarded directly to Garmin Connect as the workout description, so coaching cues appear on connected watches:
 
 - "Build an 8x400m interval workout at 3:45/km pace with 90s jog recoveries and schedule it for this Thursday on my Garmin."
 - "Schedule a 10km progressive run on Saturday with warm-up, steady, and tempo paces."

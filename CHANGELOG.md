@@ -8,6 +8,9 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+### Added
+- Forward workout execution notes (falling back to coaching rationale) into Garmin Connect workout descriptions when scheduling workouts via MCP.
+
 ### Changed
 - Update documentation and README to reflect write tools (workout scheduling, plan overrides, gear assignment) and list all 22 MCP tools, removing obsolete "read-only" statements.
 

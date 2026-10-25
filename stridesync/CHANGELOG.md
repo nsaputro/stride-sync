@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Forward workout execution notes (falling back to coaching rationale) into Garmin Connect workout descriptions when scheduling workouts.
+
 ## [0.10.0] - 2026-10-22
 
 ### Added

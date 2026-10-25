@@ -647,5 +647,78 @@ class TestFastMCPPlanOverrideTools:
         mock_client.upload_running_workout.assert_called_once()
         mock_client.schedule_workout.assert_called_once_with(999, "2026-10-28")
 
+    def test_schedule_garmin_workouts_forwards_notes_to_description(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        conn.close()
+
+        mock_client = MagicMock()
+        mock_client.upload_running_workout.return_value = {"workoutId": 101}
+        mock_client.schedule_workout.return_value = {"scheduledWorkoutId": 202}
+        monkeypatch.setattr("app.mcp.server._make_garmin_client", lambda s: mock_client)
+
+        server = create_server(settings)
+
+        res = asyncio.run(
+            server.call_tool(
+                "schedule_garmin_workouts",
+                {
+                    "workouts": [
+                        {
+                            "workout_date": "2026-10-29",
+                            "workout_name": "Progressive Tempo",
+                            "workout_type": "TEMPO",
+                            "reason": "Mid-week tempo workout",
+                            "notes": "Start at 4:30/km and drop 5s every 2km. Stay relaxed.",
+                            "steps": [
+                                {"step_type": "warmup", "distance_meters": 2000},
+                                {"step_type": "interval", "distance_meters": 6000},
+                            ],
+                        }
+                    ]
+                },
+            )
+        )
+        mock_client.upload_running_workout.assert_called_once()
+        call_kwargs = mock_client.upload_running_workout.call_args.kwargs
+        assert call_kwargs["description"] == "Start at 4:30/km and drop 5s every 2km. Stay relaxed."
+
+    def test_schedule_garmin_workouts_falls_back_to_reason_for_description(self, tmp_path, monkeypatch):
+        settings = make_settings(tmp_path)
+        conn = db.connect(settings.db_path)
+        conn.close()
+
+        mock_client = MagicMock()
+        mock_client.upload_running_workout.return_value = {"workoutId": 103}
+        mock_client.schedule_workout.return_value = {"scheduledWorkoutId": 204}
+        monkeypatch.setattr("app.mcp.server._make_garmin_client", lambda s: mock_client)
+
+        server = create_server(settings)
+
+        # Test both omitted notes and whitespace notes
+        res = asyncio.run(
+            server.call_tool(
+                "schedule_garmin_workouts",
+                {
+                    "workouts": [
+                        {
+                            "workout_date": "2026-10-30",
+                            "workout_name": "Recovery Shakeout",
+                            "workout_type": "RECOVERY",
+                            "reason": "Flush legs after tempo session",
+                            "notes": "   ",
+                            "steps": [
+                                {"step_type": "interval", "distance_meters": 5000},
+                            ],
+                        }
+                    ]
+                },
+            )
+        )
+        mock_client.upload_running_workout.assert_called_once()
+        call_kwargs = mock_client.upload_running_workout.call_args.kwargs
+        assert call_kwargs["description"] == "Reason: Flush legs after tempo session"
+
+
 
 
