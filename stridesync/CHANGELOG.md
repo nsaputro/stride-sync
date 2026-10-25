@@ -1,14 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.1] - 2026-10-25
 
 ### Added
-- Forward workout execution notes (falling back to coaching rationale) into Garmin Connect workout descriptions when scheduling workouts.
+- Forward workout execution notes (falling back to coaching rationale) into Garmin Connect workout descriptions when scheduling workouts via MCP.
 
-## [0.10.0] - 2026-10-22
+### Changed
+- Update documentation and README to reflect write tools (workout scheduling, plan overrides, gear assignment) and list all 22 MCP tools, removing obsolete "read-only" statements.
 
-### Added
-- Strongly-typed Pydantic models in `app/mcp/schemas.py` for structured workout steps and MCP tool responses.
-- Enriched parameter documentation and copy-pasteable JSON examples for `schedule_garmin_workouts`.
-
-[0.10.0]: https://github.com/nsaputro/stride-sync/releases/tag/v0.10.0
+[0.10.1]: https://github.com/nsaputro/stride-sync/releases/tag/v0.10.1
