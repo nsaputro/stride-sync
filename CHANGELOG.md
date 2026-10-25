@@ -8,6 +8,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-25
+
 ### Added
 - Forward workout execution notes (falling back to coaching rationale) into Garmin Connect workout descriptions when scheduling workouts via MCP.
 
@@ -192,7 +194,8 @@ Versions match `stridesync/config.yaml` and the GitHub release tags.
 - FastMCP server over Streamable HTTP exposing 5 core tools.
 - CI and release automation pipelines.
 
-[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/nsaputro/stride-sync/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/nsaputro/stride-sync/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/nsaputro/stride-sync/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/nsaputro/stride-sync/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/nsaputro/stride-sync/compare/v0.9.3...v0.9.4
