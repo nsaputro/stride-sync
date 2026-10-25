@@ -1942,6 +1942,26 @@ class TestGarminClientFetch:
         cooldown = seg["workoutSteps"][2]
         assert cooldown["stepType"]["stepTypeKey"] == "cooldown"
 
+    def test_build_running_workout_payload_with_description(self):
+        steps = [{"step_type": "warmup", "duration_seconds": 300}]
+        payload = build_running_workout_payload("Easy Run", steps, description="Keep heart rate below 140 bpm")
+        assert payload["description"] == "Keep heart rate below 140 bpm"
+
+    def test_build_running_workout_payload_description_truncation(self):
+        steps = [{"step_type": "warmup", "duration_seconds": 300}]
+        long_desc = "x" * 1500
+        payload = build_running_workout_payload("Long Run", steps, description=long_desc)
+        assert len(payload["description"]) == 1000
+        assert payload["description"] == "x" * 1000
+
+    def test_build_running_workout_payload_description_empty_or_none(self):
+        steps = [{"step_type": "warmup", "duration_seconds": 300}]
+        payload_none = build_running_workout_payload("Run", steps, description=None)
+        assert "description" not in payload_none
+
+        payload_empty = build_running_workout_payload("Run", steps, description="   ")
+        assert "description" not in payload_empty
+
     def test_build_running_workout_payload_validations(self):
         with pytest.raises(ValueError, match="workout_name is required"):
             build_running_workout_payload("", [{"step_type": "warmup", "duration_seconds": 300}])
@@ -1957,10 +1977,12 @@ class TestGarminClientFetch:
         client._garmin.upload_workout.return_value = {"workoutId": 456, "workoutName": "5k Tempo"}
 
         steps = [{"step_type": "interval", "distance_meters": 5000, "target_pace_sec_per_km": 270}]
-        res = client.upload_running_workout("5k Tempo", steps)
+        res = client.upload_running_workout("5k Tempo", steps, description="Focus on cadence")
 
         assert res["workoutId"] == 456
         client._garmin.upload_workout.assert_called_once()
+        uploaded_payload = client._garmin.upload_workout.call_args[0][0]
+        assert uploaded_payload["description"] == "Focus on cadence"
 
     def test_upload_running_workout_raises_garmin_api_error_on_failure(self):
         client = make_client()

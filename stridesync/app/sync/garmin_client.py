@@ -897,6 +897,7 @@ def build_running_workout_payload(
     workout_name: str,
     steps: List[Dict[str, Any]],
     estimated_duration_seconds: Optional[float] = None,
+    description: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Convert agent-provided structured workout steps into a Garmin Connect RunningWorkout JSON payload."""
     if not workout_name or not workout_name.strip():
@@ -972,6 +973,12 @@ def build_running_workout_payload(
         else max(600, int(round(total_sec)))
     )
 
+    clean_desc = (
+        description.strip()[:1000]
+        if description and description.strip()
+        else None
+    )
+
     workout = RunningWorkout(
         workoutName=workout_name.strip(),
         estimatedDurationInSecs=final_est_duration,
@@ -982,6 +989,7 @@ def build_running_workout_payload(
                 workoutSteps=workout_steps,
             )
         ],
+        description=clean_desc,
     )
     return workout.to_dict()
 
@@ -1593,6 +1601,7 @@ class GarminClient:
         workout_name: str,
         steps: List[Dict[str, Any]],
         estimated_duration_seconds: Optional[float] = None,
+        description: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Upload a structured running workout to the Garmin Connect workout library.
 
@@ -1603,6 +1612,7 @@ class GarminClient:
             workout_name=workout_name,
             steps=steps,
             estimated_duration_seconds=estimated_duration_seconds,
+            description=description,
         )
         try:
             return self._garmin.upload_workout(payload)

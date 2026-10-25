@@ -69,7 +69,7 @@ StrideSync exposes 22 MCP tools spanning activities, trends, recovery metrics, t
 | `get_plan_overrides` | View active training plan overrides (moved/skipped workouts) |
 | `set_plan_override` | Set a plan override for a specific date (move, skip, or modify planned workout) |
 | `delete_plan_override` | Delete an existing plan override for a date |
-| `schedule_garmin_workouts` | Build and schedule custom structured workouts directly to Garmin Connect calendar |
+| `schedule_garmin_workouts` | Build and schedule custom structured workouts directly to Garmin Connect calendar, forwarding workout notes (or rationale) to the workout description |
 
 **Gear**
 

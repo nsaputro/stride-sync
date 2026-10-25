@@ -713,11 +713,18 @@ def batch_schedule_workouts(
             if planned_dur is None and calc_dur > 0:
                 planned_dur = round(calc_dur, 1)
 
+        desc = (
+            item.notes.strip()
+            if item.notes and item.notes.strip()
+            else f"Reason: {reason}"
+        )
+
         # 1. Upload running workout template to Garmin Connect
         upload_res = client.upload_running_workout(
             workout_name=w_name,
             steps=steps_dicts,
             estimated_duration_seconds=planned_dur,
+            description=desc,
         )
         garmin_workout_id = upload_res.get("workoutId")
 
@@ -1263,7 +1270,7 @@ def create_server(settings: Settings) -> FastMCP:
             conn.close()
 
     SCHEDULE_GARMIN_WORKOUTS_DOC = """Batch-schedule structured running workouts with exact lap timing, uploading them to Garmin Connect
-and adding them to the user's Garmin calendar so they download directly to connected Garmin watches.
+and adding them to the user's Garmin calendar so they download directly to connected Garmin watches. Workout execution notes (or coaching rationale if notes are omitted) are forwarded to Garmin Connect as the workout description.
 
 Args:
     workouts: A list of workout objects (WorkoutItem), each containing:
@@ -1277,7 +1284,7 @@ Args:
         - planned_target_pace_sec_per_km: Optional target pace in sec/km.
         - planned_target_hr_low: Optional lower heart rate target in BPM.
         - planned_target_hr_high: Optional upper heart rate target in BPM.
-        - notes: Optional execution notes.
+        - notes: Optional execution notes (forwarded to Garmin Connect as the workout description; falls back to reason if omitted).
 
 Step Objects (SingleStep vs RepeatStep):
     1. SingleStep:
